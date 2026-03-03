@@ -60,8 +60,8 @@
         "changes": "cupcake_other 통합"
     },
     "Cupcake Provider Manager": {
-        "version": "1.19.2",
+        "version": "1.19.3",
         "file": "provider-manager.js",
-        "changes": "플로팅 테스트용 버전 갱신"
+        "changes": "Copilot 524/5xx 폴백 강화 + 커스텀 모델별 스트리밍 토글 추가"
     }
 }

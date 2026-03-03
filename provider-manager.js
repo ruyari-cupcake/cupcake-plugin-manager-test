@@ -1,10 +1,10 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.19.2
+//@version 1.19.3
 //@update-url https://cupcake-plugin-manager.vercel.app/provider-manager.js
 
-const CPM_VERSION = '1.19.2';
+const CPM_VERSION = '1.19.3';
 
 // ==========================================
 // 0. GLOBAL API REFERENCE (Risuai/risuai 대소문자 통일)
@@ -456,11 +456,35 @@ async function smartNativeFetch(url, options = {}) {
         console.log(`[CupcakePM] Direct fetch failed for ${url.substring(0, 60)}...: ${e.message}`);
     }
 
-    // Copilot/web safety: force proxy route via risuFetch(plainFetchDeforce).
-    // Why: nativeFetch follows db.usePlainFetch in web mode; when enabled it can
-    // become direct browser fetch and hit CORS on githubcopilot.com / copilot_internal.
-    // plainFetchDeforce guarantees proxy2 path in globalFetch.
+    // Copilot/web safety: prefer nativeFetch for POST/SSE, then fallback to proxy route.
+    // Why: proxy2 can return 524 on long-thinking requests (e.g., Claude Opus) when
+    // first bytes are delayed. nativeFetch keeps a real Response stream path.
+    // For token exchange GET, proxy route remains the primary path.
     const _isCopilotUrl = url.includes('githubcopilot.com') || url.includes('copilot_internal');
+    if (_isCopilotUrl && (options.method || 'POST') !== 'GET' && typeof Risu.nativeFetch === 'function') {
+        try {
+            const nfOptions = { ...options };
+            const nfRes = await Risu.nativeFetch(url, nfOptions);
+            if (nfRes && nfRes.ok) {
+                console.log(`[CupcakePM] Copilot nativeFetch succeeded: status=${nfRes.status} for ${url.substring(0, 60)}`);
+                return nfRes;
+            }
+            if (nfRes && nfRes.status && nfRes.status !== 0) {
+                // 4xx usually means request/auth issue; return immediately so caller can see exact error.
+                if (nfRes.status >= 400 && nfRes.status < 500) {
+                    console.warn(`[CupcakePM] Copilot nativeFetch returned client error ${nfRes.status}; returning as-is.`);
+                    return nfRes;
+                }
+                // 5xx (including 524) -> try other routes before giving up.
+                console.warn(`[CupcakePM] Copilot nativeFetch returned server error ${nfRes.status}; trying fallback route.`);
+            } else {
+                console.log(`[CupcakePM] Copilot nativeFetch returned unusable response, trying proxy fallback: status=${nfRes?.status || 'unknown'}`);
+            }
+        } catch (e) {
+            console.log(`[CupcakePM] Copilot nativeFetch error: ${e.message}`);
+        }
+    }
+
     if (_isCopilotUrl && typeof Risu.risuFetch === 'function') {
         try {
             let bodyObj = undefined;
@@ -495,11 +519,15 @@ async function smartNativeFetch(url, options = {}) {
                 }
 
                 if (responseBody) {
+                    if (result.status === 524) {
+                        console.warn(`[CupcakePM] Copilot proxy-forced risuFetch returned 524 for ${url.substring(0, 60)}; falling back to nativeFetch.`);
+                    } else {
                     console.log(`[CupcakePM] Copilot proxy-forced risuFetch succeeded: status=${result.status} for ${url.substring(0, 60)}`);
                     return new Response(responseBody, {
                         status: result.status || 200,
                         headers: new Headers(result.headers || {})
                     });
+                    }
                 }
             }
 
@@ -507,6 +535,48 @@ async function smartNativeFetch(url, options = {}) {
             console.log(`[CupcakePM] Copilot proxy-forced risuFetch not a real response: ${errPreview}`);
         } catch (e) {
             console.log(`[CupcakePM] Copilot proxy-forced risuFetch error: ${e.message}`);
+        }
+
+        // Last resort for Copilot API endpoints: try host plainFetch route.
+        // This can work in desktop/local setups where host-side fetch policy differs.
+        try {
+            let bodyObj = undefined;
+            if (options.body && typeof options.body === 'string') {
+                try { bodyObj = JSON.parse(options.body); } catch { bodyObj = options.body; }
+            } else if (options.body) {
+                bodyObj = options.body;
+            }
+
+            const directResult = await Risu.risuFetch(url, {
+                method: options.method || 'POST',
+                headers: options.headers || {},
+                body: bodyObj,
+                rawResponse: true,
+                plainFetchForce: true,
+            });
+
+            if (directResult && directResult.data != null) {
+                let responseBody = null;
+                if (directResult.data instanceof Uint8Array) {
+                    responseBody = directResult.data;
+                } else if (ArrayBuffer.isView(directResult.data) || directResult.data instanceof ArrayBuffer) {
+                    responseBody = new Uint8Array(directResult.data instanceof ArrayBuffer ? directResult.data : directResult.data.buffer);
+                } else if (Array.isArray(directResult.data)) {
+                    responseBody = new Uint8Array(directResult.data);
+                } else if (typeof directResult.data === 'string' && directResult.status && directResult.status !== 0) {
+                    responseBody = new TextEncoder().encode(directResult.data);
+                }
+
+                if (responseBody) {
+                    console.log(`[CupcakePM] Copilot plainFetchForce risuFetch result: status=${directResult.status} for ${url.substring(0, 60)}`);
+                    return new Response(responseBody, {
+                        status: directResult.status || 200,
+                        headers: new Headers(directResult.headers || {})
+                    });
+                }
+            }
+        } catch (e) {
+            console.log(`[CupcakePM] Copilot plainFetchForce risuFetch error: ${e.message}`);
         }
     }
 
@@ -3288,7 +3358,15 @@ async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {}, abor
         // cpm_streaming_enabled: global streaming toggle from user settings
         // Only send stream:true to API when BOTH allow it
         const streamingEnabled = await safeGetBoolArg('cpm_streaming_enabled', false);
-        const useStreaming = !config.decoupled && streamingEnabled;
+        // per-model streaming gate:
+        // - new field: config.streaming (explicit)
+        // - legacy fallback: !config.decoupled
+        const perModelStreamingEnabled = (config.streaming === true)
+            || (config.streaming !== false && !config.decoupled);
+        const useStreaming = streamingEnabled && perModelStreamingEnabled;
+        if (!useStreaming && effectiveUrl && effectiveUrl.includes('githubcopilot.com')) {
+            console.warn(`[Cupcake PM] Copilot request in non-stream mode (global=${streamingEnabled}, model=${perModelStreamingEnabled}). Long responses may return 524 via proxy.`);
+        }
 
         if (useStreaming) {
             // Build streaming request
@@ -3458,6 +3536,7 @@ async function fetchByProviderId(modelDef, args, abortSignal, _reqId) {
                 thinkingBudget: parseInt(cDef.thinkingBudget) || 0,
                 promptCacheRetention: cDef.promptCacheRetention || 'none',
                 decoupled: !!cDef.decoupled, thought: !!cDef.thought,
+                streaming: (cDef.streaming === true) || (cDef.streaming !== false && !cDef.decoupled),
                 showThoughtsToken: !!cDef.thought, useThoughtSignature: !!cDef.thought,
                 customParams: cDef.customParams || '', copilotToken: '',
                 effort: cDef.effort || 'none'
@@ -4182,7 +4261,8 @@ function _exposeScopeToWindow() {
                                         <label class="flex items-center space-x-2 text-sm text-gray-300"><input type="checkbox" id="cpm-cm-altrole" class="form-checkbox bg-gray-800"> <span>requiresAlternateRole (Assistant 역할을 Model 역할로 변경)</span></label>
                                         <label class="flex items-center space-x-2 text-sm text-gray-300"><input type="checkbox" id="cpm-cm-mustuser" class="form-checkbox bg-gray-800"> <span>mustStartWithUserInput (첫 번째 메시지를 사용자 역할로 강제 시작)</span></label>
                                         <label class="flex items-center space-x-2 text-sm text-gray-300"><input type="checkbox" id="cpm-cm-maxout" class="form-checkbox bg-gray-800"> <span>useMaxOutputTokensInstead (max_tokens 대신 max_output_tokens 사용)</span></label>
-                                        <label class="flex items-center space-x-2 text-sm text-gray-300"><input type="checkbox" id="cpm-cm-decoupled" class="form-checkbox bg-gray-800"> <span>decoupledStreaming (스트리밍 플래그 비활성화/전환)</span></label>
+                                        <label class="flex items-center space-x-2 text-sm text-gray-300"><input type="checkbox" id="cpm-cm-streaming" class="form-checkbox bg-gray-800"> <span>Use Streaming for this model (이 모델에서 스트리밍 사용)</span></label>
+                                        <p class="text-xs text-amber-300 ml-6">※ 스트리밍이 실제로 동작하려면 글로벌 탭의 "스트리밍 패스스루 활성화"를 켠 상태에서, 이 체크박스도 함께 켜야 합니다.</p>
                                         <label class="flex items-center space-x-2 text-sm text-gray-300"><input type="checkbox" id="cpm-cm-thought" class="form-checkbox bg-gray-800"> <span>useThoughtSignature (생각 서명 추출 사용)</span></label>
                                     </div>
                                 </div>
@@ -4589,7 +4669,7 @@ function _exposeScopeToWindow() {
                     document.getElementById('cpm-cm-altrole').checked = !!m.altrole;
                     document.getElementById('cpm-cm-mustuser').checked = !!m.mustuser;
                     document.getElementById('cpm-cm-maxout').checked = !!m.maxout;
-                    document.getElementById('cpm-cm-decoupled').checked = !!m.decoupled;
+                    document.getElementById('cpm-cm-streaming').checked = (m.streaming === true) || (m.streaming !== false && !m.decoupled);
                     document.getElementById('cpm-cm-thought').checked = !!m.thought;
 
                     document.getElementById('cpm-cm-custom-params').value = m.customParams || '';
@@ -4661,7 +4741,8 @@ function _exposeScopeToWindow() {
                 document.getElementById('cpm-cm-verbosity').value = 'none';
                 document.getElementById('cpm-cm-effort').value = 'none';
 
-                ['sysfirst', 'mergesys', 'altrole', 'mustuser', 'maxout', 'decoupled', 'thought'].forEach(id => document.getElementById(`cpm-cm-${id}`).checked = false);
+                ['sysfirst', 'mergesys', 'altrole', 'mustuser', 'maxout', 'thought'].forEach(id => document.getElementById(`cpm-cm-${id}`).checked = false);
+                document.getElementById('cpm-cm-streaming').checked = false;
                 document.getElementById('cpm-cm-custom-params').value = '';
 
                 document.getElementById('cpm-cm-editor-title').innerText = 'Add New Model';
@@ -4696,7 +4777,8 @@ function _exposeScopeToWindow() {
                     altrole: document.getElementById('cpm-cm-altrole').checked,
                     mustuser: document.getElementById('cpm-cm-mustuser').checked,
                     maxout: document.getElementById('cpm-cm-maxout').checked,
-                    decoupled: document.getElementById('cpm-cm-decoupled').checked,
+                    streaming: document.getElementById('cpm-cm-streaming').checked,
+                    decoupled: !document.getElementById('cpm-cm-streaming').checked,
                     thought: document.getElementById('cpm-cm-thought').checked,
                     customParams: document.getElementById('cpm-cm-custom-params').value,
                 };
