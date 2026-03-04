@@ -49,19 +49,14 @@
         "file": "cpm-translation-cache.js",
         "changes": "CSP 호환 (event delegation) + regex 최적화 (_replacementRegex)"
     },
-    "CPM Prompt Toggle Manager": {
-        "version": "3.0.5",
-        "file": "cpm-prompt-toggle-manager.js",
-        "changes": "cupcake_other 통합"
-    },
     "CPM Component - Chat Navigation": {
         "version": "2.1.1",
         "file": "cpm-chat-navigation.js",
         "changes": "cupcake_other 통합"
     },
     "Cupcake Provider Manager": {
-        "version": "1.19.3",
+        "version": "1.19.4",
         "file": "provider-manager.js",
-        "changes": "Copilot 524/5xx 폴백 강화 + 커스텀 모델별 스트리밍 토글 추가"
+        "changes": "Copilot request body 안정성 패치 (nativeFetch body 인코딩 + risuFetch 이중 stringify 방지)"
     }
 }

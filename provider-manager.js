@@ -1,10 +1,10 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.19.3
+//@version 1.19.4
 //@update-url https://cupcake-plugin-manager.vercel.app/provider-manager.js
 
-const CPM_VERSION = '1.19.3';
+const CPM_VERSION = '1.19.4';
 
 // ==========================================
 // 0. GLOBAL API REFERENCE (Risuai/risuai 대소문자 통일)
@@ -414,7 +414,16 @@ function sanitizeBodyJSON(jsonStr) {
                 console.warn(`[Cupcake PM] sanitizeBodyJSON: removed ${before - obj.contents.length} null entries from contents`);
             }
         }
-        return safeStringify(obj);
+        const result = safeStringify(obj);
+        // Validate output: ensure it's still valid JSON
+        // If safeStringify produced something unparseable, fall back to original
+        try {
+            JSON.parse(result);
+        } catch {
+            console.error('[Cupcake PM] sanitizeBodyJSON: output validation failed — returning original');
+            return jsonStr;
+        }
+        return result;
     } catch (e) {
         // Non-JSON bodies (e.g., URL-encoded form data like "grant_type=...") are expected
         // for certain endpoints (OAuth token exchange). Log at debug level, not error.
@@ -464,6 +473,12 @@ async function smartNativeFetch(url, options = {}) {
     if (_isCopilotUrl && (options.method || 'POST') !== 'GET' && typeof Risu.nativeFetch === 'function') {
         try {
             const nfOptions = { ...options };
+            // Encode body as Uint8Array to prevent bridge serialization corruption
+            // (Restored from v1.18.0 — string bodies can be corrupted by postMessage bridge,
+            //  causing "request body is not valid JSON" errors)
+            if (typeof nfOptions.body === 'string') {
+                nfOptions.body = new TextEncoder().encode(nfOptions.body);
+            }
             const nfRes = await Risu.nativeFetch(url, nfOptions);
             if (nfRes && nfRes.ok) {
                 console.log(`[CupcakePM] Copilot nativeFetch succeeded: status=${nfRes.status} for ${url.substring(0, 60)}`);
@@ -489,9 +504,22 @@ async function smartNativeFetch(url, options = {}) {
         try {
             let bodyObj = undefined;
             if (options.body && typeof options.body === 'string') {
-                try { bodyObj = JSON.parse(options.body); } catch { bodyObj = options.body; }
+                try {
+                    bodyObj = JSON.parse(options.body);
+                } catch {
+                    // CRITICAL: If JSON.parse fails, do NOT pass raw string to risuFetch
+                    // (risuFetch would JSON.stringify it again → double-quoted → "not valid JSON")
+                    // Instead, treat parse failure as unrecoverable for this path.
+                    console.error('[CupcakePM] Copilot risuFetch: body JSON.parse failed, skipping risuFetch path');
+                    bodyObj = undefined;
+                }
             } else if (options.body) {
                 bodyObj = options.body;
+            }
+
+            if (bodyObj === undefined && options.body) {
+                // Parse failed — skip risuFetch, fall through to next strategy
+                throw new Error('Body JSON parse failed — cannot safely pass to risuFetch');
             }
 
             const result = await Risu.risuFetch(url, {
@@ -542,9 +570,19 @@ async function smartNativeFetch(url, options = {}) {
         try {
             let bodyObj = undefined;
             if (options.body && typeof options.body === 'string') {
-                try { bodyObj = JSON.parse(options.body); } catch { bodyObj = options.body; }
+                try {
+                    bodyObj = JSON.parse(options.body);
+                } catch {
+                    // Do NOT pass raw string to risuFetch (would cause double-stringify)
+                    console.error('[CupcakePM] Copilot plainFetchForce: body JSON.parse failed, skipping');
+                    bodyObj = undefined;
+                }
             } else if (options.body) {
                 bodyObj = options.body;
+            }
+
+            if (bodyObj === undefined && options.body) {
+                throw new Error('Body JSON parse failed — cannot safely pass to risuFetch');
             }
 
             const directResult = await Risu.risuFetch(url, {
@@ -600,9 +638,21 @@ async function smartNativeFetch(url, options = {}) {
         try {
             let bodyObj = undefined;
             if (options.body && typeof options.body === 'string') {
-                try { bodyObj = JSON.parse(options.body); } catch { bodyObj = options.body; }
+                try {
+                    bodyObj = JSON.parse(options.body);
+                } catch {
+                    // Do NOT pass raw string to risuFetch — would cause double-stringify
+                    // (risuFetch internally calls JSON.stringify, so string → '"..."' → invalid JSON)
+                    console.error('[CupcakePM] risuFetch: body JSON.parse failed, skipping risuFetch path');
+                    bodyObj = undefined;
+                }
             } else if (options.body) {
                 bodyObj = options.body;
+            }
+
+            if (bodyObj === undefined && options.body) {
+                // Parse failed — skip risuFetch, fall through to nativeFetch
+                throw new Error('Body JSON parse failed — cannot safely pass to risuFetch');
             }
 
             // Deep-sanitize body object before it crosses the postMessage bridge
@@ -702,6 +752,10 @@ async function smartNativeFetch(url, options = {}) {
     try {
         console.log(`[CupcakePM] Falling back to nativeFetch (proxy) for ${url.substring(0, 60)}...`);
         const nfOptions = { ...options };
+        // Encode body as Uint8Array to prevent bridge serialization corruption
+        if (typeof nfOptions.body === 'string') {
+            nfOptions.body = new TextEncoder().encode(nfOptions.body);
+        }
         const res = await Risu.nativeFetch(url, nfOptions);
         return res;
     } catch (e) {
