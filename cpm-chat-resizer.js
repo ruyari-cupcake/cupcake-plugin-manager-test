@@ -1,6 +1,6 @@
 //@name CPM Component - Chat Input Resizer
 //@display-name Cupcake UI Resizer
-//@version 0.3.4
+//@version 0.3.5
 //@author Cupcake
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-chat-resizer.js
 
@@ -36,7 +36,7 @@
             id: 'cpm-resizer',
             name: 'Chat Input Resizer',
             description: '텍스트 입력창 모서리에 크기 조절/최대화 버튼을 표시합니다.',
-            version: '0.1',
+            version: '0.3.5',
             icon: '↕️',
             uiHtml: `
                 <div class="mb-2">

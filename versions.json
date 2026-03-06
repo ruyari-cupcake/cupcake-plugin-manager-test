@@ -1,62 +1,62 @@
 {
     "CPM Provider - Vertex AI": {
-        "version": "1.6.2",
+        "version": "1.6.3",
         "file": "cpm-provider-vertex.js",
-        "changes": "cupcake_other 통합 (cleanup hooks, IPC 안정화)"
+        "changes": "전체 버전 정합성 점검 및 릴리즈 메타데이터 동기화"
     },
     "CPM Provider - Gemini Studio": {
-        "version": "1.6.2",
+        "version": "1.6.3",
         "file": "cpm-provider-gemini.js",
-        "changes": "cupcake_other 통합 (cleanup hooks, IPC 안정화)"
+        "changes": "전체 버전 정합성 점검 및 릴리즈 메타데이터 동기화"
     },
     "CPM Provider - Anthropic": {
-        "version": "1.6.4",
+        "version": "1.6.5",
         "file": "cpm-provider-anthropic.js",
-        "changes": "cupcake_other 통합 (cleanup hooks, IPC 안정화)"
+        "changes": "전체 버전 정합성 점검 및 릴리즈 메타데이터 동기화"
     },
     "CPM Provider - OpenAI": {
-        "version": "1.5.4",
+        "version": "1.5.5",
         "file": "cpm-provider-openai.js",
-        "changes": "cupcake_other 통합 (cleanup hooks, IPC 안정화)"
+        "changes": "전체 버전 정합성 점검 및 릴리즈 메타데이터 동기화"
     },
     "CPM Provider - DeepSeek": {
-        "version": "1.4.3",
+        "version": "1.4.4",
         "file": "cpm-provider-deepseek.js",
-        "changes": "cupcake_other 통합 (cleanup hooks, IPC 안정화)"
+        "changes": "전체 버전 정합성 점검 및 릴리즈 메타데이터 동기화"
     },
     "CPM Provider - OpenRouter": {
-        "version": "1.3.3",
+        "version": "1.3.4",
         "file": "cpm-provider-openrouter.js",
-        "changes": "cupcake_other 통합 (cleanup hooks, IPC 안정화)"
+        "changes": "전체 버전 정합성 점검 및 릴리즈 메타데이터 동기화"
     },
     "CPM Provider - AWS Bedrock": {
-        "version": "1.5.0",
+        "version": "1.5.1",
         "file": "cpm-provider-aws.js",
-        "changes": "_awsSmartFetch 도입 (risuFetch 우선, nativeFetch fallback)"
+        "changes": "전체 버전 정합성 점검 및 릴리즈 메타데이터 동기화"
     },
     "CPM Component - Chat Input Resizer": {
-        "version": "0.3.4",
+        "version": "0.3.5",
         "file": "cpm-chat-resizer.js",
-        "changes": "FOLD null fix: chatvar 사전초기화 + BackgroundDom scrubber (querySelectorAll→querySelector)"
+        "changes": "전체 버전 정합성 점검 및 릴리즈 메타데이터 동기화"
     },
     "CPM Component - Copilot Token Manager": {
-        "version": "1.7.0",
+        "version": "1.7.1",
         "file": "cpm-copilot-manager.js",
-        "changes": "CSP 호환 (inline handler → data-action delegation)"
+        "changes": "전체 버전 정합성 점검 및 릴리즈 메타데이터 동기화"
     },
     "CPM Component - Translation Cache Manager": {
-        "version": "1.3.0",
+        "version": "1.3.1",
         "file": "cpm-translation-cache.js",
-        "changes": "CSP 호환 (event delegation) + regex 최적화 (_replacementRegex)"
+        "changes": "전체 버전 정합성 점검 및 릴리즈 메타데이터 동기화"
     },
     "CPM Component - Chat Navigation": {
-        "version": "2.1.1",
+        "version": "2.1.2",
         "file": "cpm-chat-navigation.js",
-        "changes": "cupcake_other 통합"
+        "changes": "전체 버전 정합성 점검 및 릴리즈 메타데이터 동기화"
     },
     "Cupcake Provider Manager": {
-        "version": "1.19.4",
+        "version": "1.19.5",
         "file": "provider-manager.js",
-        "changes": "Copilot request body 안정성 패치 (nativeFetch body 인코딩 + risuFetch 이중 stringify 방지)"
+        "changes": "전체 버전 정합성 점검 및 릴리즈 메타데이터 동기화"
     }
 }

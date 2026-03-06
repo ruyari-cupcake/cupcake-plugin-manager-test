@@ -1,5 +1,5 @@
 //@name CPM Provider - OpenAI
-//@version 1.5.4
+//@version 1.5.5
 //@description OpenAI provider for Cupcake PM (Streaming, Key Rotation)
 //@icon 🟢
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-provider-openai.js
@@ -21,6 +21,8 @@
             { uniqueId: 'openai-gpt-5.1-chat-latest', id: 'gpt-5.1-chat-latest', name: 'GPT-5.1 Chat (Latest)' },
             { uniqueId: 'openai-gpt-5.2-2025-12-11', id: 'gpt-5.2-2025-12-11', name: 'GPT-5.2 (2025/12/11)' },
             { uniqueId: 'openai-gpt-5.2-chat-latest', id: 'gpt-5.2-chat-latest', name: 'GPT-5.2 Chat (Latest)' },
+            { uniqueId: 'openai-gpt-5.3-chat-latest', id: 'gpt-5.3-chat-latest', name: 'GPT-5.3 Chat (Latest)' },
+            { uniqueId: 'openai-gpt-5.4-2026-03-05', id: 'gpt-5.4-2026-03-05', name: 'GPT-5.4 (2026/03/05)' },
         ],
         fetchDynamicModels: async () => {
             try {
@@ -66,7 +68,7 @@
                 return null;
             }
         },
-        fetcher: async function (modelDef, messages, temp, maxTokens, args, abortSignal) {
+        fetcher: async function (modelDef, messages, temp, maxTokens, args, abortSignal, _reqId) {
             const config = {
                 url: await CPM.safeGetArg('cpm_openai_url'),
                 model: await CPM.safeGetArg('cpm_openai_model') || modelDef.id,
@@ -77,31 +79,95 @@
             };
 
             // Helper: detect models that require max_completion_tokens instead of max_tokens
+            // Match only gpt-4.5, gpt-5 (all variants), and o-series (align with OAICompletionTokens)
             const needsMaxCompletionTokens = (model) => {
                 if (!model) return false;
                 const m = model.toLowerCase();
-                return /^(gpt-5|o[1-9])/.test(m);
+                return /(?:^|\/)(?:gpt-(?:4\.5|5)|o[1-9])/.test(m);
             };
 
             // Helper: validate service_tier value
             const validServiceTiers = new Set(['flex', 'default']);
 
+            // RisuAI-main capability alignment:
+            // - reasoning_effort: o3/o4 family + GPT-5 parameter models (non chat-latest variants)
+            // - verbosity: GPT-5 parameter models only (non chat-latest variants)
+            const supportsReasoningEffort = (model) => {
+                if (!model) return false;
+                const m = model.toLowerCase();
+                if (/(?:^|\/)o(?:3|4)(?:[\w.-]*)$/i.test(m)) return true;
+                return /(?:^|\/)gpt-5(?:\.\d+)?(?:-(?:mini|nano))?(?:-\d{4}-\d{2}-\d{2})?$/i.test(m);
+            };
+            const supportsVerbosity = (model) => {
+                if (!model) return false;
+                return /(?:^|\/)gpt-5(?:\.\d+)?(?:-(?:mini|nano))?(?:-\d{4}-\d{2}-\d{2})?$/i.test(model.toLowerCase());
+            };
+
+            // Models that should drop sampling params (reasoning-effort only family in RisuAI-main)
+            // NOTE: o1/o1-pro/o1-preview/o1-mini are NOT in this set.
+            const stripSamplingForModel = (model) => {
+                if (!model) return false;
+                const m = model.toLowerCase();
+                return /(?:^|\/)o(?:3(?:-mini|-pro|-deep-research)?|4-mini(?:-deep-research)?)$/i.test(m);
+            };
+
             const url = config.url || 'https://api.openai.com/v1/chat/completions';
             const modelName = config.model || 'gpt-4o';
-            const formattedMessages = CPM.formatToOpenAI(messages, config);
+            // BUG-A3 FIX: o-series models (o1, o3, o4) also require system → developer role conversion
+            // Also handle slash-prefixed model IDs (e.g., openai/o3-mini)
+            // BUG-5 FIX: Exclude o1-preview/o1-mini which lack DeveloperRole support
+            const useDeveloperRole = /(?:^|\/)(?:gpt-5|o[2-9]|o1(?!-(?:preview|mini)))/i.test(modelName);
+            const formattedMessages = CPM.formatToOpenAI(messages, { ...config, developerRole: useDeveloperRole });
 
             const streamingEnabled = await CPM.safeGetBoolArg('cpm_streaming_enabled', false);
+
+            // Detect Responses API requirement:
+            // - Copilot + GPT-5.4+ auto-switch
+            // - or manual /responses URL entered by user
+            const _isCopilotUrl = url.includes('githubcopilot.com');
+            const _isManualResponsesEndpoint = /\/responses(?:\?|$)/.test(url);
+            const _needsResponsesAPI = _isManualResponsesEndpoint || (
+                _isCopilotUrl
+                && typeof CPM._needsCopilotResponsesAPI === 'function'
+                && CPM._needsCopilotResponsesAPI(modelName)
+            );
+
+            // Determine effective URL (auto-switch for Copilot GPT-5.4+)
+            let effectiveUrl = url;
+            if (_isCopilotUrl && typeof CPM._needsCopilotResponsesAPI === 'function' && CPM._needsCopilotResponsesAPI(modelName)) {
+                const _copilotBase = (url.match(/https:\/\/[^/]+/) || ['https://api.githubcopilot.com'])[0];
+                effectiveUrl = `${_copilotBase}/responses`;
+                console.log(`[CPM-OpenAI] Copilot Responses API detected (model=${modelName}) → URL=${effectiveUrl}`);
+            }
 
             // Key Rotation: wrap fetch in withKeyRotation for automatic retry on 429/529
             const doFetch = async (apiKey) => {
                 const body = {
                     model: modelName,
-                    messages: Array.isArray(formattedMessages) ? formattedMessages.filter(m => m != null && typeof m === 'object') : [],
                     temperature: temp,
                     stream: streamingEnabled,
                 };
 
-                if (needsMaxCompletionTokens(modelName)) {
+                // Responses API uses 'input' array; Chat Completions uses 'messages'
+                if (_needsResponsesAPI) {
+                    body.input = Array.isArray(formattedMessages) ? formattedMessages.filter(m => m != null && typeof m === 'object') : [];
+                } else {
+                    body.messages = Array.isArray(formattedMessages) ? formattedMessages.filter(m => m != null && typeof m === 'object') : [];
+                }
+
+                // BUG-D1 FIX: Only request usage data when token display is enabled.
+                // Responses API doesn't use stream_options (usage comes in response.completed event).
+                if (streamingEnabled && !_needsResponsesAPI) {
+                    const _wantUsage = await CPM.safeGetBoolArg('cpm_show_token_usage', false);
+                    if (_wantUsage) {
+                        body.stream_options = { include_usage: true };
+                    }
+                }
+
+                if (_needsResponsesAPI) {
+                    // Responses API: max_output_tokens (not max_tokens / max_completion_tokens)
+                    body.max_output_tokens = maxTokens;
+                } else if (needsMaxCompletionTokens(modelName)) {
                     body.max_completion_tokens = maxTokens;
                 } else {
                     body.max_tokens = maxTokens;
@@ -124,11 +190,29 @@
                     body.prompt_cache_retention = config.promptCacheRetention;
                 }
 
-                if (config.reasoning && config.reasoning !== 'none') { body.reasoning_effort = config.reasoning; delete body.temperature; }
-                if (config.verbosity && config.verbosity !== 'none') body.verbosity = config.verbosity;
+                // Strip sampling params only for reasoning-effort-only o-series models.
+                // RisuAI-main keeps OpenAIParameters for o1/o1-pro/o1-preview/o1-mini.
+                if (stripSamplingForModel(modelName)) {
+                    delete body.temperature;
+                    delete body.top_p;
+                    delete body.frequency_penalty;
+                    delete body.presence_penalty;
+                }
+
+                if (config.reasoning && config.reasoning !== 'none' && supportsReasoningEffort(modelName)) {
+                    if (_needsResponsesAPI) {
+                        // Responses API: reasoning.effort (nested object)
+                        body.reasoning = { effort: config.reasoning, summary: 'auto' };
+                    } else {
+                        body.reasoning_effort = config.reasoning;
+                    }
+                }
+                if (config.verbosity && config.verbosity !== 'none' && supportsVerbosity(modelName)) {
+                    body.verbosity = config.verbosity;
+                }
 
                 const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` };
-                if (url.includes('githubcopilot.com')) {
+                if (_isCopilotUrl) {
                     let copilotApiToken = '';
                     if (typeof window.CupcakePM?.ensureCopilotApiToken === 'function') {
                         copilotApiToken = await window.CupcakePM.ensureCopilotApiToken();
@@ -138,21 +222,65 @@
                     if (copilotApiToken) {
                         headers['Authorization'] = `Bearer ${copilotApiToken}`;
                     }
+                    // Persistent session IDs (shared across all Copilot requests)
+                    if (!window._cpmCopilotMachineId) {
+                        window._cpmCopilotMachineId = Array.from({ length: 64 }, () =>
+                            Math.floor(Math.random() * 16).toString(16)
+                        ).join('');
+                    }
+                    if (!window._cpmCopilotSessionId) {
+                        window._cpmCopilotSessionId = ((typeof CPM.safeUUID === 'function') ? CPM.safeUUID() : Math.random().toString(36).slice(2)) + Date.now().toString();
+                    }
+                    // Full Copilot header set (aligned with fetchCustom + LBI pre36)
                     headers['Copilot-Integration-Id'] = 'vscode-chat';
+                    headers['Editor-Plugin-Version'] = 'copilot-chat/0.37.4';
+                    headers['Editor-Version'] = 'vscode/1.109.2';
+                    headers['User-Agent'] = 'GitHubCopilotChat/0.37.4';
+                    headers['Vscode-Machineid'] = window._cpmCopilotMachineId;
+                    headers['Vscode-Sessionid'] = window._cpmCopilotSessionId;
+                    headers['X-Github-Api-Version'] = '2025-10-01';
+                    headers['X-Initiator'] = 'user';
+                    headers['X-Interaction-Id'] = (typeof CPM.safeUUID === 'function') ? CPM.safeUUID() : Math.random().toString(36).slice(2);
+                    headers['X-Interaction-Type'] = 'conversation-panel';
                     headers['X-Request-Id'] = (typeof CPM.safeUUID === 'function') ? CPM.safeUUID() : ('xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) { var r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16); }));
+                    headers['X-Vscode-User-Agent-Library-Version'] = 'electron-fetch';
+                    // Copilot Vision: detect image content (check both messages and input arrays)
+                    const _msgArr = body.messages || body.input || [];
+                    const hasVisionContent = _msgArr.some(m =>
+                        Array.isArray(m?.content) && m.content.some(p => p.type === 'image_url')
+                    );
+                    if (hasVisionContent) headers['Copilot-Vision-Request'] = 'true';
+
+                    // Responses API: remove prompt_cache_retention (not applicable for Copilot /responses)
+                    if (_needsResponsesAPI) {
+                        delete body.prompt_cache_retention;
+                    }
                 }
 
                 const safeBody = JSON.stringify(body);
 
                 const fetchFn = typeof CPM.smartNativeFetch === 'function' ? CPM.smartNativeFetch : (window.Risuai || window.risuai).nativeFetch;
-                const res = await fetchFn(url, { method: 'POST', headers, body: safeBody });
+                const res = await fetchFn(effectiveUrl, { method: 'POST', headers, body: safeBody, signal: abortSignal });
                 if (!res.ok) return { success: false, content: `[OpenAI Error ${res.status}] ${await res.text()}`, _status: res.status };
 
                 if (streamingEnabled) {
-                    return { success: true, content: CPM.createSSEStream(res, CPM.parseOpenAISSELine, abortSignal) };
+                    if (_needsResponsesAPI && typeof CPM.createResponsesAPISSEStream === 'function') {
+                        // Responses API streaming (GPT-5.4+ on Copilot)
+                        return { success: true, content: CPM.createResponsesAPISSEStream(res, abortSignal, _reqId) };
+                    }
+                    // Standard OpenAI-compatible stream
+                    return { success: true, content: typeof CPM.createOpenAISSEStream === 'function'
+                        ? CPM.createOpenAISSEStream(res, abortSignal, _reqId)
+                        : CPM.createSSEStream(res, CPM.parseOpenAISSELine, abortSignal) };
                 } else {
                     const data = await res.json();
-                    return { success: true, content: data.choices?.[0]?.message?.content || '' };
+                    if (_needsResponsesAPI && typeof CPM.parseResponsesAPINonStreamingResponse === 'function') {
+                        // Responses API non-streaming (GPT-5.4+ on Copilot)
+                        return CPM.parseResponsesAPINonStreamingResponse(data, _reqId);
+                    }
+                    return typeof CPM.parseOpenAINonStreamingResponse === 'function'
+                        ? CPM.parseOpenAINonStreamingResponse(data, _reqId)
+                        : { success: true, content: data.choices?.[0]?.message?.content || '' };
                 }
             };
 

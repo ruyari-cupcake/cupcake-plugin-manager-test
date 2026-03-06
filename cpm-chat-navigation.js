@@ -1,13 +1,13 @@
 //@name CPM Component - Chat Navigation
 //@display-name 🧁 Cupcake Navigation
-//@version 2.1.1
+//@version 2.1.2
 //@description 채팅 메시지 네비게이션 (4버튼 → 2버튼 → 키보드 → OFF 순환)
 //@icon 🧭
 //@author Cupcake
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-chat-navigation.js
 
 /**
- * ======== CUPCAKE PM Sub-Plugin: Chat Navigation v2.1 ========
+ * ======== CUPCAKE PM Sub-Plugin: Chat Navigation v2.1.2 ========
  *
  * chat 버튼을 누를 때마다 모드가 순환:
  *   1번 → 4버튼 위젯 (⏫🔼🔽⏬, 드래그 가능)
@@ -72,7 +72,7 @@
         id: 'cpm-navigation',
         name: '🧭 Chat Navigation',
         description: '채팅 네비게이션 (4버튼 → 2버튼 → 키보드 → OFF 순환)',
-        version: '2.1.0',
+        version: '2.1.2',
         icon: '🧭'
     });
 
@@ -564,5 +564,5 @@
         currentModeIndex = -1;
     };
 
-    console.log(`${LOG_PREFIX} 초기화 완료 (v2.1.0 모드 순환)`);
+    console.log(`${LOG_PREFIX} 초기화 완료 (v2.1.2 모드 순환)`);
 })();

@@ -1,5 +1,5 @@
 //@name CPM Provider - Anthropic
-//@version 1.6.4
+//@version 1.6.5
 //@description Anthropic Claude provider for Cupcake PM (Streaming, Key Rotation)
 //@icon 🟠
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-provider-anthropic.js
@@ -48,8 +48,11 @@
                 let allModels = [];
                 let afterId = null;
 
-                // Paginate through all available models
-                while (true) {
+                // Paginate through all available models (max 50 pages safety guard)
+                let _pageCount = 0;
+                const MAX_PAGES = 50;
+                while (_pageCount < MAX_PAGES) {
+                    _pageCount++;
                     let url = 'https://api.anthropic.com/v1/models?limit=100';
                     if (afterId) url += `&after_id=${encodeURIComponent(afterId)}`;
 
@@ -79,13 +82,19 @@
                 return null;
             }
         },
-        fetcher: async function (modelDef, messages, temp, maxTokens, args, abortSignal) {
+        fetcher: async function (modelDef, messages, temp, maxTokens, args, abortSignal, _reqId) {
+            const cacheEnabled = await CPM.safeGetBoolArg('chat_claude_caching');
+            const cacheRaw = await CPM.safeGetArg('chat_claude_caching');
+            const cacheTtl = await CPM.safeGetArg('cpm_anthropic_cache_ttl');
+            const cacheTtlNormalized = String(cacheTtl || '').trim().toLowerCase();
+            const oneHourCaching = cacheTtlNormalized === '1h' || String(cacheRaw || '').trim().toLowerCase() === '1h';
             const config = {
                 url: await CPM.safeGetArg('cpm_anthropic_url'),
                 model: await CPM.safeGetArg('cpm_anthropic_model') || modelDef.id,
                 budget: await CPM.safeGetArg('cpm_anthropic_thinking_budget'),
                 effort: await CPM.safeGetArg('cpm_anthropic_thinking_effort'),
-                caching: await CPM.safeGetBoolArg('chat_claude_caching'),
+                caching: !!cacheEnabled || oneHourCaching,
+                claude1HourCaching: oneHourCaching,
             };
 
             const url = config.url || 'https://api.anthropic.com/v1/messages';
@@ -95,7 +104,7 @@
             // Key Rotation: wrap fetch in withKeyRotation for automatic retry on 429/529
             const doFetch = async (apiKey) => {
                 const body = {
-                    model: config.model || 'claude-3-5-sonnet-20241022',
+                    model: config.model || 'claude-sonnet-4-5-20250929',
                     max_tokens: maxTokens,
                     temperature: temp,
                     messages: formattedMsgs,
@@ -105,7 +114,12 @@
                 if (args.top_k !== undefined && args.top_k !== null) body.top_k = args.top_k;
                 if (systemPrompt) {
                     if (config.caching) {
-                        body.system = [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }];
+                        // BUG-4 FIX: Include ttl:'1h' when 1-hour caching is enabled
+                        // Aligned with RisuAI-main anthropic.ts: db.claude1HourCaching → { type: 'ephemeral', ttl: '1h' }
+                        const _sysCache = config.claude1HourCaching
+                            ? { type: 'ephemeral', ttl: '1h' }
+                            : { type: 'ephemeral' };
+                        body.system = [{ type: 'text', text: systemPrompt, cache_control: _sysCache }];
                     } else {
                         body.system = systemPrompt;
                     }
@@ -113,34 +127,69 @@
 
                 const isAdaptiveModel = ADAPTIVE_THINKING_MODELS.some(m => (config.model || '').startsWith(m));
 
-                if (isAdaptiveModel && (config.effort || parseInt(config.budget) > 0)) {
+                // BUG-3 FIX: Only enter adaptive path when effort is explicitly set.
+                // Budget-only on 4.6 models should use budget-based path (type: 'enabled').
+                // RisuAI-main treats effort and budget as independent flows.
+                if (isAdaptiveModel && config.effort) {
                     body.thinking = { type: 'adaptive' };
-                    const effort = config.effort && EFFORT_OPTIONS.includes(config.effort) ? config.effort : 'high';
+                    const effort = EFFORT_OPTIONS.includes(config.effort) ? config.effort : 'high';
                     body.output_config = { effort };
                     delete body.temperature;
+                    delete body.top_k;
+                    delete body.top_p;
                 } else if (config.budget && parseInt(config.budget) > 0) {
                     body.thinking = { type: 'enabled', budget_tokens: parseInt(config.budget) };
                     if (body.max_tokens <= body.thinking.budget_tokens) body.max_tokens = body.thinking.budget_tokens + 4096;
                     delete body.temperature;
+                    delete body.top_k;
+                    delete body.top_p;
                 }
 
                 const fetchFn = typeof CPM.smartNativeFetch === 'function' ? CPM.smartNativeFetch : (window.Risuai || window.risuai).nativeFetch;
+                const headers = { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
+
+                // BUG-C3 FIX: Add anthropic-beta headers when needed (aligned with native anthropic.ts)
+                const betas = [];
+                // Output-128k beta: required when max_tokens > 8192
+                if (body.max_tokens > 8192) betas.push('output-128k-2025-02-19');
+                // Extended cache TTL beta: only for explicit 1-hour caching mode (claude1HourCaching)
+                // Basic prompt caching (5-min ephemeral) is GA and doesn't need a beta header
+                // RisuAI-main only adds this when db.claude1HourCaching is true (anthropic.ts L554)
+                if (config.claude1HourCaching) betas.push('extended-cache-ttl-2025-04-11');
+                if (betas.length > 0) headers['anthropic-beta'] = betas.join(',');
+
                 const res = await fetchFn(url, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-                    body: JSON.stringify(body)
+                    headers,
+                    body: JSON.stringify(body),
+                    signal: abortSignal
                 });
                 if (!res.ok) return { success: false, content: `[Anthropic Error ${res.status}] ${await res.text()}`, _status: res.status };
 
                 if (streamingEnabled) {
-                    return { success: true, content: CPM.createAnthropicSSEStream(res, abortSignal) };
+                    return { success: true, content: CPM.createAnthropicSSEStream(res, abortSignal, _reqId) };
                 } else {
                     const data = await res.json();
-                    let showThinking = false;
-                    try { showThinking = await CPM.safeGetBoolArg('cpm_streaming_show_thinking', false); } catch { }
+                    // parseClaudeNonStreamingResponse now always shows thinking (aligned with RisuAI-main)
                     return typeof CPM.parseClaudeNonStreamingResponse === 'function'
-                        ? CPM.parseClaudeNonStreamingResponse(data, { showThinking })
-                        : { success: true, content: (Array.isArray(data.content) ? data.content.filter(b => b.type === 'text').map(b => b.text).join('') : '') };
+                        ? CPM.parseClaudeNonStreamingResponse(data, {}, _reqId)
+                        : (() => {
+                            let r = '', th = false;
+                            if (Array.isArray(data.content)) for (const b of data.content) {
+                                if (b.type === 'thinking' && b.thinking) {
+                                    if (!th) { th = true; r += '<Thoughts>\n'; }
+                                    r += b.thinking;
+                                } else if (b.type === 'redacted_thinking') {
+                                    if (!th) { th = true; r += '<Thoughts>\n'; }
+                                    r += '\n{{redacted_thinking}}\n';
+                                } else if (b.type === 'text') {
+                                    if (th) { th = false; r += '</Thoughts>\n\n'; }
+                                    r += b.text || '';
+                                }
+                            }
+                            if (th) r += '</Thoughts>\n\n';
+                            return { success: !!r, content: r || '[Anthropic] Empty response' };
+                        })();
                 }
             };
 
@@ -155,7 +204,7 @@
             id: 'tab-anthropic',
             icon: '🟠',
             label: 'Anthropic',
-            exportKeys: ['cpm_anthropic_key', 'cpm_anthropic_thinking_budget', 'cpm_anthropic_thinking_effort', 'chat_claude_caching', 'cpm_anthropic_url', 'cpm_dynamic_anthropic'],
+            exportKeys: ['cpm_anthropic_key', 'cpm_anthropic_thinking_budget', 'cpm_anthropic_thinking_effort', 'chat_claude_caching', 'cpm_anthropic_cache_ttl', 'cpm_anthropic_url', 'cpm_dynamic_anthropic'],
             renderContent: async (renderInput, lists) => {
                 return `
                     <h3 class="text-3xl font-bold text-orange-400 mb-6 pb-3 border-b border-gray-700">Anthropic Configuration (설정)</h3>
@@ -164,6 +213,7 @@
                     ${await renderInput('cpm_anthropic_thinking_budget', 'Thinking Budget Tokens (생각 토큰 예산 - 4.5 이하 모델용, 0은 끄기)', 'number')}
                     ${await renderInput('cpm_anthropic_thinking_effort', 'Adaptive Thinking Effort (4.6 모델용: low/medium/high/max)')}
                     ${await renderInput('chat_claude_caching', 'Cache Enabled (프롬프트 캐싱 사용)', 'checkbox')}
+                    ${await renderInput('cpm_anthropic_cache_ttl', 'Cache TTL (캐시 보존 시간)', 'select', [{ value: '', text: 'Default (5분, GA)' }, { value: '1h', text: 'Extended 1시간 (Beta)' }])}
                     ${await renderInput('cpm_anthropic_url', 'Custom Base URL (커스텀 API 주소 - 선택사항)')}
                 `;
             }

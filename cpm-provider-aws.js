@@ -1,5 +1,5 @@
 //@name CPM Provider - AWS Bedrock
-//@version 1.5.0
+//@version 1.5.1
 //@description AWS Bedrock (Claude) provider for Cupcake PM (Streaming)
 //@icon 🔶
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-provider-aws.js
@@ -25,7 +25,7 @@
      * @param {Object|undefined} bodyObj - Original body object (used for risuFetch)
      * @returns {Promise<Response>}
      */
-    async function _awsSmartFetch(signedUrl, signedMethod, signedHeaders, signedBody, bodyObj) {
+    async function _awsSmartFetch(signedUrl, signedMethod, signedHeaders, signedBody, bodyObj, abortSignal) {
         const url = typeof signedUrl === 'string' ? signedUrl : signedUrl.toString();
 
         // Strategy 1: risuFetch — collects full response on host, returns non-streaming data.
@@ -47,6 +47,7 @@
                     body: bodyObj,   // Original object (or undefined for GET)
                     rawResponse: true,
                     plainFetchForce: true,
+                    abortSignal,
                 });
 
                 if (result && result.data != null) {
@@ -80,22 +81,50 @@
         // Strategy 2: nativeFetch (streaming) — last resort
         const nfOpts = { method: signedMethod, headers: signedHeaders };
         if (signedBody) nfOpts.body = signedBody;
+        if (abortSignal) nfOpts.signal = abortSignal;
         return await Risu.nativeFetch(url, nfOpts);
     }
 
+    // BUG-C1 FIX: Use global. prefix for Claude 4.5+ and 4.6 models.
+    // Native RisuAI (anthropic.ts L421-435) uses global. for models with date >= 20250929 or version >= 4.5.
+    // AWS is transitioning from us. to global. cross-region inference profiles.
+    // Models older than 4.5 (date < 20250929) keep us. prefix.
     const AWS_MODELS = [
-        { uniqueId: 'aws-us.anthropic.claude-opus-4-6-v1', id: 'us.anthropic.claude-opus-4-6-v1', name: 'Claude 4.6 Opus' },
-        { uniqueId: 'aws-us.anthropic.claude-sonnet-4-6', id: 'us.anthropic.claude-sonnet-4-6', name: 'Claude 4.6 Sonnet' },
-        { uniqueId: 'aws-us.anthropic.claude-4-5-opus-20251101-v1:0', id: 'us.anthropic.claude-4-5-opus-20251101-v1:0', name: 'Claude 4.5 Opus (20251101)' },
-        { uniqueId: 'aws-us.anthropic.claude-4-5-sonnet-20250929-v1:0', id: 'us.anthropic.claude-4-5-sonnet-20250929-v1:0', name: 'Claude 4.5 Sonnet (20250929)' },
-        { uniqueId: 'aws-us.anthropic.claude-4-5-haiku-20251001-v1:0', id: 'us.anthropic.claude-4-5-haiku-20251001-v1:0', name: 'Claude 4.5 Haiku (20251001)' },
-        { uniqueId: 'aws-us.anthropic.claude-4-1-opus-20250805-v1:0', id: 'us.anthropic.claude-4-1-opus-20250805-v1:0', name: 'Claude 4.1 Opus (20250805)' },
+        { uniqueId: 'aws-global.anthropic.claude-opus-4-6-v1', id: 'global.anthropic.claude-opus-4-6-v1', name: 'Claude 4.6 Opus' },
+        { uniqueId: 'aws-global.anthropic.claude-sonnet-4-6', id: 'global.anthropic.claude-sonnet-4-6', name: 'Claude 4.6 Sonnet' },
+        { uniqueId: 'aws-global.anthropic.claude-4-5-opus-20251101-v1:0', id: 'global.anthropic.claude-4-5-opus-20251101-v1:0', name: 'Claude 4.5 Opus (20251101)' },
+        { uniqueId: 'aws-global.anthropic.claude-4-5-sonnet-20250929-v1:0', id: 'global.anthropic.claude-4-5-sonnet-20250929-v1:0', name: 'Claude 4.5 Sonnet (20250929)' },
+        { uniqueId: 'aws-global.anthropic.claude-4-5-haiku-20251001-v1:0', id: 'global.anthropic.claude-4-5-haiku-20251001-v1:0', name: 'Claude 4.5 Haiku (20251001)' },
+        { uniqueId: 'aws-global.anthropic.claude-4-1-opus-20250805-v1:0', id: 'global.anthropic.claude-4-1-opus-20250805-v1:0', name: 'Claude 4.1 Opus (20250805)' },
         { uniqueId: 'aws-us.anthropic.claude-4-opus-20250514-v1:0', id: 'us.anthropic.claude-4-opus-20250514-v1:0', name: 'Claude 4 Opus (20250514)' },
         { uniqueId: 'aws-us.anthropic.claude-4-sonnet-20250514-v1:0', id: 'us.anthropic.claude-4-sonnet-20250514-v1:0', name: 'Claude 4 Sonnet (20250514)' },
     ];
 
     const ADAPTIVE_THINKING_MODEL_PATTERNS = ['claude-opus-4-6', 'claude-sonnet-4-6'];
     const EFFORT_OPTIONS = ['low', 'medium', 'high', 'max'];
+
+    // Normalize Anthropic Bedrock model IDs to cross-region profile prefix.
+    // Aligned with RisuAI-main anthropic.ts: date>=20250929 or version>=4.5 => global., else us.
+    function normalizeAwsAnthropicModelId(rawId) {
+        const id = String(rawId || '').trim();
+        if (!id) return id;
+        if (/^(global|us)\./i.test(id)) return id;
+        if (!/anthropic\.claude/i.test(id)) return id;
+
+        let useGlobal = false;
+        const datePart = Number((id.match(/(\d{8})/) || [])[0]);
+        const versionMatch = id.match(/claude-(?:opus-|sonnet-|haiku-)?(\d+)-(\d+)/i);
+
+        if (Number.isFinite(datePart) && datePart > 0) {
+            useGlobal = datePart >= 20250929;
+        } else if (versionMatch) {
+            const majorVersion = Number(versionMatch[1]);
+            const minorVersion = Number(versionMatch[2]);
+            useGlobal = (majorVersion > 4) || (majorVersion === 4 && minorVersion >= 5);
+        }
+
+        return `${useGlobal ? 'global' : 'us'}.${id}`;
+    }
 
     CPM.registerProvider({
         name: 'AWS',
@@ -143,7 +172,8 @@
                         name = `${provider} ${name}`;
                     }
 
-                    results.push({ uniqueId: `aws-${id}`, id: id, name: name });
+                    const normalizedId = normalizeAwsAnthropicModelId(id);
+                    results.push({ uniqueId: `aws-${normalizedId}`, id: normalizedId, name: name });
                 }
 
                 // Also try cross-region inference profiles
@@ -184,7 +214,7 @@
                 return null;
             }
         },
-        fetcher: async function (modelDef, messages, temp, maxTokens, args, abortSignal) {
+        fetcher: async function (modelDef, messages, temp, maxTokens, args, abortSignal, _reqId) {
             // AWS Bedrock streaming uses application/vnd.amazon.eventstream binary protocol
             // which cannot be reliably parsed in the V3 plugin sandbox (text-based split/regex fails).
             // Force non-streaming (invoke endpoint) for all AWS models.
@@ -202,7 +232,7 @@
                 return { success: false, content: "[AWS Bedrock] Access Key, Secret, Region, and Model are required." };
             }
 
-            const { messages: anthropicMessages, system: systemPrompt } = CPM.formatToAnthropic(messages);
+            const { messages: anthropicMessages, system: systemPrompt } = CPM.formatToAnthropic(messages, config);
             const body = {
                 messages: anthropicMessages,
                 max_tokens: maxTokens || 4096,
@@ -215,17 +245,25 @@
 
             // Thinking support
             const isAdaptiveModel = ADAPTIVE_THINKING_MODEL_PATTERNS.some(p => config.model.includes(p));
-            if (isAdaptiveModel && (config.effort || parseInt(config.budget) > 0)) {
+            // BUG-3 FIX: Only enter adaptive path when effort is explicitly set.
+            // Budget-only on 4.6 models should use budget-based path (type: 'enabled').
+            if (isAdaptiveModel && config.effort) {
                 // Claude 4.6 models: use adaptive thinking
                 body.thinking = { type: 'adaptive' };
-                const effort = config.effort && EFFORT_OPTIONS.includes(config.effort) ? config.effort : 'high';
+                const effort = EFFORT_OPTIONS.includes(config.effort) ? config.effort : 'high';
                 body.output_config = { effort };
-                delete body.temperature;
+                // Bedrock requires temperature=1 when thinking is enabled (per Anthropic docs)
+                body.temperature = 1;
+                delete body.top_k;
+                delete body.top_p;
             } else if (config.budget && parseInt(config.budget) > 0) {
                 // Legacy models: use manual extended thinking
                 body.thinking = { type: 'enabled', budget_tokens: parseInt(config.budget) };
                 if (body.max_tokens <= body.thinking.budget_tokens) body.max_tokens = body.thinking.budget_tokens + 4096;
-                delete body.temperature;
+                // Bedrock requires temperature=1 when thinking is enabled (per Anthropic docs)
+                body.temperature = 1;
+                delete body.top_k;
+                delete body.top_p;
             }
 
             try {
@@ -245,15 +283,32 @@
                         headers: { 'Content-Type': 'application/json', 'accept': 'application/json' }
                     });
                     const signed = await signer.sign();
-                    const res = await _awsSmartFetch(signed.url, signed.method, signed.headers, signed.body, body);
-                    if (!res.ok) return { success: false, content: `[AWS Bedrock Error ${res.status}] ${await res.text()}` };
+                    const res = await _awsSmartFetch(signed.url, signed.method, signed.headers, signed.body, body, abortSignal);
+                    if (!res.ok) return { success: false, content: `[AWS Bedrock Error ${res.status}] ${await res.text()}`, _status: res.status };
                     const data = await res.json();
                     // Bedrock invoke returns Anthropic Messages API format
-                    let showThinking = false;
-                    try { showThinking = await CPM.safeGetBoolArg('cpm_streaming_show_thinking', false); } catch { }
-                    return typeof CPM.parseClaudeNonStreamingResponse === 'function'
-                        ? CPM.parseClaudeNonStreamingResponse(data, { showThinking })
-                        : { success: true, content: (Array.isArray(data.content) ? data.content.filter(b => b.type === 'text').map(b => b.text).join('') : '') };
+                    if (typeof CPM.parseClaudeNonStreamingResponse === 'function') {
+                        return CPM.parseClaudeNonStreamingResponse(data, {}, _reqId);
+                    }
+                    // Fallback: extract text + thinking directly (state-tracked)
+                    let fallbackOut = '';
+                    let fbThinking = false;
+                    if (Array.isArray(data.content)) {
+                        for (const block of data.content) {
+                            if (block.type === 'thinking' && block.thinking) {
+                                if (!fbThinking) { fbThinking = true; fallbackOut += '<Thoughts>\n'; }
+                                fallbackOut += block.thinking;
+                            } else if (block.type === 'redacted_thinking') {
+                                if (!fbThinking) { fbThinking = true; fallbackOut += '<Thoughts>\n'; }
+                                fallbackOut += '\n{{redacted_thinking}}\n';
+                            } else if (block.type === 'text') {
+                                if (fbThinking) { fbThinking = false; fallbackOut += '</Thoughts>\n\n'; }
+                                fallbackOut += block.text;
+                            }
+                        }
+                    }
+                    if (fbThinking) fallbackOut += '</Thoughts>\n\n';
+                    return { success: !!fallbackOut, content: fallbackOut || '[AWS Bedrock] Empty response' };
                 }
 
                 // ── Streaming: invoke-with-response-stream endpoint ──
@@ -276,13 +331,36 @@
                     body: signed.body
                 });
 
-                if (!res.ok) return { success: false, content: `[AWS Bedrock Error ${res.status}] ${await res.text()}` };
+                if (!res.ok) return { success: false, content: `[AWS Bedrock Error ${res.status}] ${await res.text()}`, _status: res.status };
 
                 // AWS Bedrock invoke-with-response-stream returns event stream format.
-                // Parse it to extract content_block_delta text chunks.
+                // Parse it to extract content_block_delta text + thinking chunks.
                 const reader = res.body.getReader();
                 const decoder = new TextDecoder();
                 let buffer = '';
+                let thinkingBlockActive = false;
+
+                const _processAwsEvent = (evt, controller) => {
+                    if (evt.type === 'content_block_start') {
+                        if (evt.content_block?.type === 'thinking') {
+                            thinkingBlockActive = true;
+                            controller.enqueue('<Thoughts>\n');
+                        } else if (evt.content_block?.type === 'redacted_thinking') {
+                            controller.enqueue('<Thoughts>\n{{redacted_thinking}}\n</Thoughts>\n\n');
+                        }
+                    } else if (evt.type === 'content_block_delta') {
+                        if ((evt.delta?.type === 'thinking_delta' || evt.delta?.type === 'thinking') && evt.delta?.thinking) {
+                            controller.enqueue(evt.delta.thinking);
+                        } else if (evt.delta?.text) {
+                            controller.enqueue(evt.delta.text);
+                        }
+                    } else if (evt.type === 'content_block_stop') {
+                        if (thinkingBlockActive) {
+                            controller.enqueue('</Thoughts>\n\n');
+                            thinkingBlockActive = false;
+                        }
+                    }
+                };
 
                 const stream = new ReadableStream({
                     async pull(controller) {
@@ -294,7 +372,14 @@
                                     return;
                                 }
                                 const { done, value } = await reader.read();
-                                if (done) { controller.close(); return; }
+                                if (done) {
+                                    if (thinkingBlockActive) {
+                                        controller.enqueue('</Thoughts>\n\n');
+                                        thinkingBlockActive = false;
+                                    }
+                                    controller.close();
+                                    return;
+                                }
                                 buffer += decoder.decode(value, { stream: true });
                                 // AWS eventstream wraps JSON payloads; extract them
                                 // The response contains base64-encoded JSON events or raw JSON chunks
@@ -309,11 +394,9 @@
                                         if (obj.bytes) {
                                             // Base64 encoded event payload
                                             const decoded = JSON.parse(atob(obj.bytes));
-                                            if (decoded.type === 'content_block_delta' && decoded.delta?.text) {
-                                                controller.enqueue(decoded.delta.text);
-                                            }
-                                        } else if (obj.type === 'content_block_delta' && obj.delta?.text) {
-                                            controller.enqueue(obj.delta.text);
+                                            _processAwsEvent(decoded, controller);
+                                        } else {
+                                            _processAwsEvent(obj, controller);
                                         }
                                     } catch {
                                         // Try extracting JSON from binary event stream format
@@ -322,6 +405,12 @@
                                         if (deltaMatch) {
                                             try {
                                                 controller.enqueue(JSON.parse('"' + deltaMatch[1] + '"'));
+                                            } catch { }
+                                        }
+                                        const thinkingMatch = trimmed.match(/"type"\s*:\s*"content_block_delta"[^}]*"delta"\s*:\s*\{[^}]*"thinking"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+                                        if (thinkingMatch) {
+                                            try {
+                                                controller.enqueue(JSON.parse('"' + thinkingMatch[1] + '"'));
                                             } catch { }
                                         }
                                     }

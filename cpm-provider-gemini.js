@@ -1,5 +1,5 @@
 //@name CPM Provider - Gemini Studio
-//@version 1.6.2
+//@version 1.6.3
 //@description Google Gemini Studio (API Key) provider for Cupcake PM (Streaming, Key Rotation)
 //@icon 🔵
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-provider-gemini.js
@@ -28,9 +28,12 @@
 
                 let allModels = [];
                 let pageToken = null;
+                let _pageCount = 0;
+                const MAX_PAGES = 50;
 
-                // Paginate through all available models
-                while (true) {
+                // Paginate through all available models (max 50 pages safety guard)
+                while (_pageCount < MAX_PAGES) {
+                    _pageCount++;
                     let url = `https://generativelanguage.googleapis.com/v1beta/models?key=${key}&pageSize=100`;
                     if (pageToken) url += `&pageToken=${encodeURIComponent(pageToken)}`;
 
@@ -64,13 +67,13 @@
                 return null;
             }
         },
-        fetcher: async function (modelDef, messages, temp, maxTokens, args, abortSignal) {
+        fetcher: async function (modelDef, messages, temp, maxTokens, args, abortSignal, _reqId) {
             const streamingEnabled = await CPM.safeGetBoolArg('cpm_streaming_enabled', false);
             const config = {
-                model: modelDef.id,
+                model: await CPM.safeGetArg('cpm_gemini_model') || modelDef.id,
                 thinking: await CPM.safeGetArg('cpm_gemini_thinking_level'),
                 thinkingBudget: await CPM.safeGetArg('cpm_gemini_thinking_budget'),
-                preserveSystem: await CPM.safeGetBoolArg('chat_gemini_preserveSystem'),
+                preserveSystem: await CPM.safeGetBoolArg('chat_gemini_preserveSystem', true),
                 showThoughtsToken: await CPM.safeGetBoolArg('chat_gemini_showThoughtsToken'),
                 useThoughtSignature: await CPM.safeGetBoolArg('chat_gemini_useThoughtSignature'),
             };
@@ -98,9 +101,9 @@
                     body.generationConfig.thinkingConfig = { includeThoughts: true, thinkingLevel: String(config.thinking).toLowerCase() };
                 }
 
-                // Safety settings: all categories OFF (aligned with LBI pre36)
+                // Safety settings: model-aware OFF vs BLOCK_NONE (aligned with RisuAI-main)
                 if (typeof CPM.getGeminiSafetySettings === 'function') {
-                    body.safetySettings = CPM.getGeminiSafetySettings();
+                    body.safetySettings = CPM.getGeminiSafetySettings(model);
                 }
                 // Validate and clamp parameters
                 if (typeof CPM.validateGeminiParams === 'function') {
@@ -110,19 +113,34 @@
                 if (typeof CPM.cleanExperimentalModelParams === 'function') {
                     CPM.cleanExperimentalModelParams(body.generationConfig, model);
                 }
+                // Strip thought:true from historical parts for thinking models
+                // (Gemini API may reject requests with thought:true in historical parts)
+                const isThinkingModel = model && (model.includes('gemini-2.5') || model.includes('gemini-3'));
+                if (isThinkingModel && body.contents) {
+                    body.contents = body.contents.map(content => ({
+                        ...content,
+                        parts: content.parts.map(part => {
+                            const { thought, ...rest } = part;
+                            return rest;
+                        }),
+                    }));
+                }
 
                 const fetchFn = typeof CPM.smartNativeFetch === 'function' ? CPM.smartNativeFetch : (window.Risuai || window.risuai).nativeFetch;
-                const res = await fetchFn(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                const res = await fetchFn(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: abortSignal });
                 if (!res.ok) return { success: false, content: `[Gemini Error ${res.status}] ${await res.text()}`, _status: res.status };
 
                 if (streamingEnabled) {
                     // Streaming: return SSE ReadableStream
-                    return { success: true, content: CPM.createSSEStream(res, (line) => CPM.parseGeminiSSELine(line, config), abortSignal) };
+                    // BUG-D2 FIX: Pass onComplete callback for thought signature + token usage capture
+                    const _onComplete = typeof CPM.saveThoughtSignatureFromStream === 'function'
+                        ? () => CPM.saveThoughtSignatureFromStream(config, _reqId) : undefined;
+                    return { success: true, content: CPM.createSSEStream(res, (line) => CPM.parseGeminiSSELine(line, config), abortSignal, _onComplete, _reqId) };
                 } else {
                     // Non-streaming: parse JSON response directly
                     const data = await res.json();
                     if (typeof CPM.parseGeminiNonStreamingResponse === 'function') {
-                        return CPM.parseGeminiNonStreamingResponse(data, config);
+                        return CPM.parseGeminiNonStreamingResponse(data, config, _reqId);
                     }
                     // Fallback: extract text directly
                     const text = data.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';

@@ -1,5 +1,5 @@
 //@name CPM Provider - Vertex AI
-//@version 1.6.2
+//@version 1.6.3
 //@description Google Vertex AI (Service Account) provider for Cupcake PM (Streaming, Key Rotation)
 //@icon 🔷
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-provider-vertex.js
@@ -23,8 +23,12 @@
         { baseId: "claude-haiku-4-5", date: "20251001", name: "Claude 4.5 Haiku", displayDate: "2025/10/01" },
         { baseId: "claude-sonnet-4", date: "20250514", name: "Claude 4 Sonnet", displayDate: "2025/05/14" },
         { baseId: "claude-sonnet-4-5", date: "20250929", name: "Claude 4.5 Sonnet", displayDate: "2025/09/29" },
+        // BUG-A4 FIX: Add Claude 4.6 models (adaptive thinking support)
+        { baseId: "claude-sonnet-4-6", date: "20260301", name: "Claude 4.6 Sonnet", displayDate: "2026/03/01" },
         { baseId: "claude-opus-4-1", date: "20250805", name: "Claude 4.1 Opus", displayDate: "2025/08/05" },
         { baseId: "claude-opus-4-5", date: "20251101", name: "Claude 4.5 Opus", displayDate: "2025/11/01" },
+        // BUG-A4 FIX: Add Claude 4.6 Opus
+        { baseId: "claude-opus-4-6", date: "20260301", name: "Claude 4.6 Opus", displayDate: "2026/03/01" },
     ];
 
     const models = [];
@@ -65,14 +69,29 @@
         const sigB64 = btoa(String.fromCharCode(...new Uint8Array(signature))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
         const jwt = `${unsignedToken}.${sigB64}`;
 
-        // Use smartNativeFetch (3-strategy fallback) to avoid V3 iframe bridge
-        // structured clone errors with raw Risuai.nativeFetch
-        const _fetchFn = typeof CPM.smartNativeFetch === 'function' ? CPM.smartNativeFetch : (window.Risuai || window.risuai).nativeFetch;
-        const res = await _fetchFn('https://oauth2.googleapis.com/token', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`
-        });
+        // Vertex OAuth token exchange stability:
+        // 1) Prefer nativeFetch with Uint8Array body (most reliable in V3 bridge)
+        // 2) Fall back to smartNativeFetch only when nativeFetch throws
+        const tokenBody = `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`;
+        const encodedTokenBody = new TextEncoder().encode(tokenBody);
+        const Risu = (window.Risuai || window.risuai);
+        let res;
+        try {
+            res = await Risu.nativeFetch('https://oauth2.googleapis.com/token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: encodedTokenBody
+            });
+        } catch (_nativeErr) {
+            const _fetchFn = typeof CPM.smartNativeFetch === 'function'
+                ? CPM.smartNativeFetch
+                : Risu.nativeFetch;
+            res = await _fetchFn('https://oauth2.googleapis.com/token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: encodedTokenBody
+            });
+        }
         if (!res.ok) throw new Error(await res.text());
         const data = await res.json();
         _tokenCaches[cacheKey] = { token: data.access_token, expiry: now + data.expires_in };
@@ -108,7 +127,10 @@
                 // Fetch Gemini models from Vertex
                 let allModels = [];
                 let pageToken = null;
-                while (true) {
+                let _pageCount = 0;
+                const MAX_PAGES = 50;
+                while (_pageCount < MAX_PAGES) {
+                    _pageCount++;
                     let url = `${baseUrl}/v1/publishers/google/models?pageSize=100`;
                     if (pageToken) url += `&pageToken=${encodeURIComponent(pageToken)}`;
                     const res = await CPM.smartFetch(url, {
@@ -172,21 +194,23 @@
                 return null;
             }
         },
-        fetcher: async function (modelDef, messages, temp, maxTokens, args, abortSignal) {
+        fetcher: async function (modelDef, messages, temp, maxTokens, args, abortSignal, _reqId) {
             const streamingEnabled = await CPM.safeGetBoolArg('cpm_streaming_enabled', false);
             const config = {
                 location: await CPM.safeGetArg('cpm_vertex_location'),
-                model: modelDef.id,
+                model: await CPM.safeGetArg('cpm_vertex_model') || modelDef.id,
                 thinking: await CPM.safeGetArg('cpm_vertex_thinking_level'),
                 thinkingBudget: await CPM.safeGetArg('cpm_vertex_thinking_budget'),
                 claudeThinkingBudget: await CPM.safeGetArg('cpm_vertex_claude_thinking_budget'),
-                preserveSystem: await CPM.safeGetBoolArg('chat_vertex_preserveSystem'),
+                preserveSystem: await CPM.safeGetBoolArg('chat_vertex_preserveSystem', true),
                 showThoughtsToken: await CPM.safeGetBoolArg('chat_vertex_showThoughtsToken'),
                 useThoughtSignature: await CPM.safeGetBoolArg('chat_vertex_useThoughtSignature'),
             };
 
             // Key Rotation: wrap all fetch logic in doFetch(keyJson) for automatic credential rotation
             const doFetch = async (keyJson) => {
+                // Reset fallback flag per doFetch call so key rotation retries get fresh attempts
+                config._triedFallback = false;
                 if (!keyJson) return { success: false, content: '[Vertex] No Service Account JSON key provided.' };
                 let project;
                 try { project = JSON.parse(keyJson).project_id; } catch (e) { return { success: false, content: `[Vertex] JSON 파싱 오류: ${e.message}` }; }
@@ -215,18 +239,48 @@
                     if (args.top_k !== undefined && args.top_k !== null) body.top_k = args.top_k;
                     if (systemPrompt) body.system = systemPrompt;
 
-                    // Extended thinking support (budget-based)
-                    const budget = parseInt(config.claudeThinkingBudget) || 0;
-                    if (budget > 0) {
-                        body.thinking = { type: 'enabled', budget_tokens: budget };
-                        if (body.max_tokens <= budget) body.max_tokens = budget + 4096;
+                    // BUG-C2 FIX: Add adaptive thinking support for Claude 4.6 on Vertex
+                    // Claude 4.6 models use adaptive thinking (type: 'adaptive') + output_config.effort
+                    // Older models use budget-based thinking (type: 'enabled') with budget_tokens
+                    const VERTEX_ADAPTIVE_PATTERNS = ['claude-opus-4-6', 'claude-sonnet-4-6'];
+                    const VERTEX_EFFORT_OPTIONS = ['low', 'medium', 'high', 'max'];
+                    const vertexClaudeEffort = await CPM.safeGetArg('cpm_vertex_claude_effort');
+                    const isVertexAdaptive = VERTEX_ADAPTIVE_PATTERNS.some(p => model.includes(p));
+
+                    // BUG-3 FIX: Only enter adaptive path when effort is explicitly set.
+                    // Budget-only on 4.6 models should use budget-based path (type: 'enabled').
+                    if (isVertexAdaptive && vertexClaudeEffort) {
+                        // Claude 4.6: adaptive thinking
+                        body.thinking = { type: 'adaptive' };
+                        const effort = VERTEX_EFFORT_OPTIONS.includes(vertexClaudeEffort)
+                            ? vertexClaudeEffort : 'high';
+                        body.output_config = { effort };
                         delete body.temperature;
+                        delete body.top_k;
+                        delete body.top_p;
+                    } else {
+                        // Legacy models: budget-based thinking
+                        const budget = parseInt(config.claudeThinkingBudget) || 0;
+                        if (budget > 0) {
+                            body.thinking = { type: 'enabled', budget_tokens: budget };
+                            if (body.max_tokens <= budget) body.max_tokens = budget + 4096;
+                            delete body.temperature;
+                            delete body.top_k;
+                            delete body.top_p;
+                        }
                     }
+
+                    // Add beta headers for Vertex Claude when needed
+                    const claudeHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` };
+                    const claudeBetas = [];
+                    if (body.max_tokens > 8192) claudeBetas.push('output-128k-2025-02-19');
+                    if (claudeBetas.length > 0) claudeHeaders['anthropic-beta'] = claudeBetas.join(',');
 
                     const res = await fetchFn(url, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
-                        body: JSON.stringify(body)
+                        headers: claudeHeaders,
+                        body: JSON.stringify(body),
+                        signal: abortSignal
                     });
                     if (!res.ok) {
                         if (res.status === 401 || res.status === 403) invalidateTokenCache(keyJson);
@@ -234,19 +288,32 @@
                     }
 
                     if (streamingEnabled) {
-                        return { success: true, content: CPM.createAnthropicSSEStream(res, abortSignal) };
+                        return { success: true, content: CPM.createAnthropicSSEStream(res, abortSignal, _reqId) };
                     } else {
                         // Non-streaming: parse JSON response
                         const data = await res.json();
-                        // Resolve showThinking for non-streaming display
-                        let showThinking = false;
-                        try { showThinking = await CPM.safeGetBoolArg('cpm_streaming_show_thinking', false); } catch { }
                         if (typeof CPM.parseClaudeNonStreamingResponse === 'function') {
-                            return CPM.parseClaudeNonStreamingResponse(data, { showThinking });
+                            return CPM.parseClaudeNonStreamingResponse(data, {}, _reqId);
                         }
-                        // Fallback: extract text directly
-                        const text = data.content?.filter(b => b.type === 'text').map(b => b.text).join('') || '';
-                        return { success: !!text, content: text || '[Vertex Claude] Empty response' };
+                        // Fallback: extract text + thinking directly (state-tracked)
+                        let fallbackOut = '';
+                        let fbThinking = false;
+                        if (Array.isArray(data.content)) {
+                            for (const block of data.content) {
+                                if (block.type === 'thinking' && block.thinking) {
+                                    if (!fbThinking) { fbThinking = true; fallbackOut += '<Thoughts>\n'; }
+                                    fallbackOut += block.thinking;
+                                } else if (block.type === 'redacted_thinking') {
+                                    if (!fbThinking) { fbThinking = true; fallbackOut += '<Thoughts>\n'; }
+                                    fallbackOut += '\n{{redacted_thinking}}\n';
+                                } else if (block.type === 'text') {
+                                    if (fbThinking) { fbThinking = false; fallbackOut += '</Thoughts>\n\n'; }
+                                    fallbackOut += block.text;
+                                }
+                            }
+                        }
+                        if (fbThinking) fallbackOut += '</Thoughts>\n\n';
+                        return { success: !!fallbackOut, content: fallbackOut || '[Vertex Claude] Empty response' };
                     }
                 }
 
@@ -266,12 +333,12 @@
                     const _tc = CPM.buildGeminiThinkingConfig(model, config.thinking, config.thinkingBudget, true);
                     if (_tc) body.generationConfig.thinkingConfig = _tc;
                 } else if (config.thinking && config.thinking !== 'off' && config.thinking !== 'none') {
-                    body.generationConfig.thinkingConfig = { includeThoughts: true, thinkingLevel: String(config.thinking).toLowerCase() };
+                    body.generationConfig.thinkingConfig = { includeThoughts: true, thinkingLevel: String(config.thinking).toUpperCase() };
                 }
 
-                // Safety settings: all categories OFF (aligned with LBI pre36)
+                // Safety settings: model-aware OFF vs BLOCK_NONE (aligned with RisuAI-main)
                 if (typeof CPM.getGeminiSafetySettings === 'function') {
-                    body.safetySettings = CPM.getGeminiSafetySettings();
+                    body.safetySettings = CPM.getGeminiSafetySettings(model);
                 }
                 // Validate and clamp parameters
                 if (typeof CPM.validateGeminiParams === 'function') {
@@ -298,7 +365,8 @@
                 const res = await fetchFn(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
-                    body: JSON.stringify(body)
+                    body: JSON.stringify(body),
+                    signal: abortSignal
                 });
                 if (!res.ok) {
                     const errText = await res.text();
@@ -316,15 +384,19 @@
                                 const fbRes = await fetchFn(fbUrl, {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
-                                    body: JSON.stringify(body)
+                                    body: JSON.stringify(body),
+                                    signal: abortSignal
                                 });
                                 if (fbRes.ok) {
                                     console.log(`[CPM-Vertex] Fallback to ${fallbackLoc} succeeded`);
                                     if (streamingEnabled) {
-                                        return { success: true, content: CPM.createSSEStream(fbRes, (line) => CPM.parseGeminiSSELine(line, config), abortSignal) };
+                                        // BUG-D2 FIX: onComplete for fallback path too
+                                        const _fbOnComplete = typeof CPM.saveThoughtSignatureFromStream === 'function'
+                                            ? () => CPM.saveThoughtSignatureFromStream(config, _reqId) : undefined;
+                                        return { success: true, content: CPM.createSSEStream(fbRes, (line) => CPM.parseGeminiSSELine(line, config), abortSignal, _fbOnComplete, _reqId) };
                                     } else {
                                         const fbData = await fbRes.json();
-                                        return CPM.parseGeminiNonStreamingResponse(fbData, config);
+                                        return CPM.parseGeminiNonStreamingResponse(fbData, config, _reqId);
                                     }
                                 }
                             } catch (fbErr) {
@@ -337,10 +409,13 @@
                 }
 
                 if (streamingEnabled) {
-                    return { success: true, content: CPM.createSSEStream(res, (line) => CPM.parseGeminiSSELine(line, config), abortSignal) };
+                    // BUG-D2 FIX: Pass onComplete for thought signature + token usage capture
+                    const _onComplete = typeof CPM.saveThoughtSignatureFromStream === 'function'
+                        ? () => CPM.saveThoughtSignatureFromStream(config, _reqId) : undefined;
+                    return { success: true, content: CPM.createSSEStream(res, (line) => CPM.parseGeminiSSELine(line, config), abortSignal, _onComplete, _reqId) };
                 } else {
                     const data = await res.json();
-                    return CPM.parseGeminiNonStreamingResponse(data, config);
+                    return CPM.parseGeminiNonStreamingResponse(data, config, _reqId);
                 }
             };
 
@@ -355,7 +430,7 @@
             id: 'tab-vertex',
             icon: '🔷',
             label: 'Vertex AI',
-            exportKeys: ['cpm_vertex_key_json', 'cpm_vertex_location', 'cpm_vertex_thinking_level', 'cpm_vertex_thinking_budget', 'cpm_vertex_claude_thinking_budget', 'chat_vertex_preserveSystem', 'chat_vertex_showThoughtsToken', 'chat_vertex_useThoughtSignature', 'cpm_dynamic_vertexai'],
+            exportKeys: ['cpm_vertex_key_json', 'cpm_vertex_location', 'cpm_vertex_thinking_level', 'cpm_vertex_thinking_budget', 'cpm_vertex_claude_thinking_budget', 'cpm_vertex_claude_effort', 'chat_vertex_preserveSystem', 'chat_vertex_showThoughtsToken', 'chat_vertex_useThoughtSignature', 'cpm_dynamic_vertexai'],
             renderContent: async (renderInput, lists) => {
                 return `
                     <h3 class="text-3xl font-bold text-blue-400 mb-6 pb-3 border-b border-gray-700">Vertex AI Configuration (설정)</h3>
@@ -366,7 +441,8 @@
                     ${await renderInput('cpm_vertex_thinking_budget', 'Thinking Budget Tokens (생각 토큰 예산 - Gemini 2.5용, 0은 끄기)', 'number')}
                     <hr class="my-4 border-gray-700">
                     <h4 class="text-xl font-semibold text-orange-400 mb-3">Claude on Vertex (Model Garden)</h4>
-                    ${await renderInput('cpm_vertex_claude_thinking_budget', 'Claude Thinking Budget Tokens (Claude 생각 토큰 예산, 0은 끄기)', 'number')}
+                    ${await renderInput('cpm_vertex_claude_thinking_budget', 'Claude Thinking Budget Tokens (4.5 이하 모델용, 0은 끄기)', 'number')}
+                    ${await renderInput('cpm_vertex_claude_effort', 'Adaptive Thinking Effort (4.6 모델용: low/medium/high/max)')}
                     <hr class="my-4 border-gray-700">
                     ${await renderInput('chat_vertex_preserveSystem', 'Preserve System (시스템 프롬프트 보존)', 'checkbox')}
                     ${await renderInput('chat_vertex_showThoughtsToken', 'Show Thoughts Token Info (생각 토큰 알림 표시)', 'checkbox')}

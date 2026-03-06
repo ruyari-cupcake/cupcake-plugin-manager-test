@@ -1,5 +1,5 @@
 //@name CPM Provider - DeepSeek
-//@version 1.4.3
+//@version 1.4.4
 //@description DeepSeek provider for Cupcake PM (Streaming, Key Rotation)
 //@icon 🟣
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-provider-deepseek.js
@@ -41,10 +41,10 @@
                 return null;
             }
         },
-        fetcher: async function (modelDef, messages, temp, maxTokens, args, abortSignal) {
+        fetcher: async function (modelDef, messages, temp, maxTokens, args, abortSignal, _reqId) {
             const config = {
                 url: await CPM.safeGetArg('cpm_deepseek_url'),
-                model: modelDef.id,
+                model: await CPM.safeGetArg('cpm_deepseek_model') || modelDef.id,
             };
 
             const url = config.url || 'https://api.deepseek.com/v1/chat/completions';
@@ -53,24 +53,47 @@
 
             // Key Rotation: wrap fetch in withKeyRotation for automatic retry on 429/529
             const doFetch = async (apiKey) => {
+                const _modelName = (config.model || '').toLowerCase();
+                const _isReasoner = _modelName.includes('reasoner');
                 const body = { model: config.model || 'deepseek-chat', messages: CPM.formatToOpenAI(messages), temperature: temp, max_tokens: maxTokens, stream: streamingEnabled };
+                // BUG-D4 FIX: Request usage data in streaming mode when token display is enabled
+                if (streamingEnabled) {
+                    const _wantUsage = await CPM.safeGetBoolArg('cpm_show_token_usage', false);
+                    if (_wantUsage) {
+                        body.stream_options = { include_usage: true };
+                    }
+                }
+                // Add optional params FIRST, then delete for reasoner
                 if (args.top_p !== undefined && args.top_p !== null) body.top_p = args.top_p;
                 if (args.frequency_penalty !== undefined && args.frequency_penalty !== null) body.frequency_penalty = args.frequency_penalty;
                 if (args.presence_penalty !== undefined && args.presence_penalty !== null) body.presence_penalty = args.presence_penalty;
+                // deepseek-reasoner: API does not support temperature/top_p/penalties
+                // Must be AFTER args assignment to ensure deletion takes priority
+                if (_isReasoner) {
+                    delete body.temperature;
+                    delete body.top_p;
+                    delete body.frequency_penalty;
+                    delete body.presence_penalty;
+                }
 
                 const fetchFn = typeof CPM.smartNativeFetch === 'function' ? CPM.smartNativeFetch : (window.Risuai || window.risuai).nativeFetch;
                 const res = await fetchFn(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-                    body: JSON.stringify(body)
+                    body: JSON.stringify(body),
+                    signal: abortSignal
                 });
                 if (!res.ok) return { success: false, content: `[DeepSeek Error ${res.status}] ${await res.text()}`, _status: res.status };
 
                 if (streamingEnabled) {
-                    return { success: true, content: CPM.createSSEStream(res, CPM.parseOpenAISSELine, abortSignal) };
+                    return { success: true, content: typeof CPM.createOpenAISSEStream === 'function'
+                        ? CPM.createOpenAISSEStream(res, abortSignal, _reqId)
+                        : CPM.createSSEStream(res, CPM.parseOpenAISSELine, abortSignal) };
                 } else {
                     const data = await res.json();
-                    return { success: true, content: data.choices?.[0]?.message?.content || '' };
+                    return typeof CPM.parseOpenAINonStreamingResponse === 'function'
+                        ? CPM.parseOpenAINonStreamingResponse(data, _reqId)
+                        : { success: true, content: data.choices?.[0]?.message?.content || '' };
                 }
             };
 

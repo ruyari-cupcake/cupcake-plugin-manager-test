@@ -1,10 +1,10 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.19.4
+//@version 1.19.5
 //@update-url https://cupcake-plugin-manager.vercel.app/provider-manager.js
 
-const CPM_VERSION = '1.19.4';
+const CPM_VERSION = '1.19.5';
 
 // ==========================================
 // 0. GLOBAL API REFERENCE (Risuai/risuai 대소문자 통일)
@@ -35,6 +35,7 @@ const Risu = window.risuai || window.Risuai;
 //@arg cpm_anthropic_model string Anthropic Model
 //@arg cpm_anthropic_thinking_budget int Anthropic Thinking Budget
 //@arg cpm_anthropic_thinking_effort string Anthropic Thinking Effort (none/low/medium/high)
+//@arg cpm_anthropic_cache_ttl string Anthropic Cache TTL (default/1h)
 //@arg cpm_dynamic_anthropic string Dynamic Anthropic Model Fetch (true/false)
 // Gemini
 //@arg cpm_gemini_key string Gemini API Key
@@ -49,6 +50,7 @@ const Risu = window.risuai || window.Risuai;
 //@arg cpm_vertex_thinking_level string Vertex Thinking Level (off, MINIMAL, LOW, MEDIUM, HIGH)
 //@arg cpm_vertex_thinking_budget int Vertex Gemini Thinking Budget
 //@arg cpm_vertex_claude_thinking_budget int Vertex Claude Thinking Budget
+//@arg cpm_vertex_claude_effort string Vertex Claude Adaptive Thinking Effort (low/medium/high/max)
 //@arg chat_vertex_preserveSystem string Vertex Preserve System Prompt (true/false)
 //@arg chat_vertex_showThoughtsToken string Vertex Show Thoughts Token (true/false)
 //@arg chat_vertex_useThoughtSignature string Vertex Use Thought Signature (true/false)
@@ -162,6 +164,171 @@ const _apiRequestHistory = new Map(); // requestId -> { timestamp, modelName, ur
 const _API_REQUEST_HISTORY_MAX = 20;
 let _apiRequestLatestId = null; // Track the most recently added request ID
 
+// ==========================================
+// TOKEN USAGE TRACKING — Real-time display of input/output/reasoning tokens
+// ==========================================
+// Stores normalized token usage captured from parser/stream completion.
+// Primary keying is request-id scoped to prevent cross-request overwrite races.
+// Legacy keys are kept for backward compatibility with old sub-plugins.
+const _tokenUsageStore = new Map();
+const _TOKEN_USAGE_LEGACY_NONSTREAM = '_latest';
+const _TOKEN_USAGE_LEGACY_STREAM = '_stream_latest';
+
+function _tokenUsageKey(requestId, isStream = false) {
+    if (!requestId || typeof requestId !== 'string') {
+        return isStream ? _TOKEN_USAGE_LEGACY_STREAM : _TOKEN_USAGE_LEGACY_NONSTREAM;
+    }
+    return `${isStream ? '_stream_' : '_nonstream_'}${requestId}`;
+}
+
+function _setTokenUsage(requestId, usage, isStream = false) {
+    if (!usage || typeof usage !== 'object') return;
+    _tokenUsageStore.set(_tokenUsageKey(requestId, isStream), usage);
+}
+
+function _takeTokenUsage(requestId, isStream = false) {
+    const key = _tokenUsageKey(requestId, isStream);
+    const scoped = _tokenUsageStore.get(key);
+    if (scoped) {
+        _tokenUsageStore.delete(key);
+        return scoped;
+    }
+    const legacyKey = isStream ? _TOKEN_USAGE_LEGACY_STREAM : _TOKEN_USAGE_LEGACY_NONSTREAM;
+    const legacy = _tokenUsageStore.get(legacyKey);
+    if (legacy) {
+        _tokenUsageStore.delete(legacyKey);
+        return legacy;
+    }
+    return null;
+}
+
+/**
+ * Normalize token usage from different API formats into a unified shape.
+ * @param {Object} raw - Raw usage object from API response
+ * @param {'openai'|'anthropic'|'gemini'} format
+ * @returns {{ input: number, output: number, reasoning: number, cached: number, total: number }}
+ */
+function _normalizeTokenUsage(raw, format) {
+    if (!raw || typeof raw !== 'object') return null;
+    if (format === 'openai') {
+        const input = raw.prompt_tokens || 0;
+        const output = raw.completion_tokens || 0;
+        const reasoning = raw.completion_tokens_details?.reasoning_tokens || 0;
+        const cached = raw.prompt_tokens_details?.cached_tokens || raw.prompt_cache_hit_tokens || 0;
+        return { input, output, reasoning, cached, total: raw.total_tokens || (input + output) };
+    } else if (format === 'anthropic') {
+        const input = raw.input_tokens || 0;
+        const output = raw.output_tokens || 0;
+        const cached = (raw.cache_read_input_tokens || 0) + (raw.cache_creation_input_tokens || 0);
+        return { input, output, reasoning: 0, cached, total: input + output };
+    } else if (format === 'gemini') {
+        const input = raw.promptTokenCount || 0;
+        const output = raw.candidatesTokenCount || 0;
+        const reasoning = raw.thoughtsTokenCount || 0;
+        const cached = raw.cachedContentTokenCount || 0;
+        return { input, output, reasoning, cached, total: raw.totalTokenCount || (input + output) };
+    }
+    return null;
+}
+
+/**
+ * Show a lightweight toast notification with token usage information.
+ * Displayed at the top-right corner, auto-dismisses after a configurable duration.
+ * @param {string} modelName - Display name of the model
+ * @param {{ input: number, output: number, reasoning: number, cached: number, total: number }} usage
+ * @param {number} durationMs - Request duration in milliseconds
+ */
+async function _showTokenUsageToast(modelName, usage, durationMs) {
+    if (!usage) return;
+    try {
+        const doc = await Risu.getRootDocument();
+        if (!doc) return;
+
+        // Remove previous token usage toast
+        const existing = await doc.querySelector('[x-cpm-token-toast]');
+        if (existing) { try { await existing.remove(); } catch (_) { } }
+
+        // Format numbers with commas
+        const fmt = (n) => n != null ? n.toLocaleString() : '0';
+        const durationStr = durationMs ? `${(durationMs / 1000).toFixed(1)}s` : '';
+
+        // Build detail parts
+        let parts = [];
+        parts.push(`📥 ${fmt(usage.input)}`);
+        parts.push(`📤 ${fmt(usage.output)}`);
+        if (usage.reasoning > 0) parts.push(`🧠 ${fmt(usage.reasoning)}`);
+        if (usage.cached > 0) parts.push(`💾 ${fmt(usage.cached)}`);
+        if (durationStr) parts.push(`⏱️ ${durationStr}`);
+
+        // Truncate model name for display
+        const shortModel = modelName.length > 40 ? modelName.substring(0, 37) + '...' : modelName;
+
+        const toast = await doc.createElement('div');
+        await toast.setAttribute('x-cpm-token-toast', '1');
+        await toast.setStyle('position', 'fixed');
+        await toast.setStyle('top', '12px');
+        await toast.setStyle('right', '12px');
+        await toast.setStyle('zIndex', '99997');
+        await toast.setStyle('background', 'rgba(17, 24, 39, 0.92)');
+        await toast.setStyle('border', '1px solid #374151');
+        await toast.setStyle('borderLeft', '3px solid #8b5cf6');
+        await toast.setStyle('borderRadius', '8px');
+        await toast.setStyle('padding', '8px 12px');
+        await toast.setStyle('maxWidth', '420px');
+        await toast.setStyle('minWidth', '200px');
+        await toast.setStyle('boxShadow', '0 4px 16px rgba(0,0,0,0.4)');
+        await toast.setStyle('fontFamily', "-apple-system, BlinkMacSystemFont, 'Segoe UI', monospace");
+        await toast.setStyle('pointerEvents', 'auto');
+        await toast.setStyle('opacity', '0');
+        await toast.setStyle('transform', 'translateY(-8px)');
+        await toast.setStyle('transition', 'opacity 0.25s ease, transform 0.25s ease');
+        await toast.setStyle('cursor', 'pointer');
+
+        await toast.setInnerHTML(`
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <span style="font-size:11px;color:#a78bfa;font-weight:600;white-space:nowrap">📊 ${shortModel}</span>
+                <span style="font-size:11px;color:#6b7280">|</span>
+                <span style="font-size:11px;color:#d1d5db;font-family:monospace;letter-spacing:0.5px">${parts.join(' <span style="color:#4b5563">·</span> ')}</span>
+            </div>
+        `);
+
+        const body = await doc.querySelector('body');
+        if (!body) return;
+        await body.appendChild(toast);
+
+        // Animate in
+        setTimeout(async () => {
+            try {
+                await toast.setStyle('opacity', '1');
+                await toast.setStyle('transform', 'translateY(0)');
+            } catch (_) { }
+        }, 30);
+
+        // Click to dismiss
+        try {
+            await toast.addEventListener('click', async () => {
+                try {
+                    await toast.setStyle('opacity', '0');
+                    await toast.setStyle('transform', 'translateY(-8px)');
+                    setTimeout(async () => { try { await toast.remove(); } catch (_) { } }, 300);
+                } catch (_) { }
+            });
+        } catch (_) { }
+
+        // Auto-dismiss after 6 seconds
+        setTimeout(async () => {
+            try {
+                await toast.setStyle('opacity', '0');
+                await toast.setStyle('transform', 'translateY(-8px)');
+                setTimeout(async () => { try { await toast.remove(); } catch (_) { } }, 300);
+            } catch (_) { }
+        }, 6000);
+
+    } catch (e) {
+        console.debug('[CPM TokenToast] Failed:', e.message);
+    }
+}
+
 /**
  * Store an API request entry. Returns the requestId for later updates.
  */
@@ -233,8 +400,16 @@ async function isDynamicFetchEnabled(providerName) {
  * Strip RisuAI-internal tags from message content.
  * Keep inlay tokens intact to avoid breaking translation/aux slot image flows.
  */
+function isInlaySceneWrapperText(text) {
+    if (typeof text !== 'string') return false;
+    return /<lb-xnai\s+scene="[^"]*">\{\{(?:inlay|inlayed|inlayeddata)::[^}]*\}\}<\/lb-xnai>/i.test(text);
+}
+
 function stripInternalTags(text) {
     if (typeof text !== 'string') return text;
+    if (isInlaySceneWrapperText(text)) {
+        return text.trim();
+    }
     return text
         .replace(/<qak>|<\/qak>/g, '')
         .trim();
@@ -242,6 +417,7 @@ function stripInternalTags(text) {
 
 function stripStaleAutoCaption(text, message) {
     if (typeof text !== 'string') return text;
+    if (isInlaySceneWrapperText(text) || /\{\{(?:inlay|inlayed|inlayeddata)::[^}]*\}\}/i.test(text)) return text;
     if (hasAttachedMultimodals(message)) return text;
 
     const lower = text.toLowerCase();
@@ -470,6 +646,26 @@ async function smartNativeFetch(url, options = {}) {
     // first bytes are delayed. nativeFetch keeps a real Response stream path.
     // For token exchange GET, proxy route remains the primary path.
     const _isCopilotUrl = url.includes('githubcopilot.com') || url.includes('copilot_internal');
+
+    // Best-effort AbortSignal propagation across V3 bridge.
+    // Some runtimes may fail to structured-clone `signal` through postMessage.
+    // In that case, retry once without signal to preserve compatibility.
+    const callNativeFetchWithAbortFallback = async (_url, _options) => {
+        try {
+            return await Risu.nativeFetch(_url, _options);
+        } catch (_err) {
+            const _msg = String(_err?.message || _err || '');
+            const _hasSignal = !!(_options && _options.signal);
+            const _cloneIssue = /clone|structured|postmessage|AbortSignal|DataCloneError/i.test(_msg);
+            if (_hasSignal && _cloneIssue) {
+                const _retry = { ..._options };
+                delete _retry.signal;
+                console.warn('[CupcakePM] nativeFetch signal bridge failed; retrying without signal:', _msg);
+                return await Risu.nativeFetch(_url, _retry);
+            }
+            throw _err;
+        }
+    };
     if (_isCopilotUrl && (options.method || 'POST') !== 'GET' && typeof Risu.nativeFetch === 'function') {
         try {
             const nfOptions = { ...options };
@@ -479,12 +675,18 @@ async function smartNativeFetch(url, options = {}) {
             if (typeof nfOptions.body === 'string') {
                 nfOptions.body = new TextEncoder().encode(nfOptions.body);
             }
-            const nfRes = await Risu.nativeFetch(url, nfOptions);
+            const nfRes = await callNativeFetchWithAbortFallback(url, nfOptions);
             if (nfRes && nfRes.ok) {
                 console.log(`[CupcakePM] Copilot nativeFetch succeeded: status=${nfRes.status} for ${url.substring(0, 60)}`);
                 return nfRes;
             }
             if (nfRes && nfRes.status && nfRes.status !== 0) {
+                // For Copilot POST, never replay on any concrete HTTP status.
+                // Re-sending non-idempotent chat requests can create duplicate generations/cost.
+                if ((options.method || 'POST') !== 'GET') {
+                    console.warn(`[CupcakePM] Copilot nativeFetch returned HTTP ${nfRes.status}; returning as-is to avoid duplicate replay.`);
+                    return nfRes;
+                }
                 // 4xx usually means request/auth issue; return immediately so caller can see exact error.
                 if (nfRes.status >= 400 && nfRes.status < 500) {
                     console.warn(`[CupcakePM] Copilot nativeFetch returned client error ${nfRes.status}; returning as-is.`);
@@ -522,13 +724,31 @@ async function smartNativeFetch(url, options = {}) {
                 throw new Error('Body JSON parse failed — cannot safely pass to risuFetch');
             }
 
-            const result = await Risu.risuFetch(url, {
-                method: options.method || 'POST',
-                headers: options.headers || {},
-                body: bodyObj,
-                rawResponse: true,
-                plainFetchDeforce: true,
-            });
+            let result;
+            try {
+                result = await Risu.risuFetch(url, {
+                    method: options.method || 'POST',
+                    headers: options.headers || {},
+                    body: bodyObj,
+                    rawResponse: true,
+                    plainFetchDeforce: true,
+                    abortSignal: options.signal,
+                });
+            } catch (_rfErr) {
+                const _rfMsg = String(_rfErr?.message || _rfErr || '');
+                if (options.signal && /clone|structured|postmessage|AbortSignal|DataCloneError/i.test(_rfMsg)) {
+                    console.warn('[CupcakePM] Copilot risuFetch(deforce) signal clone failed; retrying without signal');
+                    result = await Risu.risuFetch(url, {
+                        method: options.method || 'POST',
+                        headers: options.headers || {},
+                        body: bodyObj,
+                        rawResponse: true,
+                        plainFetchDeforce: true,
+                    });
+                } else {
+                    throw _rfErr;
+                }
+            }
 
             if (result && result.data != null) {
                 let responseBody = null;
@@ -538,8 +758,19 @@ async function smartNativeFetch(url, options = {}) {
                     responseBody = new Uint8Array(result.data instanceof ArrayBuffer ? result.data : result.data.buffer);
                 } else if (Array.isArray(result.data)) {
                     responseBody = new Uint8Array(result.data);
-                } else if (typeof result.data === 'object' && !(result.data instanceof Blob) && typeof result.data.length === 'number') {
-                    try { responseBody = new Uint8Array(Array.from(result.data)); } catch (_) { }
+                } else if (typeof result.data === 'object' && !(result.data instanceof Blob)) {
+                    const _len = typeof result.data.length === 'number'
+                        ? result.data.length
+                        : typeof result.data.byteLength === 'number'
+                            ? result.data.byteLength
+                            : (() => { const keys = Object.keys(result.data).filter(k => /^\d+$/.test(k)); return keys.length > 0 ? Math.max(...keys.map(Number)) + 1 : 0; })();
+                    if (_len > 0) {
+                        try {
+                            const arr = new Uint8Array(_len);
+                            for (let i = 0; i < _len; i++) arr[i] = result.data[i] || 0;
+                            responseBody = arr;
+                        } catch (_) { }
+                    }
                 } else if (typeof result.data === 'string') {
                     if (result.status && result.status !== 0) {
                         responseBody = new TextEncoder().encode(result.data);
@@ -585,13 +816,31 @@ async function smartNativeFetch(url, options = {}) {
                 throw new Error('Body JSON parse failed — cannot safely pass to risuFetch');
             }
 
-            const directResult = await Risu.risuFetch(url, {
-                method: options.method || 'POST',
-                headers: options.headers || {},
-                body: bodyObj,
-                rawResponse: true,
-                plainFetchForce: true,
-            });
+            let directResult;
+            try {
+                directResult = await Risu.risuFetch(url, {
+                    method: options.method || 'POST',
+                    headers: options.headers || {},
+                    body: bodyObj,
+                    rawResponse: true,
+                    plainFetchForce: true,
+                    abortSignal: options.signal,
+                });
+            } catch (_rfErr) {
+                const _rfMsg = String(_rfErr?.message || _rfErr || '');
+                if (options.signal && /clone|structured|postmessage|AbortSignal|DataCloneError/i.test(_rfMsg)) {
+                    console.warn('[CupcakePM] Copilot risuFetch(plainForce) signal clone failed; retrying without signal');
+                    directResult = await Risu.risuFetch(url, {
+                        method: options.method || 'POST',
+                        headers: options.headers || {},
+                        body: bodyObj,
+                        rawResponse: true,
+                        plainFetchForce: true,
+                    });
+                } else {
+                    throw _rfErr;
+                }
+            }
 
             if (directResult && directResult.data != null) {
                 let responseBody = null;
@@ -601,6 +850,19 @@ async function smartNativeFetch(url, options = {}) {
                     responseBody = new Uint8Array(directResult.data instanceof ArrayBuffer ? directResult.data : directResult.data.buffer);
                 } else if (Array.isArray(directResult.data)) {
                     responseBody = new Uint8Array(directResult.data);
+                } else if (typeof directResult.data === 'object' && !(directResult.data instanceof Blob)) {
+                    const _len = typeof directResult.data.length === 'number'
+                        ? directResult.data.length
+                        : typeof directResult.data.byteLength === 'number'
+                            ? directResult.data.byteLength
+                            : (() => { const keys = Object.keys(directResult.data).filter(k => /^\d+$/.test(k)); return keys.length > 0 ? Math.max(...keys.map(Number)) + 1 : 0; })();
+                    if (_len > 0) {
+                        try {
+                            const arr = new Uint8Array(_len);
+                            for (let i = 0; i < _len; i++) arr[i] = directResult.data[i] || 0;
+                            responseBody = arr;
+                        } catch (_) { }
+                    }
                 } else if (typeof directResult.data === 'string' && directResult.status && directResult.status !== 0) {
                     responseBody = new TextEncoder().encode(directResult.data);
                 }
@@ -707,13 +969,32 @@ async function smartNativeFetch(url, options = {}) {
                 }
             }
 
-            const result = await Risu.risuFetch(url, {
-                method: options.method || 'POST',
-                headers: options.headers || {},
-                body: bodyObj,
-                rawResponse: true,
-                plainFetchForce: true,
-            });
+            let result;
+            try {
+                result = await Risu.risuFetch(url, {
+                    method: options.method || 'POST',
+                    headers: options.headers || {},
+                    body: bodyObj,
+                    rawResponse: true,
+                    plainFetchForce: true,
+                    abortSignal: options.signal,
+                });
+            } catch (_rfErr) {
+                // AbortSignal can't be cloned via postMessage → retry without signal
+                const _rfMsg = String(_rfErr?.message || _rfErr || '');
+                if (options.signal && /clone|structured|postmessage|AbortSignal|DataCloneError/i.test(_rfMsg)) {
+                    console.warn('[CupcakePM] risuFetch signal clone failed; retrying without signal:', _rfMsg);
+                    result = await Risu.risuFetch(url, {
+                        method: options.method || 'POST',
+                        headers: options.headers || {},
+                        body: bodyObj,
+                        rawResponse: true,
+                        plainFetchForce: true,
+                    });
+                } else {
+                    throw _rfErr;
+                }
+            }
 
             if (result && result.data != null) {
                 let responseBody = null;
@@ -723,8 +1004,21 @@ async function smartNativeFetch(url, options = {}) {
                     responseBody = new Uint8Array(result.data instanceof ArrayBuffer ? result.data : result.data.buffer);
                 } else if (Array.isArray(result.data)) {
                     responseBody = new Uint8Array(result.data);
-                } else if (typeof result.data === 'object' && !(result.data instanceof Blob) && typeof result.data.length === 'number') {
-                    try { responseBody = new Uint8Array(Array.from(result.data)); } catch (_) { }
+                } else if (typeof result.data === 'object' && !(result.data instanceof Blob)) {
+                    // Handle Uint8Array that lost its type through postMessage bridge:
+                    // comes as plain object {0: 123, 1: 10, ...} with or without .length
+                    const _len = typeof result.data.length === 'number'
+                        ? result.data.length
+                        : typeof result.data.byteLength === 'number'
+                            ? result.data.byteLength
+                            : (() => { const keys = Object.keys(result.data).filter(k => /^\d+$/.test(k)); return keys.length > 0 ? Math.max(...keys.map(Number)) + 1 : 0; })();
+                    if (_len > 0) {
+                        try {
+                            const arr = new Uint8Array(_len);
+                            for (let i = 0; i < _len; i++) arr[i] = result.data[i] || 0;
+                            responseBody = arr;
+                        } catch (_) { }
+                    }
                 } else if (typeof result.data === 'string') {
                     if (result.status && result.status !== 0) {
                         responseBody = new TextEncoder().encode(result.data);
@@ -756,7 +1050,7 @@ async function smartNativeFetch(url, options = {}) {
         if (typeof nfOptions.body === 'string') {
             nfOptions.body = new TextEncoder().encode(nfOptions.body);
         }
-        const res = await Risu.nativeFetch(url, nfOptions);
+        const res = await callNativeFetchWithAbortFallback(url, nfOptions);
         return res;
     } catch (e) {
         console.error(`[CupcakePM] nativeFetch also failed: ${e.message}`);
@@ -788,7 +1082,7 @@ const SettingsBackup = {
             // OpenAI
             'cpm_openai_key', 'cpm_openai_url', 'cpm_openai_model', 'cpm_openai_reasoning', 'cpm_openai_verbosity', 'common_openai_servicetier',
             // Anthropic
-            'cpm_anthropic_key', 'cpm_anthropic_url', 'cpm_anthropic_model', 'cpm_anthropic_thinking_budget', 'cpm_anthropic_thinking_effort', 'chat_claude_caching',
+            'cpm_anthropic_key', 'cpm_anthropic_url', 'cpm_anthropic_model', 'cpm_anthropic_thinking_budget', 'cpm_anthropic_thinking_effort', 'chat_claude_caching', 'cpm_anthropic_cache_ttl',
             // Gemini
             'cpm_gemini_key', 'cpm_gemini_model', 'cpm_gemini_thinking_level', 'cpm_gemini_thinking_budget',
             'chat_gemini_preserveSystem', 'chat_gemini_showThoughtsToken', 'chat_gemini_useThoughtSignature', 'chat_gemini_usePlainFetch',
@@ -801,6 +1095,8 @@ const SettingsBackup = {
             'cpm_openrouter_key', 'cpm_openrouter_url', 'cpm_openrouter_model', 'cpm_openrouter_provider', 'cpm_openrouter_reasoning',
             // DeepSeek
             'cpm_deepseek_key', 'cpm_deepseek_url', 'cpm_deepseek_model',
+            // Display
+            'cpm_show_token_usage',
         ];
     },
 
@@ -1777,6 +2073,8 @@ window.CupcakePM = {
     formatToGemini,
     createSSEStream,
     parseOpenAISSELine,
+    createOpenAISSEStream,
+    createResponsesAPISSEStream,
     createAnthropicSSEStream,
     parseGeminiSSELine,
     collectStream,
@@ -1787,6 +2085,11 @@ window.CupcakePM = {
     cleanExperimentalModelParams,
     parseGeminiNonStreamingResponse,
     parseClaudeNonStreamingResponse,
+    parseOpenAINonStreamingResponse,
+    parseResponsesAPINonStreamingResponse,
+    _needsCopilotResponsesAPI,
+    // BUG-D3 FIX: Expose saveThoughtSignatureFromStream so sub-providers can pass it as onComplete
+    saveThoughtSignatureFromStream,
     // ThoughtSignatureCache is a const declared later — use getter to avoid TDZ
     get ThoughtSignatureCache() { return ThoughtSignatureCache; },
     /** Check if the V3 iframe bridge can transfer ReadableStream. */
@@ -2044,17 +2347,30 @@ async function inferSlot(activeModelDef, args) {
 }
 
 /**
- * Get Gemini safety settings with all categories set to OFF.
- * Aligned with LBI pre36 — prevents default safety filtering.
+ * Get Gemini safety settings with model-aware threshold.
+ * Aligned with RisuAI-main google.ts — uses geminiBlockOff/noCivilIntegrity flags:
+ *   - Gemini 2.0/2.5 models: threshold 'OFF' (geminiBlockOff flag)
+ *   - Gemini 2.0-flash-lite-preview: also excludes CIVIC_INTEGRITY (noCivilIntegrity flag)
+ *   - All others (1.5, 3.x, unknown): threshold 'BLOCK_NONE'
+ * @param {string} [modelId] - Model ID for model-aware threshold selection
  */
-function getGeminiSafetySettings() {
-    return [
+function getGeminiSafetySettings(modelId) {
+    const m = (modelId || '').toLowerCase();
+    // noCivilIntegrity: some models don't support CIVIC_INTEGRITY category
+    // Aligned with RisuAI-main providers/google.ts noCivilIntegrity flag
+    const noCivic = /gemini-2\.0-flash-lite-preview|gemini-2\.0-pro-exp/.test(m);
+
+    const categories = [
         'HATE_SPEECH',
         'DANGEROUS_CONTENT',
         'HARASSMENT',
         'SEXUALLY_EXPLICIT',
-        'CIVIC_INTEGRITY',
-    ].map(c => ({
+    ];
+    if (!noCivic) categories.push('CIVIC_INTEGRITY');
+
+    // Use 'OFF' universally — safer across all regions and model versions.
+    // BLOCK_NONE can cause 400 errors in some region/model combinations.
+    return categories.map(c => ({
         category: `HARM_CATEGORY_${c}`,
         threshold: 'OFF',
     }));
@@ -2147,8 +2463,8 @@ function buildGeminiThinkingConfig(model, level, budget, isVertexAI) {
     const budgetNum = parseInt(budget) || 0;
 
     if (isGemini3) {
-        // Gemini 3+: thinking level
-        // Vertex AI uses snake_case: thinking_level, Gemini Studio uses camelCase: thinkingLevel (lowercase value)
+        // Gemini 3+ (including 3.1, 3.x): thinking level (not thinkingBudget)
+        // Vertex AI uses snake_case: thinking_level, Gemini Studio uses camelCase: thinkingLevel
         if (level && level !== 'off' && level !== 'none') {
             if (isVertexAI) {
                 return { includeThoughts: true, thinking_level: level };
@@ -2223,7 +2539,16 @@ function formatToOpenAI(messages, config = {}) {
                     if (modal.base64) contentParts.push({ type: 'image_url', image_url: { url: modal.base64 } });
                     else if (modal.url) contentParts.push({ type: 'image_url', image_url: { url: modal.url } });
                 } else if (modal.type === 'audio') {
-                    contentParts.push({ type: 'input_audio', input_audio: { data: (modal.base64 || '').split(',')[1] || modal.base64, format: (modal.base64 || '').includes('wav') ? 'wav' : 'mp3' } });
+                    const _audioBase64 = modal.base64 || '';
+                    const _commaIdx = _audioBase64.indexOf(',');
+                    const _audioData = _commaIdx > -1 ? _audioBase64.substring(_commaIdx + 1) : _audioBase64;
+                    const _audioMime = (_commaIdx > -1 ? _audioBase64.substring(0, _commaIdx) : '').toLowerCase();
+                    let _audioFormat = 'mp3';
+                    if (_audioMime.includes('wav')) _audioFormat = 'wav';
+                    else if (_audioMime.includes('ogg')) _audioFormat = 'ogg';
+                    else if (_audioMime.includes('flac')) _audioFormat = 'flac';
+                    else if (_audioMime.includes('webm')) _audioFormat = 'webm';
+                    contentParts.push({ type: 'input_audio', input_audio: { data: _audioData, format: _audioFormat } });
                 }
             }
             msg.content = contentParts.length > 0 ? contentParts : (textContent || '');
@@ -2274,14 +2599,41 @@ function formatToOpenAI(messages, config = {}) {
         }
     }
 
+    // GPT-5 계열: system → developer 역할 변환 (네이티브 DeveloperRole 동작 정렬)
+    if (config.developerRole) {
+        for (const m of arr) {
+            if (m.role === 'system') m.role = 'developer';
+        }
+    }
+
     return arr;
 }
 
 function formatToAnthropic(messages, config = {}) {
     const validMsgs = sanitizeMessages(messages);
-    const systemMsgs = validMsgs.filter(m => m.role === 'system');
-    const chatMsgs = validMsgs.filter(m => m.role !== 'system');
-    const systemPrompt = systemMsgs.map(m => typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).join('\n\n');
+
+    // 선두(leading) 시스템 메시지만 추출
+    const leadingSystem = [];
+    let splitIdx = 0;
+    for (let i = 0; i < validMsgs.length; i++) {
+        if (validMsgs[i].role === 'system') {
+            leadingSystem.push(typeof validMsgs[i].content === 'string' ? validMsgs[i].content : JSON.stringify(validMsgs[i].content));
+            splitIdx = i + 1;
+        } else {
+            break;
+        }
+    }
+    const systemPrompt = leadingSystem.join('\n\n');
+    const remainingMsgs = validMsgs.slice(splitIdx);
+
+    // 비선두 시스템 메시지는 위치 유지하여 user 역할 + "system: " 접두사로 변환
+    const chatMsgs = remainingMsgs.map(m => {
+        if (m.role === 'system') {
+            const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+            return { ...m, role: 'user', content: `system: ${content}` };
+        }
+        return m;
+    });
 
     const formattedMsgs = [];
     for (const m of chatMsgs) {
@@ -2291,9 +2643,11 @@ function formatToAnthropic(messages, config = {}) {
         // Multimodal handling (images) → Anthropic vision format
         // Aligned with Anthropic Messages API: content becomes array of content blocks
         if (payload.multimodals.length > 0) {
-            const contentParts = [];
+            // Anthropic best practice: images BEFORE text (RisuAI-main uses unshift for images)
+            const imageParts = [];
+            const textParts = [];
             const textContent = payload.text.trim();
-            if (textContent) contentParts.push({ type: 'text', text: textContent });
+            if (textContent) textParts.push({ type: 'text', text: textContent });
             for (const modal of payload.multimodals) {
                 if (!modal || typeof modal !== 'object') continue;
                 if (modal.type === 'image') {
@@ -2302,12 +2656,13 @@ function formatToAnthropic(messages, config = {}) {
                     // Extract media_type from data URI (e.g., "data:image/png;base64,...")
                     const mediaType = (commaIdx > -1 ? base64Str.split(';')[0]?.split(':')[1] : null) || 'image/png';
                     const data = commaIdx > -1 ? base64Str.substring(commaIdx + 1) : base64Str;
-                    contentParts.push({
+                    imageParts.push({
                         type: 'image',
                         source: { type: 'base64', media_type: mediaType, data: data }
                     });
                 }
             }
+            const contentParts = [...imageParts, ...textParts];
             // Merge or push new message
             if (contentParts.length > 0) {
                 if (formattedMsgs.length > 0 && formattedMsgs[formattedMsgs.length - 1].role === role) {
@@ -2327,10 +2682,10 @@ function formatToAnthropic(messages, config = {}) {
                 if (!hasNonEmptyMessageContent(content)) continue;
                 if (formattedMsgs.length > 0 && formattedMsgs[formattedMsgs.length - 1].role === role) {
                     const prev = formattedMsgs[formattedMsgs.length - 1];
-                    if (typeof prev.content === 'string') prev.content += '\n\n' + content;
+                    if (typeof prev.content === 'string') prev.content = [{ type: 'text', text: prev.content }, { type: 'text', text: content }];
                     else if (Array.isArray(prev.content)) prev.content.push({ type: 'text', text: content });
                 } else {
-                    formattedMsgs.push({ role, content });
+                    formattedMsgs.push({ role, content: [{ type: 'text', text: content }] });
                 }
             }
             continue;
@@ -2418,17 +2773,51 @@ function formatToAnthropic(messages, config = {}) {
         if (formattedMsgs.length > 0 && formattedMsgs[formattedMsgs.length - 1].role === role) {
             const prev = formattedMsgs[formattedMsgs.length - 1];
             if (typeof prev.content === 'string') {
-                prev.content += '\n\n' + content;
+                prev.content = [{ type: 'text', text: prev.content }, { type: 'text', text: content }];
             } else if (Array.isArray(prev.content)) {
                 prev.content.push({ type: 'text', text: content });
             }
         } else {
-            formattedMsgs.push({ role, content });
+            formattedMsgs.push({ role, content: [{ type: 'text', text: content }] });
         }
     }
     if (formattedMsgs.length === 0 || formattedMsgs[0].role !== 'user') {
-        formattedMsgs.unshift({ role: 'user', content: '(Continue)' });
+        formattedMsgs.unshift({ role: 'user', content: [{ type: 'text', text: 'Start' }] });
     }
+
+    // BUG-1 FIX: Apply cache_control breakpoints for messages with cachePoint property.
+    // Aligned with RisuAI-main anthropic.ts L143-157: per-message cache_control on last content block.
+    // This enables Anthropic's prompt caching to reuse prefix tokens, reducing costs.
+    // BUG-4 FIX: When config.claude1HourCaching is true, include ttl:'1h' in cache_control
+    // (RisuAI-main anthropic.ts: db.claude1HourCaching → { type: 'ephemeral', ttl: '1h' })
+    if (config.caching) {
+        const _cacheCtrl = config.claude1HourCaching
+            ? { type: 'ephemeral', ttl: '1h' }
+            : { type: 'ephemeral' };
+        // Walk through original chatMsgs and apply cache_control to matching formatted messages
+        let fmtIdx = 0;
+        for (let ci = 0; ci < chatMsgs.length && fmtIdx < formattedMsgs.length; ci++) {
+            const srcMsg = chatMsgs[ci];
+            // Track which formatted message this source message contributed to
+            // (consecutive same-role messages get merged, so fmtIdx advances only on role change)
+            if (ci > 0) {
+                const prevRole = chatMsgs[ci - 1].role === 'assistant' ? 'assistant' : 'user';
+                const curRole = srcMsg.role === 'assistant' ? 'assistant' : 'user';
+                if (curRole !== prevRole) fmtIdx++;
+            }
+            if (fmtIdx >= formattedMsgs.length) break;
+
+            if (srcMsg.cachePoint) {
+                const fMsg = formattedMsgs[fmtIdx];
+                if (Array.isArray(fMsg.content) && fMsg.content.length > 0) {
+                    fMsg.content[fMsg.content.length - 1].cache_control = _cacheCtrl;
+                } else if (typeof fMsg.content === 'string') {
+                    fMsg.content = [{ type: 'text', text: fMsg.content, cache_control: _cacheCtrl }];
+                }
+            }
+        }
+    }
+
     return { messages: formattedMsgs, system: systemPrompt };
 }
 
@@ -2499,7 +2888,7 @@ function formatToGemini(messagesRaw, config = {}) {
 
         // Handle system messages found after the leading block — merge into user content
         if (m.role === 'system') {
-            const sysText = `[System]\n${trimmed}\n[/System]`;
+            const sysText = `system: ${trimmed}`;
             if (contents.length > 0 && contents[contents.length - 1].role === 'user') {
                 contents[contents.length - 1].parts.push({ text: sysText });
             } else {
@@ -2519,11 +2908,12 @@ function formatToGemini(messagesRaw, config = {}) {
             // If same role as last message (consecutive), append to it
             if (lastMessage && lastMessage.role === role) {
                 if (trimmed) {
-                    // If last part is inlineData, push new text part; otherwise append
-                    if (lastMessage.parts[lastMessage.parts.length - 1]?.inlineData) {
+                    // If last part is inlineData or fileData (no .text), push new text part; otherwise append
+                    const _lastPart = lastMessage.parts[lastMessage.parts.length - 1];
+                    if (_lastPart?.inlineData || _lastPart?.fileData || _lastPart?.text === undefined) {
                         lastMessage.parts.push({ text: trimmed });
                     } else {
-                        lastMessage.parts[lastMessage.parts.length - 1].text += '\n\n' + trimmed;
+                        _lastPart.text += '\n\n' + trimmed;
                     }
                 }
                 for (const modal of normalizedMultimodals) {
@@ -2563,10 +2953,11 @@ function formatToGemini(messagesRaw, config = {}) {
 
         // Text-only message
         const part = { text: trimmed || text };
-        // Inject thought_signature if enabled and available (for context caching)
+        // Inject thoughtSignature if enabled and available (for context caching)
+        // MUST use camelCase 'thoughtSignature' — Gemini REST API expects camelCase (google.ts#L1076)
         if (config.useThoughtSignature && role === 'model') {
             const cachedSig = ThoughtSignatureCache.get(trimmed || text);
-            if (cachedSig) part.thought_signature = cachedSig;
+            if (cachedSig) part.thoughtSignature = cachedSig;
         }
 
         if (contents.length > 0 && contents[contents.length - 1].role === role) {
@@ -2576,16 +2967,22 @@ function formatToGemini(messagesRaw, config = {}) {
         }
     }
 
-    if (contents.length > 0 && contents[0].role === 'model') contents.unshift({ role: 'user', parts: [{ text: '(Continue)' }] });
+    if (contents.length > 0 && contents[0].role === 'model') contents.unshift({ role: 'user', parts: [{ text: 'Start' }] });
 
     if (!config.preserveSystem && systemInstruction.length > 0) {
-        const sysText = systemInstruction.join('\n\n');
+        const sysText = `system: ${systemInstruction.join('\n\n')}`;
         if (contents.length > 0 && contents[0].role === 'user') {
-            contents[0].parts.unshift({ text: `[System Content]\n${sysText}\n[/System Content]\n\n` });
+            contents[0].parts.unshift({ text: sysText });
         } else {
-            contents.unshift({ role: 'user', parts: [{ text: `[System Content]\n${sysText}\n[/System Content]\n\n` }] });
+            contents.unshift({ role: 'user', parts: [{ text: sysText }] });
         }
         systemInstruction.length = 0; // Clear system instructions to signal it's merged
+    }
+
+    // Guard: preserveSystem=true + all-system input can leave contents empty,
+    // but Gemini API requires non-empty contents.
+    if (config.preserveSystem && contents.length === 0 && systemInstruction.length > 0) {
+        contents.push({ role: 'user', parts: [{ text: 'Start' }] });
     }
 
     return { contents, systemInstruction };
@@ -2677,36 +3074,238 @@ function parseOpenAISSELine(line) {
 }
 
 /**
+ * OpenAI-compatible SSE stream with reasoning_content support.
+ * Handles reasoning deltas from o-series, DeepSeek reasoner, and OpenRouter reasoning models.
+ * Wraps reasoning in <Thoughts> tags matching RisuAI-main format.
+ * @param {Response} response - fetch Response with streaming body
+ * @param {AbortSignal} [abortSignal] - optional abort signal
+ * @param {string} [_logRequestId] - optional API View request ID
+ */
+function createOpenAISSEStream(response, abortSignal, _logRequestId) {
+    let inReasoning = false;
+
+    let _streamUsage = null; // Capture usage from final SSE chunk
+
+    function parser(line) {
+        if (!line.startsWith('data:')) return null;
+        const jsonStr = line.slice(5).trim();
+        if (jsonStr === '[DONE]') return null;
+        try {
+            const obj = JSON.parse(jsonStr);
+            // Capture usage data (sent when stream_options.include_usage is true)
+            if (obj.usage) {
+                _streamUsage = _normalizeTokenUsage(obj.usage, 'openai');
+            }
+            const delta = obj.choices?.[0]?.delta;
+            if (!delta) return null;
+            let out = '';
+            // Reasoning content (OpenAI o-series, DeepSeek reasoner)
+            const reasoningDelta = delta.reasoning_content ?? delta.reasoning;
+            if (reasoningDelta) {
+                if (!inReasoning) { inReasoning = true; out += '<Thoughts>\n'; }
+                out += String(reasoningDelta);
+            }
+            // Regular content
+            if (delta.content) {
+                if (inReasoning) { inReasoning = false; out += '\n</Thoughts>\n'; }
+                out += delta.content;
+            }
+            return out || null;
+        } catch { return null; }
+    }
+
+    function onComplete() {
+        // Store captured usage for handleRequest to pick up
+        if (_streamUsage) _setTokenUsage(_logRequestId, _streamUsage, true);
+        if (inReasoning) { inReasoning = false; return '\n</Thoughts>\n'; }
+        return null;
+    }
+
+    return createSSEStream(response, parser, abortSignal, onComplete, _logRequestId);
+}
+
+/**
+ * Parse OpenAI-compatible non-streaming response with reasoning support.
+ * Extracts reasoning_content (OpenAI/DeepSeek) and reasoning (OpenRouter) fields.
+ * @param {Object} data - parsed JSON response
+ * @returns {{ success: boolean, content: string }}
+ */
+function normalizeOpenAIMessageContent(content) {
+    if (typeof content === 'string') return content;
+    if (content == null) return '';
+    if (Array.isArray(content)) {
+        let out = '';
+        for (const part of content) {
+            if (typeof part === 'string') {
+                out += part;
+                continue;
+            }
+            if (!part || typeof part !== 'object') continue;
+            if (typeof part.text === 'string') {
+                out += part.text;
+                continue;
+            }
+            if (part.type === 'text' && typeof part.content === 'string') {
+                out += part.content;
+            }
+        }
+        return out;
+    }
+    return String(content);
+}
+
+function parseOpenAINonStreamingResponse(data, _requestId) {
+    const msg = data.choices?.[0]?.message;
+    if (!msg) return { success: false, content: '[OpenAI] Empty response (no message)' };
+    let out = '';
+    // reasoning_content: check both choice-level and message-level (RisuAI-main checks both)
+    const reasoningContent = data.choices?.[0]?.reasoning_content ?? msg.reasoning_content;
+    if (reasoningContent) {
+        out += '<Thoughts>\n' + String(reasoningContent) + '\n</Thoughts>\n';
+    }
+    // reasoning: OpenRouter specific field (only if reasoning_content wasn't already captured)
+    const openRouterReasoning = msg.reasoning ?? data.choices?.[0]?.reasoning;
+    if (openRouterReasoning && !reasoningContent) {
+        out += '<Thoughts>\n' + String(openRouterReasoning) + '\n</Thoughts>\n';
+    }
+    // DeepSeek reasoner: extract <think>...</think> from content (RisuAI-main deepSeekThinkingOutput)
+    let content = normalizeOpenAIMessageContent(msg.content);
+    if (content.includes('</think>')) {
+        let dsThinking = '';
+        content = content.replace(/<think>([\s\S]*?)<\/think>/gm, (m, p1) => {
+            dsThinking += p1;
+            return '';
+        });
+        if (dsThinking) {
+            out += '<Thoughts>\n' + dsThinking + '\n</Thoughts>\n';
+        }
+    }
+    out += content;
+    // Extract token usage for display
+    if (data.usage) {
+        _setTokenUsage(_requestId, _normalizeTokenUsage(data.usage, 'openai'), false);
+    }
+    return { success: !!out, content: out || '[OpenAI] Empty response' };
+}
+
+/**
+ * OpenAI Responses API SSE stream parser.
+ * Handles response.output_text.delta and response.reasoning_summary_text.delta events.
+ * Used for GPT-5.4+ models on GitHub Copilot /responses endpoint.
+ * @param {Response} response - fetch Response with streaming body
+ * @param {AbortSignal} [abortSignal] - optional abort signal
+ * @param {string} [_logRequestId] - optional API View request ID
+ */
+function createResponsesAPISSEStream(response, abortSignal, _logRequestId) {
+    let inReasoning = false;
+    let _streamUsage = null;
+
+    function parser(line) {
+        if (!line.startsWith('data:')) return null;
+        const jsonStr = line.slice(5).trim();
+        if (jsonStr === '[DONE]') return null;
+        try {
+            const obj = JSON.parse(jsonStr);
+            // Capture usage from response.completed event
+            if (obj.type === 'response.completed' && obj.response?.usage) {
+                _streamUsage = _normalizeTokenUsage(obj.response.usage, 'openai');
+            }
+            // Reasoning summary delta
+            if (obj.type === 'response.reasoning_summary_text.delta') {
+                let out = '';
+                if (!inReasoning) { inReasoning = true; out += '<Thoughts>\n'; }
+                out += obj.delta || '';
+                return out || null;
+            }
+            // Text content delta
+            if (obj.type === 'response.output_text.delta') {
+                let out = '';
+                if (inReasoning) { inReasoning = false; out += '\n</Thoughts>\n'; }
+                out += obj.delta || '';
+                return out || null;
+            }
+            return null;
+        } catch { return null; }
+    }
+
+    function onComplete() {
+        if (_streamUsage) _setTokenUsage(_logRequestId, _streamUsage, true);
+        if (inReasoning) { inReasoning = false; return '\n</Thoughts>\n'; }
+        return null;
+    }
+
+    return createSSEStream(response, parser, abortSignal, onComplete, _logRequestId);
+}
+
+/**
+ * Parse OpenAI Responses API non-streaming response.
+ * Extracts text from output[].content[].text and reasoning from output[].summary[].
+ * Used for GPT-5.4+ models on GitHub Copilot /responses endpoint.
+ * @param {Object} data - parsed JSON response
+ * @param {string} [_requestId] - optional API View request ID
+ * @returns {{ success: boolean, content: string }}
+ */
+function parseResponsesAPINonStreamingResponse(data, _requestId) {
+    if (!data || !data.output || !Array.isArray(data.output)) {
+        // Fallback: try parsing as standard OpenAI Chat Completions format
+        if (data?.choices?.[0]?.message) return parseOpenAINonStreamingResponse(data, _requestId);
+        return { success: false, content: '[Responses API] Empty response (no output)' };
+    }
+    let out = '';
+    for (const item of data.output) {
+        if (!item || typeof item !== 'object') continue;
+        // Reasoning output (thinking summary)
+        if (item.type === 'reasoning' && Array.isArray(item.summary)) {
+            const reasoningText = item.summary
+                .filter(s => s && s.type === 'summary_text')
+                .map(s => s.text || '')
+                .join('');
+            if (reasoningText) out += '<Thoughts>\n' + reasoningText + '\n</Thoughts>\n';
+        }
+        // Message output (main content)
+        if (item.type === 'message' && Array.isArray(item.content)) {
+            for (const part of item.content) {
+                if (!part || typeof part !== 'object') continue;
+                if (part.type === 'output_text') out += part.text || '';
+            }
+        }
+    }
+    // Extract token usage for display
+    if (data.usage) {
+        _setTokenUsage(_requestId, _normalizeTokenUsage(data.usage, 'openai'), false);
+    }
+    return { success: !!out, content: out || '[Responses API] Empty response' };
+}
+
+/**
  * Anthropic SSE parser: extracts delta.text from content_block_delta events.
  * Anthropic SSE format uses "event: ..." + "data: ..." pairs.
  * Enhanced with thinking/redacted_thinking support (LBI pre-36 reference).
  * @param {Response} response - fetch Response with streaming body
  * @param {AbortSignal} [abortSignal] - optional abort signal
- * @param {Object} [config] - { showThinking: boolean }
  */
-function createAnthropicSSEStream(response, abortSignal, config = {}, _logRequestId) {
+function createAnthropicSSEStream(response, abortSignal, _logRequestId) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
     let currentEvent = '';
     let thinking = false;
-    let showThinkingResolved = false; // lazy-init flag
     let _accumulatedContent = ''; // Accumulate parsed content for API View log
+    let _streamUsage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
 
     return new ReadableStream({
         async pull(controller) {
             try {
-                // Lazy-detect showThinking from global setting if caller didn't pass it
-                // (backward compat for sub-plugins calling CPM.createAnthropicSSEStream(res, signal))
-                if (!showThinkingResolved) {
-                    showThinkingResolved = true;
-                    if (config.showThinking === undefined) {
-                        try { config.showThinking = await safeGetBoolArg('cpm_streaming_show_thinking', false); }
-                        catch { config.showThinking = false; }
-                    }
-                }
                 while (true) {
                     if (abortSignal && abortSignal.aborted) {
+                        if (thinking) {
+                            const closeTag = '</Thoughts>\n\n';
+                            try { controller.enqueue(closeTag); _accumulatedContent += closeTag; } catch (_) { }
+                            thinking = false;
+                        }
+                        if (_streamUsage.input_tokens > 0 || _streamUsage.output_tokens > 0) {
+                            _setTokenUsage(_logRequestId, _normalizeTokenUsage(_streamUsage, 'anthropic'), true);
+                        }
                         reader.cancel();
                         if (_logRequestId) _updateApiRequest(_logRequestId, { response: _accumulatedContent || '(aborted)' });
                         controller.close();
@@ -2716,10 +3315,14 @@ function createAnthropicSSEStream(response, abortSignal, config = {}, _logReques
                     if (done) {
                         // Close any open thinking tag
                         if (thinking) {
-                            const closeTag = '\n</Thoughts>\n\n';
+                            const closeTag = '</Thoughts>\n\n';
                             controller.enqueue(closeTag);
                             _accumulatedContent += closeTag;
                             thinking = false;
+                        }
+                        // Store captured token usage for handleRequest
+                        if (_streamUsage.input_tokens > 0 || _streamUsage.output_tokens > 0) {
+                            _setTokenUsage(_logRequestId, _normalizeTokenUsage(_streamUsage, 'anthropic'), true);
                         }
                         if (_logRequestId) _updateApiRequest(_logRequestId, { response: _accumulatedContent || '(empty stream)' });
                         if (_accumulatedContent) console.log('[CupcakePM] 📥 Streamed Response Body (Anthropic):', _accumulatedContent);
@@ -2744,36 +3347,49 @@ function createAnthropicSSEStream(response, abortSignal, config = {}, _logReques
                                 if (currentEvent === 'content_block_delta') {
                                     let deltaText = '';
                                     // Thinking delta (Anthropic extended thinking)
+                                    // Always display thinking — RisuAI-main shows <Thoughts> unconditionally
                                     if (obj.delta?.type === 'thinking' || obj.delta?.type === 'thinking_delta') {
-                                        if (config.showThinking && obj.delta.thinking) {
+                                        if (obj.delta.thinking) {
                                             if (!thinking) {
                                                 thinking = true;
-                                                deltaText += '<Thoughts>\n\n';
+                                                deltaText += '<Thoughts>\n';
                                             }
                                             deltaText += obj.delta.thinking;
                                         }
                                     }
                                     // Redacted thinking
                                     else if (obj.delta?.type === 'redacted_thinking') {
-                                        if (config.showThinking) {
-                                            if (!thinking) {
-                                                thinking = true;
-                                                deltaText += '<Thoughts>\n';
-                                            }
-                                            deltaText += '\n[REDACTED]\n';
+                                        if (!thinking) {
+                                            thinking = true;
+                                            deltaText += '<Thoughts>\n';
                                         }
+                                        deltaText += '\n{{redacted_thinking}}\n';
                                     }
                                     // Regular text delta
                                     else if (obj.delta?.type === 'text_delta' || obj.delta?.type === 'text') {
                                         if (obj.delta.text) {
                                             if (thinking) {
                                                 thinking = false;
-                                                deltaText += '\n</Thoughts>\n\n';
+                                                deltaText += '</Thoughts>\n\n';
                                             }
                                             deltaText += obj.delta.text;
                                         }
                                     }
                                     if (deltaText) { controller.enqueue(deltaText); _accumulatedContent += deltaText; }
+                                }
+                                // Handle redacted_thinking from content_block_start
+                                // (Anthropic API sends redacted_thinking as a block, not as a delta)
+                                else if (currentEvent === 'content_block_start') {
+                                    if (obj.content_block?.type === 'redacted_thinking') {
+                                        let rt = '';
+                                        if (!thinking) {
+                                            thinking = true;
+                                            rt += '<Thoughts>\n';
+                                        }
+                                        rt += '\n{{redacted_thinking}}\n';
+                                        controller.enqueue(rt);
+                                        _accumulatedContent += rt;
+                                    }
                                 }
                                 // Handle errors
                                 else if (currentEvent === 'error' || obj.type === 'error') {
@@ -2782,11 +3398,30 @@ function createAnthropicSSEStream(response, abortSignal, config = {}, _logReques
                                     controller.enqueue(errText);
                                     _accumulatedContent += errText;
                                 }
+                                // Capture token usage from message_start and message_delta events
+                                if (currentEvent === 'message_start' && obj.message?.usage) {
+                                    _streamUsage.input_tokens = obj.message.usage.input_tokens || 0;
+                                    _streamUsage.cache_read_input_tokens = obj.message.usage.cache_read_input_tokens || 0;
+                                    _streamUsage.cache_creation_input_tokens = obj.message.usage.cache_creation_input_tokens || 0;
+                                }
+                                if (currentEvent === 'message_delta' && obj.usage) {
+                                    _streamUsage.output_tokens = obj.usage.output_tokens || 0;
+                                }
                             } catch { }
                         }
                     }
                 }
             } catch (e) {
+                // Close open <Thoughts> tag to prevent corrupted markdown output
+                if (thinking) {
+                    const closeTag = '</Thoughts>\n\n';
+                    try { controller.enqueue(closeTag); _accumulatedContent += closeTag; } catch (_) { }
+                    thinking = false;
+                }
+                // Store token usage even on abort/error so _tokenUsageStore doesn't leak
+                if (_streamUsage.input_tokens > 0 || _streamUsage.output_tokens > 0) {
+                    _setTokenUsage(_logRequestId, _normalizeTokenUsage(_streamUsage, 'anthropic'), true);
+                }
                 if (e.name !== 'AbortError') {
                     if (_logRequestId) _updateApiRequest(_logRequestId, { response: _accumulatedContent + `\n[Stream Error: ${e.message}]` });
                     controller.error(e);
@@ -2798,6 +3433,10 @@ function createAnthropicSSEStream(response, abortSignal, config = {}, _logReques
         },
         cancel() {
             if (_logRequestId) _updateApiRequest(_logRequestId, { response: _accumulatedContent || '(cancelled)' });
+            // Store token usage on cancel to prevent _tokenUsageStore leak
+            if (_streamUsage.input_tokens > 0 || _streamUsage.output_tokens > 0) {
+                _setTokenUsage(_logRequestId, _normalizeTokenUsage(_streamUsage, 'anthropic'), true);
+            }
             reader.cancel();
         }
     });
@@ -2814,10 +3453,13 @@ function createAnthropicSSEStream(response, abortSignal, config = {}, _logReques
 const ThoughtSignatureCache = {
     _cache: new Map(),
     _maxSize: 50,
+    _keyOf(responseText) {
+        const normalized = stripThoughtDisplayContent(stripInternalTags(String(responseText || '')) || '');
+        return normalized.substring(0, 500);
+    },
     save(responseText, signature) {
         if (!responseText || !signature) return;
-        // Use first 200 chars as key (sufficient for uniqueness)
-        const key = String(responseText).substring(0, 200);
+        const key = this._keyOf(responseText);
         this._cache.set(key, signature);
         // Evict oldest entries if cache grows too large
         if (this._cache.size > this._maxSize) {
@@ -2827,7 +3469,7 @@ const ThoughtSignatureCache = {
     },
     get(responseText) {
         if (!responseText) return null;
-        const key = String(responseText).substring(0, 200);
+        const key = this._keyOf(responseText);
         return this._cache.get(key) || null;
     },
     clear() { this._cache.clear(); }
@@ -2837,18 +3479,23 @@ const ThoughtSignatureCache = {
  * onComplete callback for streaming Gemini responses — saves extracted thought_signature.
  * Called after stream ends. The config._lastSignature is set during parseGeminiSSELine.
  */
-function saveThoughtSignatureFromStream(config) {
+function saveThoughtSignatureFromStream(config, _requestId) {
     let finalChunk = '';
     // Close unclosed thought block (edge case: stream ends during thought phase)
     if (config._inThoughtBlock) {
         config._inThoughtBlock = false;
-        finalChunk += '\n</Thoughts>\n\n';
+        finalChunk += '\n\n</Thoughts>\n\n';
     }
     // The signature was collected during streaming via config._lastSignature
     // The response text was accumulated by parseGeminiSSELine into config._streamResponseText
     if (config._lastSignature && config._streamResponseText) {
         ThoughtSignatureCache.save(config._streamResponseText, config._lastSignature);
         console.log('[CupcakePM] Thought signature extracted from stream and saved to cache.');
+    }
+    // Store captured Gemini token usage for handleRequest
+    if (config._streamUsageMetadata) {
+        const _usageReqId = _requestId || config._tokenUsageReqId;
+        _setTokenUsage(_usageReqId, _normalizeTokenUsage(config._streamUsageMetadata, 'gemini'), true);
     }
     return finalChunk || undefined;
 }
@@ -2868,7 +3515,7 @@ function parseGeminiSSELine(line, config = {}) {
         if (effectiveBlockReason && BLOCK_REASONS.includes(effectiveBlockReason)) {
             // Close unclosed thought block before returning error
             let blockMsg = '';
-            if (config._inThoughtBlock) { config._inThoughtBlock = false; blockMsg += '\n</Thoughts>\n\n'; }
+            if (config._inThoughtBlock) { config._inThoughtBlock = false; blockMsg += '\n\n</Thoughts>\n\n'; }
             return blockMsg + `\n\n[⚠️ Gemini Safety Block: ${effectiveBlockReason}] ${JSON.stringify(obj.promptFeedback || obj.candidates?.[0]?.safetyRatings || '').substring(0, 300)}`;
         }
 
@@ -2877,8 +3524,8 @@ function parseGeminiSSELine(line, config = {}) {
             for (const part of obj.candidates[0].content.parts) {
                 if (part.thought) {
                     // thought is a boolean flag — the actual thinking text is in part.text
-                    // Use <Thoughts> wrapping aligned with LBI pre36 format
-                    if (config.showThoughtsToken && part.text) {
+                    // Always display thinking — RisuAI-main shows <Thoughts> unconditionally
+                    if (part.text) {
                         if (!config._inThoughtBlock) {
                             config._inThoughtBlock = true;
                             text += '<Thoughts>\n\n';
@@ -2889,7 +3536,7 @@ function parseGeminiSSELine(line, config = {}) {
                     // Close thought block when transitioning from thought → content
                     if (config._inThoughtBlock) {
                         config._inThoughtBlock = false;
-                        text += '\n</Thoughts>\n\n';
+                        text += '\n\n</Thoughts>\n\n';
                     }
                     text += part.text;
                     // Accumulate non-thought response text for ThoughtSignatureCache key
@@ -2898,9 +3545,9 @@ function parseGeminiSSELine(line, config = {}) {
                     }
                 }
                 // thought_signature / thoughtSignature: extract and cache for subsequent requests
+                // Always overwrite so the last (most authoritative) signature wins, matching non-streaming behavior.
                 if (config.useThoughtSignature && (part.thought_signature || part.thoughtSignature)) {
-                    // Store signature temporarily for onComplete callback
-                    if (!config._lastSignature) config._lastSignature = part.thought_signature || part.thoughtSignature;
+                    config._lastSignature = part.thought_signature || part.thoughtSignature;
                 }
             }
         }
@@ -2908,7 +3555,12 @@ function parseGeminiSSELine(line, config = {}) {
         // Safety net: close thought block on finishReason (stream end)
         if (config._inThoughtBlock && finishReason) {
             config._inThoughtBlock = false;
-            text += '\n</Thoughts>\n\n';
+            text += '\n\n</Thoughts>\n\n';
+        }
+
+        // Capture usageMetadata for token usage display (last chunk has complete data)
+        if (obj.usageMetadata) {
+            config._streamUsageMetadata = obj.usageMetadata;
         }
 
         return text || null;
@@ -2923,7 +3575,7 @@ function parseGeminiSSELine(line, config = {}) {
  * @param {Object} config - { useThoughtSignature, showThoughtsToken }
  * @returns {{ success: boolean, content: string }}
  */
-function parseGeminiNonStreamingResponse(data, config = {}) {
+function parseGeminiNonStreamingResponse(data, config = {}, _requestId) {
     const blockReason = data?.promptFeedback?.blockReason
         ?? data?.candidates?.[0]?.finishReason;
     const BLOCK_REASONS = ['SAFETY', 'RECITATION', 'OTHER', 'BLOCKLIST', 'PROHIBITED_CONTENT', 'SPII'];
@@ -2939,13 +3591,13 @@ function parseGeminiNonStreamingResponse(data, config = {}) {
         for (const part of data.candidates[0].content.parts) {
             if (part.thought) {
                 // thought is a boolean flag — actual text is in part.text
-                if (config.showThoughtsToken && part.text) {
+                // Always display thinking — RisuAI-main shows <Thoughts> unconditionally
+                if (part.text) {
                     if (!inThought) { inThought = true; result += '<Thoughts>\n\n'; }
                     result += part.text;
                 }
-                // Skip thought text from main content when showThoughtsToken is off
             } else if (part.text !== undefined) {
-                if (inThought) { inThought = false; result += '\n</Thoughts>\n\n'; }
+                if (inThought) { inThought = false; result += '\n\n</Thoughts>\n\n'; }
                 result += part.text;
             }
             // Extract thought signature (snake_case + camelCase)
@@ -2956,14 +3608,18 @@ function parseGeminiNonStreamingResponse(data, config = {}) {
     }
 
     // Close unclosed thought block
-    if (inThought) result += '\n</Thoughts>\n\n';
+    if (inThought) result += '\n\n</Thoughts>\n\n';
 
     // Save extracted signature to cache if present
     if (extractedSignature && result) {
         ThoughtSignatureCache.save(result, extractedSignature);
     }
 
-    return { success: true, content: result };
+    // Extract token usage for display
+    if (data.usageMetadata) {
+        _setTokenUsage(_requestId, _normalizeTokenUsage(data.usageMetadata, 'gemini'), false);
+    }
+    return { success: !!result, content: result || '[Gemini] Empty response' };
 }
 
 /**
@@ -2974,7 +3630,7 @@ function parseGeminiNonStreamingResponse(data, config = {}) {
  * @param {Object} config - { showThinking }
  * @returns {{ success: boolean, content: string }}
  */
-function parseClaudeNonStreamingResponse(data, config = {}) {
+function parseClaudeNonStreamingResponse(data, config = {}, _requestId) {
     // Check for API-level error
     if (data.type === 'error' || data.error) {
         const errMsg = data.error?.message || data.message || JSON.stringify(data.error || data).substring(0, 500);
@@ -2986,27 +3642,30 @@ function parseClaudeNonStreamingResponse(data, config = {}) {
 
     if (Array.isArray(data.content)) {
         for (const block of data.content) {
+            // Always display thinking — RisuAI-main shows <Thoughts> unconditionally
             if (block.type === 'thinking') {
-                if (config.showThinking && block.thinking) {
-                    if (!inThinking) { inThinking = true; result += '<Thoughts>\n\n'; }
+                if (block.thinking) {
+                    if (!inThinking) { inThinking = true; result += '<Thoughts>\n'; }
                     result += block.thinking;
                 }
             } else if (block.type === 'redacted_thinking') {
-                if (config.showThinking) {
-                    if (!inThinking) { inThinking = true; result += '<Thoughts>\n\n'; }
-                    result += '\n[REDACTED]\n';
-                }
+                if (!inThinking) { inThinking = true; result += '<Thoughts>\n'; }
+                result += '\n{{redacted_thinking}}\n';
             } else if (block.type === 'text') {
-                if (inThinking) { inThinking = false; result += '\n</Thoughts>\n\n'; }
+                if (inThinking) { inThinking = false; result += '</Thoughts>\n\n'; }
                 result += block.text || '';
             }
         }
     }
 
     // Close unclosed thinking block
-    if (inThinking) result += '\n</Thoughts>\n\n';
+    if (inThinking) result += '</Thoughts>\n\n';
 
-    return { success: true, content: result };
+    // Extract token usage for display
+    if (data.usage) {
+        _setTokenUsage(_requestId, _normalizeTokenUsage(data.usage, 'anthropic'), false);
+    }
+    return { success: !!result, content: result || '[Claude] Empty response' };
 }
 
 /**
@@ -3015,12 +3674,27 @@ function parseClaudeNonStreamingResponse(data, config = {}) {
  */
 async function collectStream(stream) {
     const reader = stream.getReader();
+    const decoder = new TextDecoder();
     let result = '';
     while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        if (value) result += value;
+        if (value == null) continue;
+        if (typeof value === 'string') {
+            result += value;
+            continue;
+        }
+        if (value instanceof Uint8Array) {
+            result += decoder.decode(value, { stream: true });
+            continue;
+        }
+        if (value instanceof ArrayBuffer) {
+            result += decoder.decode(new Uint8Array(value), { stream: true });
+            continue;
+        }
+        result += String(value);
     }
+    result += decoder.decode();
     return result;
 }
 
@@ -3084,11 +3758,20 @@ async function checkStreamCapability() {
 // 3.7 COPILOT TOKEN AUTO-FETCH (for githubcopilot.com URLs)
 // ==========================================
 let _copilotTokenCache = { token: '', expiry: 0 };
+let _copilotTokenPromise = null;
 
 async function ensureCopilotApiToken() {
     // Return cached token if still valid (with 60s safety margin)
     if (_copilotTokenCache.token && Date.now() < _copilotTokenCache.expiry - 60000) {
         return _copilotTokenCache.token;
+    }
+    // Single-flight: prevent parallel duplicate token exchange requests
+    if (_copilotTokenPromise) {
+        try {
+            return await _copilotTokenPromise;
+        } catch {
+            return '';
+        }
     }
     // Read GitHub OAuth token from stored arg
     const githubToken = await safeGetArg('tools_githubCopilotToken');
@@ -3099,7 +3782,7 @@ async function ensureCopilotApiToken() {
     // Sanitize token (strip non-ASCII)
     const cleanToken = githubToken.replace(/[^\x20-\x7E]/g, '').trim();
     if (!cleanToken) return '';
-    try {
+    _copilotTokenPromise = (async () => {
         console.log('[Cupcake PM] Copilot: Exchanging OAuth token for API token...');
         const res = await smartNativeFetch('https://api.github.com/copilot_internal/v2/token', {
             method: 'GET',
@@ -3127,9 +3810,15 @@ async function ensureCopilotApiToken() {
         window._cpmCopilotApiToken = data.token;
         console.log('[Cupcake PM] Copilot: API token obtained, expires in', Math.round((expiryMs - Date.now()) / 60000), 'min');
         return data.token;
+    })();
+
+    try {
+        return await _copilotTokenPromise;
     } catch (e) {
         console.error('[Cupcake PM] Copilot token exchange error:', e.message);
         return '';
+    } finally {
+        _copilotTokenPromise = null;
     }
 }
 
@@ -3138,6 +3827,10 @@ async function ensureCopilotApiToken() {
 // ==========================================
 
 async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {}, abortSignal, _reqId) {
+    // Guard: empty URL
+    if (!config.url || !config.url.trim()) {
+        return { success: false, content: '[Cupcake PM] Base URL is required. Configure it in PM settings.' };
+    }
     // Defensive: deep-sanitize messages (null filter + tag strip + role validation)
     const messages = sanitizeMessages(messagesRaw);
     const format = config.format || 'openai';
@@ -3153,6 +3846,11 @@ async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {}, abor
         formattedMessages = geminiContents;
         systemPrompt = geminiSys.length > 0 ? geminiSys.join('\n\n') : '';
     } else { // Default to OpenAI
+        const modelId = String(config.model || '');
+        // BUG-A3 FIX: o-series (o1, o3, o4) also need developer role
+        // Also handle slash-prefixed model IDs (e.g., openai/o3-mini, openai/gpt-5)
+        // BUG-5 FIX: Exclude o1-preview/o1-mini which lack DeveloperRole support
+        config.developerRole = /(?:^|\/)(?:gpt-5|o[2-9]|o1(?!-(?:preview|mini)))/i.test(modelId);
         formattedMessages = formatToOpenAI(messages, config);
     }
 
@@ -3182,7 +3880,8 @@ async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {}, abor
     };
 
     // max_tokens vs max_completion_tokens: newer OpenAI models require max_completion_tokens
-    const _needsMCT = (model) => { if (!model) return false; return /^(gpt-5|o[1-9])/i.test(model); };
+    // Match only gpt-4.5, gpt-5 (all variants), and o-series (align with RisuAI-main OAICompletionTokens models)
+    const _needsMCT = (model) => { if (!model) return false; return /(?:^|\/)(?:gpt-(?:4\.5|5)|o[1-9])/i.test(model); };
     if (format === 'openai' && _needsMCT(config.model)) {
         body.max_completion_tokens = maxTokens;
     } else {
@@ -3192,6 +3891,7 @@ async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {}, abor
     if (args.top_k !== undefined && args.top_k !== null) body.top_k = args.top_k;
     if (args.frequency_penalty !== undefined && args.frequency_penalty !== null) body.frequency_penalty = args.frequency_penalty;
     if (args.presence_penalty !== undefined && args.presence_penalty !== null) body.presence_penalty = args.presence_penalty;
+    if (args.min_p !== undefined && args.min_p !== null) body.min_p = args.min_p;
     // repetition_penalty: Only include for OpenAI-compatible APIs.
     // Anthropic and Google APIs do not support this parameter — it causes 400 errors
     // (especially on Copilot /v1/messages which rejects "Extra inputs").
@@ -3199,22 +3899,40 @@ async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {}, abor
         body.repetition_penalty = args.repetition_penalty;
     }
 
+    // BUG-A1 FIX: Strip unsupported params for Anthropic format.
+    // Anthropic API only accepts temperature, top_p, top_k — not frequency/presence penalty or min_p.
+    // Sending extra fields causes 400 "Extra inputs are not permitted" (especially on Copilot /v1/messages).
     if (format === 'anthropic') {
+        delete body.frequency_penalty;
+        delete body.presence_penalty;
+        delete body.min_p;
+        delete body.top_k; // re-add conditionally below if provided
         body.messages = formattedMessages;
         if (systemPrompt) body.system = systemPrompt;
+        // Re-add top_k for Anthropic (it IS supported)
+        if (args.top_k !== undefined && args.top_k !== null) body.top_k = args.top_k;
 
         // Anthropic Adaptive Thinking Effort (effort 드롭다운)
-        const effortVal = config.effort && config.effort !== 'none' ? config.effort : null;
-        if (effortVal) {
-            if (effortVal === 'unspecified') {
-                // 미지정: adaptive thinking 활성화, effort 지정 안함
-                body.thinking = { type: 'adaptive' };
-            } else {
-                // low / medium / high / max
-                body.thinking = { type: 'adaptive' };
-                body.output_config = { effort: effortVal };
+        // + 커스텀 모델 호환: thinking='adaptive'만 들어와도 adaptive를 활성화
+        const effortRaw = String(config.effort || '').trim().toLowerCase();
+        const thinkingMode = String(config.thinking || config.thinking_level || '').trim().toLowerCase();
+        const useAdaptiveThinking = (effortRaw && effortRaw !== 'none') || thinkingMode === 'adaptive';
+        if (useAdaptiveThinking) {
+            body.thinking = { type: 'adaptive' };
+            let adaptiveEffort = '';
+            if (['low', 'medium', 'high', 'max'].includes(effortRaw)) {
+                adaptiveEffort = effortRaw;
+            } else if (thinkingMode === 'adaptive') {
+                adaptiveEffort = 'high';
             }
+            if (adaptiveEffort) {
+                body.output_config = { effort: adaptiveEffort };
+            }
+            body.max_tokens = Math.max(body.max_tokens || 0, 16000);
+            // Anthropic rejects temperature/top_k/top_p when adaptive thinking is enabled
             delete body.temperature;
+            delete body.top_k;
+            delete body.top_p;
         } else {
             // Check explicit thinkingBudget first (new numeric field), then fall back to thinking_level
             const explicitBudget = config.thinkingBudget || 0;
@@ -3223,7 +3941,10 @@ async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {}, abor
             if (budget > 0) {
                 body.thinking = { type: 'enabled', budget_tokens: budget };
                 if (!body.max_tokens || body.max_tokens <= budget) body.max_tokens = budget + 4096;
+                // Anthropic rejects temperature/top_k/top_p when thinking is enabled
                 delete body.temperature;
+                delete body.top_k;
+                delete body.top_p;
             }
         }
     } else if (format === 'google') {
@@ -3239,8 +3960,8 @@ async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {}, abor
         const _thinkBudgetForGemini = config.thinkingBudget || undefined;
         const _thinkCfg = buildGeminiThinkingConfig(config.model, config.thinking_level, _thinkBudgetForGemini, _isVertexEndpoint);
         if (_thinkCfg) body.generationConfig.thinkingConfig = _thinkCfg;
-        // Add safety settings (all categories OFF, aligned with LBI pre36)
-        body.safetySettings = getGeminiSafetySettings();
+        // Add safety settings (model-aware OFF vs BLOCK_NONE, aligned with RisuAI-main)
+        body.safetySettings = getGeminiSafetySettings(config.model);
         // Validate and clamp parameters
         validateGeminiParams(body.generationConfig);
         // Strip unsupported params for experimental models
@@ -3251,6 +3972,9 @@ async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {}, abor
         delete body.top_k;
         delete body.frequency_penalty;
         delete body.presence_penalty;
+        delete body.min_p;
+        delete body.max_completion_tokens;
+        delete body.model; // Google API specifies model in URL, not body
     } else { // OpenAI compatible
         body.messages = formattedMessages;
     }
@@ -3303,10 +4027,26 @@ async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {}, abor
         }
     }
 
+    // o3/o4 family: ALWAYS strip sampling params — these models only accept reasoning_effort.
+    // Must run OUTSIDE the reasoning condition to handle cases where reasoning is not configured.
+    // RisuAI-main: o3/o4 parameter list is ['reasoning_effort'] only — no temp/top_p/freq/pres.
+    if (format === 'openai') {
+        const _modelStr = String(config.model || '').toLowerCase();
+        if (shouldStripOpenAISamplingParams(_modelStr)) {
+            delete body.temperature;
+            delete body.top_p;
+            delete body.frequency_penalty;
+            delete body.presence_penalty;
+            delete body.min_p;
+            delete body.repetition_penalty;
+        }
+    }
+
     if (config.reasoning && config.reasoning !== 'none') {
         if (format === 'openai') {
-            body.reasoning_effort = config.reasoning;
-            delete body.temperature;
+            if (supportsOpenAIReasoningEffort(config.model)) {
+                body.reasoning_effort = config.reasoning;
+            }
         }
         // Anthropic and Google have their own thinking/budget params, not directly mapped here
     }
@@ -3350,10 +4090,66 @@ async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {}, abor
         console.log('[Cupcake PM] Copilot + Anthropic format detected → URL auto-switched to /v1/messages');
     }
 
+    // Copilot + Responses API: GPT-5.4+ models use /responses endpoint instead of /chat/completions.
+    // Custom override: responsesMode = auto | on | off
+    // - auto: detect via Copilot+GPT-5.4+ OR manual /responses URL
+    // - on: force Responses API (for Copilot URL or manual /responses URL)
+    // - off: disable Responses API even if auto-detection matches
+    const _responsesMode = String(config.responsesMode || 'auto').toLowerCase();
+    const _responsesForceOn = _responsesMode === 'on' || _responsesMode === 'force' || _responsesMode === 'always';
+    const _responsesForceOff = _responsesMode === 'off' || _responsesMode === 'disable' || _responsesMode === 'disabled';
+    const _isManualResponsesEndpoint = !!(config.url && /\/responses(?:\?|$)/.test(config.url));
+    const _isCopilotDomain = !!(config.url && config.url.includes('githubcopilot.com'));
+    const _canUseResponsesByUrl = _isManualResponsesEndpoint || _isCopilotDomain;
+    const _autoResponsesMatch = _isManualResponsesEndpoint || (_isCopilotDomain && _needsCopilotResponsesAPI(config.model));
+    const _useResponsesAPI = !!(format === 'openai' && !_responsesForceOff && _canUseResponsesByUrl && (_responsesForceOn || _autoResponsesMatch));
+    if (_useResponsesAPI) {
+        // Auto-switch only for Copilot domain (manual /responses URL is kept as-is).
+        if (_isCopilotDomain && !_isManualResponsesEndpoint && (_responsesForceOn || _needsCopilotResponsesAPI(config.model))) {
+            const _copilotBase = (config.url.match(/https:\/\/[^/]+/) || ['https://api.githubcopilot.com'])[0];
+            effectiveUrl = `${_copilotBase}/responses`;
+        }
+
+        // Convert body: messages → input (Responses API format)
+        if (body.messages) {
+            body.input = body.messages;
+            delete body.messages;
+        }
+
+        // max_completion_tokens / max_tokens → max_output_tokens (Responses API field name)
+        if (body.max_completion_tokens) {
+            body.max_output_tokens = body.max_completion_tokens;
+            delete body.max_completion_tokens;
+        } else if (body.max_tokens) {
+            body.max_output_tokens = body.max_tokens;
+            delete body.max_tokens;
+        }
+
+        // reasoning_effort → reasoning.effort (Responses API nests inside reasoning object)
+        if (body.reasoning_effort) {
+            body.reasoning = { effort: body.reasoning_effort, summary: 'auto' };
+            delete body.reasoning_effort;
+        }
+
+        // Remove fields not supported by Responses API
+        delete body.stream_options;
+        delete body.prompt_cache_retention;
+
+        console.log(`[Cupcake PM] Copilot + Responses API detected (model=${config.model}) → URL=${effectiveUrl}`);
+    }
+    // Also detect manually-set /responses URL (user explicitly typed it)
+    const _isResponsesEndpoint = _useResponsesAPI || (effectiveUrl && /\/responses(?:\?|$)/.test(effectiveUrl));
+
     // --- Wrap core fetch logic to support key rotation ---
     const _doCustomFetch = async (_apiKey) => {
 
         const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_apiKey}` };
+        // BUG-A6 FIX: Direct Anthropic API uses x-api-key header, not Authorization: Bearer
+        // Only apply when URL points to api.anthropic.com (not proxies/Copilot which use Bearer)
+        if (format === 'anthropic' && effectiveUrl && effectiveUrl.includes('api.anthropic.com')) {
+            delete headers['Authorization'];
+            headers['x-api-key'] = _apiKey;
+        }
         // Copilot auto-detection: if URL is githubcopilot.com, auto-fetch API token + attach Copilot headers
         // Header set aligned with LBI pre36 Utils.applyGithubCopilotHeaders()
         if (effectiveUrl && effectiveUrl.includes('githubcopilot.com')) {
@@ -3397,13 +4193,32 @@ async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {}, abor
                 headers['anthropic-version'] = '2023-06-01';
             }
 
-            // Copilot-Vision-Request header: detect vision content in messages
+            // Copilot-Vision-Request header: detect vision content in messages/input
             // OpenAI format uses 'image_url', Anthropic format uses 'image'
-            const hasVisionContent = body.messages && body.messages.some(m =>
+            const _visionMsgArr = body.messages || body.input || [];
+            const hasVisionContent = _visionMsgArr.some(m =>
                 Array.isArray(m?.content) && m.content.some(p => p.type === 'image_url' || p.type === 'image')
             );
             if (hasVisionContent) {
                 headers['Copilot-Vision-Request'] = 'true';
+            }
+        }
+
+        // BUG-C3 FIX: Add Anthropic beta headers for fetchCustom (Anthropic format)
+        // Aligned with native anthropic.ts — output-128k beta required when max_tokens > 8192
+        // NOTE: Copilot /v1/messages does NOT support anthropic-beta headers — skip for Copilot URLs.
+        if (format === 'anthropic') {
+            const _isCopilotAnthropic = !!(effectiveUrl && effectiveUrl.includes('githubcopilot.com'));
+            if (!_isCopilotAnthropic) {
+                const _anthropicBetas = [];
+                const _effectiveMaxTokens = body.max_tokens || maxTokens || 0;
+                if (_effectiveMaxTokens > 8192) _anthropicBetas.push('output-128k-2025-02-19');
+                if (_anthropicBetas.length > 0) {
+                    headers['anthropic-beta'] = _anthropicBetas.join(',');
+                }
+                // Anthropic direct API requires anthropic-version header
+                headers['anthropic-version'] = '2023-06-01';
+                headers['anthropic-dangerous-direct-browser-access'] = 'true';
             }
         }
 
@@ -3436,6 +4251,15 @@ async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {}, abor
             } else {
                 // OpenAI-compatible
                 streamBody.stream = true;
+                // Responses API: do NOT add stream_options (uses different event format)
+                if (!_isResponsesEndpoint) {
+                    // BUG-D1 FIX: Only request usage data when token display is enabled.
+                    // Some third-party OpenAI-compatible APIs reject unknown stream_options with 400.
+                    const _wantStreamUsage = await safeGetBoolArg('cpm_show_token_usage', false);
+                    if (_wantStreamUsage) {
+                        streamBody.stream_options = { include_usage: true };
+                    }
+                }
             }
 
             // Use safeStringify → sanitizeBodyJSON for final safety
@@ -3451,8 +4275,8 @@ async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {}, abor
             const res = await smartNativeFetch(streamUrl, {
                 method: 'POST',
                 headers,
-                body: finalBody
-                // NOTE: signal: abortSignal removed — AbortSignal can't cross V3 iframe bridge (postMessage structured clone)
+                body: finalBody,
+                signal: abortSignal
             });
 
             if (_reqId) _updateApiRequest(_reqId, { status: res.status });
@@ -3466,13 +4290,16 @@ async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {}, abor
             if (_reqId) _updateApiRequest(_reqId, { response: '(streaming…)' });
 
             if (format === 'anthropic') {
-                const showThinking = await safeGetBoolArg('cpm_streaming_show_thinking', false);
-                return { success: true, content: createAnthropicSSEStream(res, abortSignal, { showThinking }, _reqId) };
+                return { success: true, content: createAnthropicSSEStream(res, abortSignal, _reqId) };
             } else if (format === 'google') {
-                const _onComplete = () => saveThoughtSignatureFromStream(config);
+                config._tokenUsageReqId = _reqId;
+                const _onComplete = () => saveThoughtSignatureFromStream(config, _reqId);
                 return { success: true, content: createSSEStream(res, (line) => parseGeminiSSELine(line, config), abortSignal, _onComplete, _reqId) };
+            } else if (_isResponsesEndpoint) {
+                // Responses API (GPT-5.4+ on Copilot) — different SSE event format
+                return { success: true, content: createResponsesAPISSEStream(res, abortSignal, _reqId) };
             } else {
-                return { success: true, content: createSSEStream(res, parseOpenAISSELine, abortSignal, null, _reqId) };
+                return { success: true, content: createOpenAISSEStream(res, abortSignal, _reqId) };
             }
         }
 
@@ -3489,8 +4316,8 @@ async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {}, abor
         const res = await smartNativeFetch(effectiveUrl, {
             method: 'POST',
             headers,
-            body: _nonStreamBody
-            // NOTE: signal: abortSignal removed — AbortSignal can't cross V3 iframe bridge (postMessage structured clone)
+            body: _nonStreamBody,
+            signal: abortSignal
         });
 
         if (_reqId) _updateApiRequest(_reqId, { status: res.status });
@@ -3517,14 +4344,15 @@ async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {}, abor
 
         if (format === 'anthropic') {
             // Use unified non-streaming Claude parser (thinking/redacted_thinking support)
-            let showThinking = false;
-            try { showThinking = await safeGetBoolArg('cpm_streaming_show_thinking', false); } catch { }
-            return parseClaudeNonStreamingResponse(data, { showThinking });
+            return parseClaudeNonStreamingResponse(data, {}, _reqId);
         } else if (format === 'google') {
             // Use unified non-streaming Gemini parser (safety block, <Thoughts>, thought_signature)
-            return parseGeminiNonStreamingResponse(data, config);
+            return parseGeminiNonStreamingResponse(data, config, _reqId);
+        } else if (_isResponsesEndpoint) {
+            // Responses API (GPT-5.4+ on Copilot) — different response structure
+            return parseResponsesAPINonStreamingResponse(data, _reqId);
         } else { // OpenAI compatible
-            return { success: true, content: data.choices?.[0]?.message?.content || '' };
+            return parseOpenAINonStreamingResponse(data, _reqId);
         }
     }; // end _doCustomFetch
 
@@ -3549,6 +4377,42 @@ async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {}, abor
 // 4. MAIN ROUTER
 // ==========================================
 
+function _toFiniteFloat(v) {
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : undefined;
+}
+
+function _toFiniteInt(v) {
+    const n = parseInt(v);
+    return Number.isFinite(n) ? n : undefined;
+}
+
+function supportsOpenAIReasoningEffort(modelName) {
+    if (!modelName) return false;
+    const m = String(modelName).toLowerCase();
+    if (/(?:^|\/)o(?:3(?:-mini|-pro|-deep-research)?|4-mini(?:-deep-research)?)$/i.test(m)) return true;
+    return /(?:^|\/)gpt-5(?:\.\d+)?(?:-(?:mini|nano))?(?:-\d{4}-\d{2}-\d{2})?$/i.test(m);
+}
+
+/**
+ * Detect models that require the OpenAI Responses API on GitHub Copilot.
+ * GPT-5.4+ models use /responses endpoint instead of /chat/completions on Copilot.
+ */
+function _needsCopilotResponsesAPI(modelName) {
+    if (!modelName) return false;
+    const m = String(modelName).toLowerCase();
+    // Match gpt-5.N where N >= 4 (gpt-5.4, gpt-5.5, etc.)
+    const match = m.match(/(?:^|\/)gpt-5\.(\d+)/);
+    if (match && parseInt(match[1]) >= 4) return true;
+    return false;
+}
+
+function shouldStripOpenAISamplingParams(modelName) {
+    if (!modelName) return false;
+    // RisuAI-main: o3/o4 family is reasoning_effort-only. o1 family keeps OpenAIParameters.
+    return /(?:^|\/)o(?:3(?:-mini|-pro|-deep-research)?|4-mini(?:-deep-research)?)$/i.test(String(modelName).toLowerCase());
+}
+
 async function fetchByProviderId(modelDef, args, abortSignal, _reqId) {
     // Use ?? (nullish coalescing) not || for numeric fallbacks to preserve 0 values
     const cpmFallbackTemp = await safeGetArg('cpm_fallback_temp');
@@ -3557,13 +4421,24 @@ async function fetchByProviderId(modelDef, args, abortSignal, _reqId) {
     const cpmFallbackFreqPen = await safeGetArg('cpm_fallback_freq_pen');
     const cpmFallbackPresPen = await safeGetArg('cpm_fallback_pres_pen');
 
-    const temp = args.temperature ?? (cpmFallbackTemp !== '' ? parseFloat(cpmFallbackTemp) : 0.7);
-    const maxTokens = args.max_tokens ?? (cpmFallbackMaxTokens !== '' ? parseInt(cpmFallbackMaxTokens) : undefined);
+    const fallbackTemp = cpmFallbackTemp !== '' ? _toFiniteFloat(cpmFallbackTemp) : undefined;
+    const fallbackMaxTokens = cpmFallbackMaxTokens !== '' ? _toFiniteInt(cpmFallbackMaxTokens) : undefined;
+    const temp = args.temperature ?? (fallbackTemp ?? 0.7);
+    const maxTokens = args.max_tokens ?? fallbackMaxTokens;
 
     // Apply CPM global fallbacks for optional params (only when RisuAI didn't provide them)
-    if (args.top_p === undefined && cpmFallbackTopP !== '') args.top_p = parseFloat(cpmFallbackTopP);
-    if (args.frequency_penalty === undefined && cpmFallbackFreqPen !== '') args.frequency_penalty = parseFloat(cpmFallbackFreqPen);
-    if (args.presence_penalty === undefined && cpmFallbackPresPen !== '') args.presence_penalty = parseFloat(cpmFallbackPresPen);
+    if (args.top_p === undefined && cpmFallbackTopP !== '') {
+        const n = _toFiniteFloat(cpmFallbackTopP);
+        if (n !== undefined) args.top_p = n;
+    }
+    if (args.frequency_penalty === undefined && cpmFallbackFreqPen !== '') {
+        const n = _toFiniteFloat(cpmFallbackFreqPen);
+        if (n !== undefined) args.frequency_penalty = n;
+    }
+    if (args.presence_penalty === undefined && cpmFallbackPresPen !== '') {
+        const n = _toFiniteFloat(cpmFallbackPresPen);
+        if (n !== undefined) args.presence_penalty = n;
+    }
 
     const rawChat = args.prompt_chat;
     const messages = sanitizeMessages(rawChat);
@@ -3572,7 +4447,7 @@ async function fetchByProviderId(modelDef, args, abortSignal, _reqId) {
         // Dynamic provider lookup from registered sub-plugins
         const fetcher = customFetchers[modelDef.provider];
         if (fetcher) {
-            return await fetcher(modelDef, messages, temp, maxTokens, args, abortSignal);
+            return await fetcher(modelDef, messages, temp, maxTokens, args, abortSignal, _reqId);
         }
 
         // Custom Models Manager (built-in)
@@ -3586,6 +4461,7 @@ async function fetchByProviderId(modelDef, args, abortSignal, _reqId) {
                 sysfirst: !!cDef.sysfirst, altrole: !!cDef.altrole,
                 mustuser: !!cDef.mustuser, maxout: !!cDef.maxout, mergesys: !!cDef.mergesys,
                 reasoning: cDef.reasoning || 'none', verbosity: cDef.verbosity || 'none',
+                responsesMode: cDef.responsesMode || 'auto',
                 thinking_level: cDef.thinking || 'none', tok: cDef.tok || 'o200k_base',
                 thinkingBudget: parseInt(cDef.thinkingBudget) || 0,
                 promptCacheRetention: cDef.promptCacheRetention || 'none',
@@ -3603,6 +4479,11 @@ async function fetchByProviderId(modelDef, args, abortSignal, _reqId) {
 }
 
 async function handleRequest(args, activeModelDef, abortSignal) {
+    args = (args && typeof args === 'object') ? args : {};
+    if (!activeModelDef || typeof activeModelDef !== 'object' || !activeModelDef.provider) {
+        return { success: false, content: '[Cupcake PM] Invalid model selection.' };
+    }
+
     // V3 forces args.mode='v3', so we infer the slot from CPM's own slot config.
     // Pass args so inferSlot can use prompt content heuristics when models collide.
     const slot = await inferSlot(activeModelDef, args);
@@ -3623,14 +4504,38 @@ async function handleRequest(args, activeModelDef, abortSignal) {
         const freqPen = await safeGetArg(`cpm_slot_${slot}_freq_pen`);
         const presPen = await safeGetArg(`cpm_slot_${slot}_pres_pen`);
 
-        if (maxOut !== '') args.max_tokens = parseInt(maxOut);
-        if (maxCtx !== '') args.max_context_tokens = parseInt(maxCtx);
-        if (slotTemp !== '') args.temperature = parseFloat(slotTemp);
-        if (topP !== '') args.top_p = parseFloat(topP);
-        if (topK !== '') args.top_k = parseInt(topK);
-        if (repPen !== '') args.repetition_penalty = parseFloat(repPen);
-        if (freqPen !== '') args.frequency_penalty = parseFloat(freqPen);
-        if (presPen !== '') args.presence_penalty = parseFloat(presPen);
+        if (maxOut !== '') {
+            const n = _toFiniteInt(maxOut);
+            if (n !== undefined) args.max_tokens = n;
+        }
+        if (maxCtx !== '') {
+            const n = _toFiniteInt(maxCtx);
+            if (n !== undefined) args.max_context_tokens = n;
+        }
+        if (slotTemp !== '') {
+            const n = _toFiniteFloat(slotTemp);
+            if (n !== undefined) args.temperature = n;
+        }
+        if (topP !== '') {
+            const n = _toFiniteFloat(topP);
+            if (n !== undefined) args.top_p = n;
+        }
+        if (topK !== '') {
+            const n = _toFiniteInt(topK);
+            if (n !== undefined) args.top_k = n;
+        }
+        if (repPen !== '') {
+            const n = _toFiniteFloat(repPen);
+            if (n !== undefined) args.repetition_penalty = n;
+        }
+        if (freqPen !== '') {
+            const n = _toFiniteFloat(freqPen);
+            if (n !== undefined) args.frequency_penalty = n;
+        }
+        if (presPen !== '') {
+            const n = _toFiniteFloat(presPen);
+            if (n !== undefined) args.presence_penalty = n;
+        }
     }
 
     // === Centralized API Request Logging (covers ALL providers, not just Custom Models) ===
@@ -3656,20 +4561,40 @@ async function handleRequest(args, activeModelDef, abortSignal) {
         throw e;
     }
 
+    // Normalize malformed provider returns to prevent logger/runtime crashes.
+    if (!result || typeof result !== 'object') {
+        result = { success: false, content: `[Cupcake PM Error] Invalid provider result type: ${typeof result}` };
+    }
+    if (typeof result.success !== 'boolean') {
+        result.success = !!result.success;
+    }
+    if (result.content == null) {
+        result.content = '';
+    }
+
     _updateApiRequest(_reqId, {
         duration: Date.now() - _startTime,
         status: result.success ? (result._status || 200) : (result._status || 'error')
     });
 
+    // === Token Usage Display ===
+    // For non-streaming: parsers store usage keyed by request id.
+    // Read and clear it immediately. Streaming usage is handled in stream flush/fallback paths.
+    const _nonStreamTokenUsage = _takeTokenUsage(_reqId, false);
+    const _showTokens = await safeGetBoolArg('cpm_show_token_usage', false);
+
     // === Response logging: console.log (iframe) + Risu.log (HOST console — always visible) ===
     const _logResponse = (contentStr, prefix = '📥 Response') => {
+        const safeContent = typeof contentStr === 'string'
+            ? contentStr
+            : (contentStr == null ? '' : String(contentStr));
         // Don't overwrite response if _doCustomFetch already enriched it with raw HTTP response
         const _existing = _apiRequestHistory.get(_reqId);
         if (!_existing?.response || _existing.response === null || _existing.response === '(streaming…)') {
-            _updateApiRequest(_reqId, { response: contentStr.substring(0, 4000) });
+            _updateApiRequest(_reqId, { response: safeContent.substring(0, 4000) });
         }
-        console.log(`[CupcakePM] ${prefix} (${_displayName}):`, contentStr.substring(0, 2000));
-        try { Risu.log(`${prefix} (${_displayName}): ${contentStr.substring(0, 500)}`); } catch {}
+        console.log(`[CupcakePM] ${prefix} (${_displayName}):`, safeContent.substring(0, 2000));
+        try { Risu.log(`${prefix} (${_displayName}): ${safeContent.substring(0, 500)}`); } catch {}
     };
 
     // Streaming pass-through: conditionally return ReadableStream to RisuAI
@@ -3681,14 +4606,28 @@ async function handleRequest(args, activeModelDef, abortSignal) {
             if (bridgeCapable) {
                 // Wrap stream with logging TransformStream before returning to RisuAI
                 const _chunks = [];
+                const _streamDecoder = new TextDecoder();
+                const _streamStartTime = _startTime; // Capture for closure
+                const _streamModelName = _displayName;
+                const _streamShowTokens = _showTokens;
                 result.content = result.content.pipeThrough(new TransformStream({
                     transform(chunk, controller) {
                         _chunks.push(chunk);
                         controller.enqueue(chunk);
                     },
                     flush() {
-                        const full = _chunks.join('');
+                        const full = _chunks.map((c) => {
+                            if (typeof c === 'string') return c;
+                            if (c instanceof Uint8Array) return _streamDecoder.decode(c, { stream: true });
+                            if (c instanceof ArrayBuffer) return _streamDecoder.decode(new Uint8Array(c), { stream: true });
+                            return String(c ?? '');
+                        }).join('') + _streamDecoder.decode();
                         _logResponse(full, '📥 Streamed Response');
+                        // Always drain stream token usage from store to prevent memory leak
+                        const streamUsage = _takeTokenUsage(_reqId, true);
+                        if (_streamShowTokens && streamUsage) {
+                            _showTokenUsageToast(_streamModelName, streamUsage, Date.now() - _streamStartTime);
+                        }
                     }
                 }));
                 console.log('[Cupcake PM] ✓ Streaming: returning ReadableStream to RisuAI');
@@ -3696,16 +4635,39 @@ async function handleRequest(args, activeModelDef, abortSignal) {
                 console.warn('[Cupcake PM] ⚠ Streaming enabled but V3 bridge cannot transfer ReadableStream. Falling back to collected string.');
                 result.content = await collectStream(result.content);
                 _logResponse(result.content);
+                // Always drain stream token usage from store to prevent memory leak
+                const _collectedUsage = _takeTokenUsage(_reqId, true);
+                if (_showTokens && _collectedUsage) {
+                    _showTokenUsageToast(_displayName, _collectedUsage, Date.now() - _startTime);
+                }
             }
         } else {
             // Streaming disabled — always collect to string (original behavior)
             result.content = await collectStream(result.content);
             _logResponse(result.content);
+            // Always drain stream token usage from store to prevent memory leak
+            const _collectedUsage2 = _takeTokenUsage(_reqId, true);
+            if (_showTokens && _collectedUsage2) {
+                _showTokenUsageToast(_displayName, _collectedUsage2, Date.now() - _startTime);
+            }
         }
     } else if (result) {
         // Non-streaming result
-        const contentStr = typeof result.content === 'string' ? result.content : JSON.stringify(result.content);
+        const contentStr = typeof result.content === 'string'
+            ? result.content
+            : (() => {
+                try {
+                    const s = JSON.stringify(result.content);
+                    return s == null ? String(result.content) : s;
+                } catch {
+                    return String(result.content);
+                }
+            })();
         _logResponse(contentStr);
+        // Token usage toast for non-streaming responses
+        if (_showTokens && _nonStreamTokenUsage) {
+            _showTokenUsageToast(_displayName, _nonStreamTokenUsage, Date.now() - _startTime);
+        }
     }
 
     return result;
@@ -3772,11 +4734,13 @@ function _exposeScopeToWindow() {
         sanitizeMessages, stripInternalTags, safeStringify, sanitizeBodyJSON,
         isDynamicFetchEnabled, inferSlot, buildGeminiThinkingConfig,
         formatToOpenAI, formatToAnthropic, formatToGemini,
-        createSSEStream, parseOpenAISSELine, createAnthropicSSEStream, parseGeminiSSELine,
+        createSSEStream, parseOpenAISSELine, createOpenAISSEStream, createResponsesAPISSEStream, createAnthropicSSEStream, parseGeminiSSELine,
         collectStream, checkStreamCapability, ensureCopilotApiToken,
         getGeminiSafetySettings, validateGeminiParams, isExperimentalGeminiModel,
         cleanExperimentalModelParams, stripThoughtDisplayContent,
         saveThoughtSignatureFromStream, parseGeminiNonStreamingResponse, parseClaudeNonStreamingResponse,
+        parseOpenAINonStreamingResponse, parseResponsesAPINonStreamingResponse,
+        _normalizeTokenUsage, _showTokenUsageToast, _needsCopilotResponsesAPI,
     };
     for (const [k, v] of Object.entries(fns)) {
         window[k] = v;
@@ -3785,7 +4749,7 @@ function _exposeScopeToWindow() {
     const objs = {
         customFetchers, registeredProviderTabs, pendingDynamicFetchers,
         _pluginRegistrations, SubPluginManager, SettingsBackup, KeyPool,
-        CPM_SLOT_LIST, AwsV4Signer, ThoughtSignatureCache,
+        CPM_SLOT_LIST, AwsV4Signer, ThoughtSignatureCache, _tokenUsageStore,
     };
     for (const [k, v] of Object.entries(objs)) {
         window[k] = v;
@@ -3906,6 +4870,7 @@ function _exposeScopeToWindow() {
                     reasoning: await safeGetArg(`cpm_c${i}_reasoning`) || 'none',
                     verbosity: await safeGetArg(`cpm_c${i}_verbosity`) || 'none',
                     thinking: await safeGetArg(`cpm_c${i}_thinking`) || 'none',
+                    responsesMode: 'auto',
                     tok: await safeGetArg(`cpm_c${i}_tok`) || 'o200k_base',
                     customParams: ''
                 });
@@ -3934,32 +4899,56 @@ function _exposeScopeToWindow() {
         });
 
         // Format: `🧁 [GoogleAI] Gemini 2.5 Flash`
-        for (const modelDef of ALL_DEFINED_MODELS) {
-            let pLabel = modelDef.provider;
-            let mLabel = modelDef.name;
+        // BUG FIX: Model registration is wrapped in try-catch to ensure registerSetting()
+        // is ALWAYS called even if addProvider fails. Without this, any addProvider error
+        // crashes the entire init and the settings panel never appears (green-button update bug).
+        let _modelRegCount = 0;
+        try {
+            for (const modelDef of ALL_DEFINED_MODELS) {
+                let pLabel = modelDef.provider;
+                let mLabel = modelDef.name;
 
-            // ── Model capability flags ──
-            // LLMFlags enum values (from RisuAI types.ts):
-            //   0 = hasImageInput, 9 = hasFullSystemPrompt, 10 = hasStreaming
-            // hasImageInput is CRITICAL — without it RisuAI converts images to
-            // text captions via runImageEmbedding() and never sends image data.
-            const modelFlags = [
-                0,   // hasImageInput
-                9,   // hasFullSystemPrompt
-                10,  // hasStreaming
-            ];
+                // ── Model capability flags ──
+                // LLMFlags enum values (current RisuAI types.ts):
+                //   0=hasImageInput, 6=hasFullSystemPrompt, 7=hasFirstSystemPrompt,
+                //   8=hasStreaming, 9=requiresAlternateRole, 14=DeveloperRole
+                // hasImageInput is CRITICAL — without it RisuAI converts images to
+                // text captions via runImageEmbedding() and never sends image data.
+                //
+                // BUG-Q13 FIX: provider별 플래그를 네이티브 RisuAI와 일치시킴.
+                const provider = modelDef.provider;
+                const modelId = String(modelDef.id || '');
+                const isClaudeFamily = provider === 'Anthropic' || provider === 'AWS' || (provider === 'VertexAI' && modelId.startsWith('claude-'));
+                const isGeminiFamily = provider === 'GoogleAI' || (provider === 'VertexAI' && modelId.startsWith('gemini-'));
+                const isOpenAIFamily = provider === 'OpenAI';
 
-            await Risu.addProvider(`🧁 [${pLabel}] ${mLabel}`, async (args, abortSignal) => {
-                try {
-                    return await handleRequest(args, modelDef, abortSignal);
-                } catch (err) {
-                    return { success: false, content: `[Cupcake SDK Fallback Crash] ${err.message}` };
+                const modelFlags = [0, 8]; // hasImageInput, hasStreaming (공통)
+                if (isClaudeFamily) {
+                    modelFlags.push(7);   // hasFirstSystemPrompt
+                } else if (isGeminiFamily) {
+                    modelFlags.push(7, 9); // hasFirstSystemPrompt + requiresAlternateRole
+                } else {
+                    modelFlags.push(6);   // hasFullSystemPrompt (OpenAI/OpenRouter/DeepSeek)
                 }
-            }, {
-                model: {
-                    flags: modelFlags,
+                if (isOpenAIFamily && /(?:^|\/)(?:gpt-5|o[2-9]|o1(?!-(?:preview|mini)))/i.test(modelId)) {
+                    modelFlags.push(14);  // DeveloperRole
                 }
-            });
+
+                await Risu.addProvider(`🧁 [${pLabel}] ${mLabel}`, async (args, abortSignal) => {
+                    try {
+                        return await handleRequest(args, modelDef, abortSignal);
+                    } catch (err) {
+                        return { success: false, content: `[Cupcake SDK Fallback Crash] ${err.message}` };
+                    }
+                }, {
+                    model: {
+                        flags: modelFlags,
+                    }
+                });
+                _modelRegCount++;
+            }
+        } catch (regErr) {
+            console.error(`[CPM] Model registration error after ${_modelRegCount}/${ALL_DEFINED_MODELS.length} models (continuing to register settings):`, regErr);
         }
 
         // ── Silent Update Check (지연 자동 체크) ──
@@ -4184,6 +5173,24 @@ function _exposeScopeToWindow() {
                                 ${await renderInput('cpm_streaming_show_thinking', 'Anthropic Thinking 토큰 표시 (Show Thinking in Stream)', 'checkbox')}
                             </div>
                         </div>
+
+                        <div class="mt-10 pt-6 border-t border-gray-700">
+                            <h4 class="text-xl font-bold text-purple-400 mb-4">📊 토큰 사용량 표시 (Token Usage Display)</h4>
+                            <div class="bg-gray-800/70 border border-purple-900/50 rounded-lg p-4 mb-6">
+                                <p class="text-xs text-purple-300 mb-2 font-semibold">📊 실시간 토큰 사용량 알림</p>
+                                <p class="text-xs text-gray-400 mb-2">
+                                    활성화하면 API 응답이 올 때마다 (번역, 하이파, 메인 출력 등) 화면 우측 상단에 토큰 사용량을 표시합니다.<br/>
+                                    입력(📥) / 출력(📤) / 추론(🧠) / 캐시(💾) 토큰 수와 응답 시간을 한눈에 확인할 수 있습니다.
+                                </p>
+                                <p class="text-xs text-gray-500">
+                                    💡 OpenAI, Anthropic, Gemini, Vertex, AWS 등 모든 프로바이더에서 동작합니다.<br/>
+                                    스트리밍 모드에서는 응답이 완료된 후 표시됩니다. 6초 후 자동으로 사라지며, 클릭하면 즉시 닫힙니다.
+                                </p>
+                            </div>
+                            <div class="space-y-3">
+                                ${await renderInput('cpm_show_token_usage', '토큰 사용량 표시 (Show Token Usage Toast)', 'checkbox')}
+                            </div>
+                        </div>
                     </div>
 
                     <div id="tab-other" class="cpm-tab-content hidden">
@@ -4266,6 +5273,15 @@ function _exposeScopeToWindow() {
                                         <option value="claude">Claude</option>
                                         <option value="gemma">Gemma</option>
                                     </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-400 mb-1">Responses API Mode (OpenAI/Copilot)</label>
+                                    <select id="cpm-cm-responses-mode" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white">
+                                        <option value="auto">Auto (자동 감지: Copilot + GPT-5.4+ 또는 /responses URL)</option>
+                                        <option value="on">On (강제 사용)</option>
+                                        <option value="off">Off (강제 비활성화)</option>
+                                    </select>
+                                    <p class="text-xs text-gray-500 mt-1">OpenAI 포맷에서만 적용됩니다. Copilot URL에서는 On 시 /responses로 강제 전환됩니다.</p>
                                 </div>
                                 <div>
                                     <label class="block text-sm font-medium text-gray-400 mb-1">Thinking Level / Budget Tokens (생각 수준)</label>
@@ -4711,6 +5727,7 @@ function _exposeScopeToWindow() {
 
                     document.getElementById('cpm-cm-format').value = m.format || 'openai';
                     document.getElementById('cpm-cm-tok').value = m.tok || 'o200k_base';
+                    document.getElementById('cpm-cm-responses-mode').value = m.responsesMode || 'auto';
                     document.getElementById('cpm-cm-thinking').value = m.thinking || 'none';
                     document.getElementById('cpm-cm-thinking-budget').value = m.thinkingBudget || 0;
                     document.getElementById('cpm-cm-prompt-cache-retention').value = m.promptCacheRetention || 'none';
@@ -4788,6 +5805,7 @@ function _exposeScopeToWindow() {
 
                 document.getElementById('cpm-cm-format').value = 'openai';
                 document.getElementById('cpm-cm-tok').value = 'o200k_base';
+                document.getElementById('cpm-cm-responses-mode').value = 'auto';
                 document.getElementById('cpm-cm-thinking').value = 'none';
                 document.getElementById('cpm-cm-thinking-budget').value = 0;
                 document.getElementById('cpm-cm-prompt-cache-retention').value = 'none';
@@ -4820,6 +5838,7 @@ function _exposeScopeToWindow() {
                     key: document.getElementById('cpm-cm-key').value,
                     format: document.getElementById('cpm-cm-format').value,
                     tok: document.getElementById('cpm-cm-tok').value,
+                    responsesMode: document.getElementById('cpm-cm-responses-mode').value || 'auto',
                     thinking: document.getElementById('cpm-cm-thinking').value,
                     thinkingBudget: parseInt(document.getElementById('cpm-cm-thinking-budget').value) || 0,
                     promptCacheRetention: document.getElementById('cpm-cm-prompt-cache-retention').value || 'none',
@@ -5073,5 +6092,33 @@ function _exposeScopeToWindow() {
 
         // Inline Resizer Sub-plugin removed. Handled cleanly by dynamic Sub-Plugins Loader.
 
-    } catch (e) { console.error('[CPM] init fail', e); }
+    } catch (e) {
+        console.error('[CPM] init fail', e);
+        // CRITICAL FALLBACK: If the main init fails, ensure the settings panel is still
+        // accessible so the user can at least see the error and manage sub-plugins.
+        // Without this, the green-button update bug leaves users with no way to open settings.
+        try {
+            await Risu.registerSetting(
+                `⚠️ CPM v${CPM_VERSION} (Error)`,
+                async () => {
+                    Risu.showContainer('fullscreen');
+                    document.body.innerHTML = `<div style="background:#1a1a2e;color:#fff;padding:40px;font-family:sans-serif;min-height:100vh;">
+                        <h1 style="color:#ff6b6b;">🧁 Cupcake PM — Initialization Error</h1>
+                        <p style="color:#ccc;margin:20px 0;">The plugin failed to initialize properly. This usually happens after an auto-update.</p>
+                        <pre style="background:#0d1117;color:#ff7b72;padding:16px;border-radius:8px;overflow:auto;max-height:300px;font-size:13px;">${String(e && e.stack ? e.stack : e).replace(/</g, '&lt;')}</pre>
+                        <p style="color:#aaa;margin-top:20px;">Try these solutions:</p>
+                        <ol style="color:#ccc;line-height:2;">
+                            <li>Close settings and reopen — the plugin may have loaded by now</li>
+                            <li>Reload the page (Ctrl+Shift+R)</li>
+                            <li>If the error persists, re-import the plugin manually</li>
+                        </ol>
+                        <button onclick="document.body.innerHTML='';${typeof Risu !== 'undefined' ? 'Risu' : 'window.risuai'}.hideContainer();"
+                            style="margin-top:20px;padding:10px 24px;background:#e74c3c;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;">Close</button>
+                    </div>`;
+                },
+                '🧁',
+                'html'
+            );
+        } catch (_) { /* Last resort: even registerSetting failed */ }
+    }
 })();
