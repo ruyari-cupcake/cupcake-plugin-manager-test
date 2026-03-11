@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build (Rollup IIFE)
+        run: npm run build
+
+      - name: Verify build output
+        run: |
+          test -f dist/provider-manager.js
+          echo "✅ dist/provider-manager.js generated ($(wc -c < dist/provider-manager.js) bytes)"
+
+      - name: Extract version from tag
+        id: version
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          VERSION="${{ steps.version.outputs.tag }}"
+          HEADER_VER=$(grep -oP '(?<=@version )\S+' src/plugin-header.js | head -1)
+          BYTES=$(wc -c < dist/provider-manager.js | tr -d ' ')
+          SHA=$(sha256sum dist/provider-manager.js | cut -d' ' -f1)
+
+          cat <<EOF > release-notes.md
+          ## Cupcake Provider Manager ${VERSION} (Test)
+
+          **Plugin version:** ${HEADER_VER}
+          **Build size:** ${BYTES} bytes
+          **SHA-256:** \`${SHA}\`
+
+          ### 사용법
+          1. \`provider-manager.js\`를 다운로드
+          2. RisuAI 설정 → 플러그인 → + 버튼으로 설치
+          3. 또는 update-url을 \`https://cupcake-plugin-manager-test.vercel.app/provider-manager.js\`로 설정
+
+          ---
+          *이 릴리즈는 테스트 레포에서 자동 생성되었습니다.*
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "${{ steps.version.outputs.tag }}"
+          body_path: release-notes.md
+          files: |
+            dist/provider-manager.js
+            update-bundle.json
+            versions.json
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.tag, 'test') || contains(steps.version.outputs.tag, 'rc') || contains(steps.version.outputs.tag, 'beta') }}

@@ -8,6 +8,18 @@
     const CPM = window.CupcakePM;
     if (!CPM) { console.error('[CPM-OpenAI] CupcakePM API not found!'); return; }
 
+    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+    const parseRetryAfterMs = (headers) => {
+        const raw = headers?.get?.('retry-after');
+        if (!raw) return 0;
+        const seconds = Number(raw);
+        if (Number.isFinite(seconds) && seconds >= 0) return Math.max(0, Math.floor(seconds * 1000));
+        const retryAt = Date.parse(raw);
+        if (Number.isNaN(retryAt)) return 0;
+        return Math.max(0, retryAt - Date.now());
+    };
+    const isRetriableStatus = (status) => status === 408 || status === 429 || status >= 500;
+
     CPM.registerProvider({
         name: 'OpenAI',
         models: [
@@ -150,6 +162,29 @@
 
             // Key Rotation: wrap fetch in withKeyRotation for automatic retry on 429/529
             const doFetch = async (apiKey) => {
+                const executeRequest = async (requestFactory, label, maxAttempts = 3) => {
+                    let attempt = 0;
+                    let response;
+
+                    while (attempt < maxAttempts) {
+                        response = await requestFactory();
+                        if (response?.ok) return response;
+
+                        const status = response?.status || 0;
+                        if (!isRetriableStatus(status) || attempt >= maxAttempts - 1 || abortSignal?.aborted) {
+                            return response;
+                        }
+
+                        response?.body?.cancel?.();
+                        attempt++;
+                        const retryDelay = parseRetryAfterMs(response?.headers) || (700 * attempt);
+                        console.warn(`[CPM-OpenAI] ${label} retry ${attempt}/${maxAttempts - 1} after HTTP ${status}`);
+                        await sleep(retryDelay);
+                    }
+
+                    return response;
+                };
+
                 const body = {
                     model: modelName,
                     temperature: temp,
@@ -276,10 +311,36 @@
                 const safeBody = JSON.stringify(body);
 
                 const fetchFn = typeof CPM.smartNativeFetch === 'function' ? CPM.smartNativeFetch : (window.Risuai || window.risuai).nativeFetch;
-                const res = await fetchFn(effectiveUrl, { method: 'POST', headers, body: safeBody, signal: abortSignal });
+                const res = await executeRequest(
+                    () => fetchFn(effectiveUrl, { method: 'POST', headers, body: safeBody, signal: abortSignal }),
+                    'request'
+                );
                 if (!res.ok) return { success: false, content: `[OpenAI Error ${res.status}] ${await res.text()}`, _status: res.status };
 
                 if (streamingEnabled) {
+                    const hasReadableStreamBody = !!(res.body && typeof res.body.getReader === 'function');
+                    if (!hasReadableStreamBody) {
+                        console.warn('[CPM-OpenAI] Streaming response body unavailable; retrying as non-streaming.');
+                        const fallbackBody = { ...body, stream: false };
+                        delete fallbackBody.stream_options;
+                        const fallbackRes = await executeRequest(
+                            () => fetchFn(effectiveUrl, {
+                                method: 'POST',
+                                headers,
+                                body: JSON.stringify(fallbackBody),
+                                signal: abortSignal,
+                            }),
+                            'non-stream fallback'
+                        );
+                        if (!fallbackRes.ok) return { success: false, content: `[OpenAI Error ${fallbackRes.status}] ${await fallbackRes.text()}`, _status: fallbackRes.status };
+                        const fallbackData = await fallbackRes.json();
+                        if (_needsResponsesAPI && typeof CPM.parseResponsesAPINonStreamingResponse === 'function') {
+                            return CPM.parseResponsesAPINonStreamingResponse(fallbackData, _reqId);
+                        }
+                        return typeof CPM.parseOpenAINonStreamingResponse === 'function'
+                            ? CPM.parseOpenAINonStreamingResponse(fallbackData, _reqId)
+                            : { success: true, content: fallbackData.choices?.[0]?.message?.content || '' };
+                    }
                     if (_needsResponsesAPI && typeof CPM.createResponsesAPISSEStream === 'function') {
                         // Responses API streaming (GPT-5.4+ on Copilot)
                         return { success: true, content: CPM.createResponsesAPISSEStream(res, abortSignal, _reqId) };

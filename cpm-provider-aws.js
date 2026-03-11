@@ -8,6 +8,40 @@
     const CPM = window.CupcakePM;
     if (!CPM) { console.error('[CPM-AWS] CupcakePM API not found!'); return; }
     const Risu = window.Risuai || window.risuai;
+    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+    const parseRetryAfterMs = (headers) => {
+        const raw = headers?.get?.('retry-after');
+        if (!raw) return 0;
+        const seconds = Number(raw);
+        if (Number.isFinite(seconds) && seconds >= 0) return Math.max(0, Math.floor(seconds * 1000));
+        const retryAt = Date.parse(raw);
+        if (Number.isNaN(retryAt)) return 0;
+        return Math.max(0, retryAt - Date.now());
+    };
+    const isRetriableStatus = (status) => status === 408 || status === 429 || status >= 500;
+
+    async function _awsExecuteRequest(requestFactory, label, abortSignal, maxAttempts = 3) {
+        let attempt = 0;
+        let response;
+
+        while (attempt < maxAttempts) {
+            response = await requestFactory();
+            if (response?.ok) return response;
+
+            const status = response?.status || 0;
+            if (!isRetriableStatus(status) || attempt >= maxAttempts - 1 || abortSignal?.aborted) {
+                return response;
+            }
+
+            response?.body?.cancel?.();
+            attempt++;
+            const retryDelay = parseRetryAfterMs(response?.headers) || (700 * attempt);
+            console.warn(`[CPM-AWS] ${label} retry ${attempt}/${maxAttempts - 1} after HTTP ${status}`);
+            await sleep(retryDelay);
+        }
+
+        return response;
+    }
 
     /**
      * AWS-specific smart fetch: prefers risuFetch (full response collection) over
@@ -147,7 +181,11 @@
                     region: region,
                 });
                 const signed = await signer.sign();
-                const res = await _awsSmartFetch(signed.url, signed.method, signed.headers, null, undefined);
+                const res = await _awsExecuteRequest(
+                    () => _awsSmartFetch(signed.url, signed.method, signed.headers, null, undefined),
+                    'model listing',
+                    undefined
+                );
                 if (!res.ok) return null;
 
                 const data = await res.json();
@@ -188,7 +226,11 @@
                         region: region,
                     });
                     const profileSigned = await profileSigner.sign();
-                    const profileRes = await _awsSmartFetch(profileSigned.url, profileSigned.method, profileSigned.headers, null, undefined);
+                    const profileRes = await _awsExecuteRequest(
+                        () => _awsSmartFetch(profileSigned.url, profileSigned.method, profileSigned.headers, null, undefined),
+                        'profile listing',
+                        undefined
+                    );
                     if (profileRes.ok) {
                         const profileData = await profileRes.json();
                         const profiles = profileData.inferenceProfileSummaries || [];
@@ -233,6 +275,14 @@
             }
 
             const { messages: anthropicMessages, system: systemPrompt } = CPM.formatToAnthropic(messages, config);
+
+            // Safety: AWS Bedrock Claude API max is 128K with output-128k beta
+            const _AWS_MAX_OUT = 128000;
+            if (typeof maxTokens === 'number' && maxTokens > _AWS_MAX_OUT) {
+                console.warn(`[CPM-AWS] max_tokens ${maxTokens} → clamped to ${_AWS_MAX_OUT} (API limit)`);
+                maxTokens = _AWS_MAX_OUT;
+            }
+
             const body = {
                 messages: anthropicMessages,
                 max_tokens: maxTokens || 4096,
@@ -283,7 +333,11 @@
                         headers: { 'Content-Type': 'application/json', 'accept': 'application/json' }
                     });
                     const signed = await signer.sign();
-                    const res = await _awsSmartFetch(signed.url, signed.method, signed.headers, signed.body, body, abortSignal);
+                    const res = await _awsExecuteRequest(
+                        () => _awsSmartFetch(signed.url, signed.method, signed.headers, signed.body, body, abortSignal),
+                        'invoke request',
+                        abortSignal
+                    );
                     if (!res.ok) return { success: false, content: `[AWS Bedrock Error ${res.status}] ${await res.text()}`, _status: res.status };
                     const data = await res.json();
                     // Bedrock invoke returns Anthropic Messages API format

@@ -8,6 +8,18 @@
     const CPM = window.CupcakePM;
     if (!CPM) { console.error('[CPM-Anthropic] CupcakePM API not found!'); return; }
 
+    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+    const parseRetryAfterMs = (headers) => {
+        const raw = headers?.get?.('retry-after');
+        if (!raw) return 0;
+        const seconds = Number(raw);
+        if (Number.isFinite(seconds) && seconds >= 0) return Math.max(0, Math.floor(seconds * 1000));
+        const retryAt = Date.parse(raw);
+        if (Number.isNaN(retryAt)) return 0;
+        return Math.max(0, retryAt - Date.now());
+    };
+    const isRetriableStatus = (status) => status === 408 || status === 429 || status >= 500;
+
     const CLAUDE_MODELS_BASE = [
         { baseId: "claude-haiku-4-5", date: "20251001", name: "Claude 4.5 Haiku", displayDate: "2025/10/01" },
         { baseId: "claude-sonnet-4", date: "20250514", name: "Claude 4 Sonnet", displayDate: "2025/05/14" },
@@ -101,8 +113,38 @@
             const streamingEnabled = await CPM.safeGetBoolArg('cpm_streaming_enabled', false);
             const { messages: formattedMsgs, system: systemPrompt } = CPM.formatToAnthropic(messages, config);
 
+            // Safety: Anthropic API max is 128K with output-128k beta header
+            const _ANTH_MAX_OUT = 128000;
+            if (typeof maxTokens === 'number' && maxTokens > _ANTH_MAX_OUT) {
+                console.warn(`[CPM-Anthropic] max_tokens ${maxTokens} → clamped to ${_ANTH_MAX_OUT} (API limit)`);
+                maxTokens = _ANTH_MAX_OUT;
+            }
+
             // Key Rotation: wrap fetch in withKeyRotation for automatic retry on 429/529
             const doFetch = async (apiKey) => {
+                const executeRequest = async (requestFactory, label, maxAttempts = 3) => {
+                    let attempt = 0;
+                    let response;
+
+                    while (attempt < maxAttempts) {
+                        response = await requestFactory();
+                        if (response?.ok) return response;
+
+                        const status = response?.status || 0;
+                        if (!isRetriableStatus(status) || attempt >= maxAttempts - 1 || abortSignal?.aborted) {
+                            return response;
+                        }
+
+                        response?.body?.cancel?.();
+                        attempt++;
+                        const retryDelay = parseRetryAfterMs(response?.headers) || (700 * attempt);
+                        console.warn(`[CPM-Anthropic] ${label} retry ${attempt}/${maxAttempts - 1} after HTTP ${status}`);
+                        await sleep(retryDelay);
+                    }
+
+                    return response;
+                };
+
                 const body = {
                     model: config.model || 'claude-sonnet-4-5-20250929',
                     max_tokens: maxTokens,
@@ -158,15 +200,53 @@
                 if (config.claude1HourCaching) betas.push('extended-cache-ttl-2025-04-11');
                 if (betas.length > 0) headers['anthropic-beta'] = betas.join(',');
 
-                const res = await fetchFn(url, {
-                    method: 'POST',
-                    headers,
-                    body: JSON.stringify(body),
-                    signal: abortSignal
-                });
+                const res = await executeRequest(
+                    () => fetchFn(url, {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify(body),
+                        signal: abortSignal
+                    }),
+                    'request'
+                );
                 if (!res.ok) return { success: false, content: `[Anthropic Error ${res.status}] ${await res.text()}`, _status: res.status };
 
                 if (streamingEnabled) {
+                    const hasReadableStreamBody = !!(res.body && typeof res.body.getReader === 'function');
+                    if (!hasReadableStreamBody) {
+                        console.warn('[CPM-Anthropic] Streaming response body unavailable; retrying as non-streaming.');
+                        const fallbackBody = { ...body, stream: false };
+                        const fallbackRes = await executeRequest(
+                            () => fetchFn(url, {
+                                method: 'POST',
+                                headers,
+                                body: JSON.stringify(fallbackBody),
+                                signal: abortSignal
+                            }),
+                            'non-stream fallback'
+                        );
+                        if (!fallbackRes.ok) return { success: false, content: `[Anthropic Error ${fallbackRes.status}] ${await fallbackRes.text()}`, _status: fallbackRes.status };
+                        const fallbackData = await fallbackRes.json();
+                        return typeof CPM.parseClaudeNonStreamingResponse === 'function'
+                            ? CPM.parseClaudeNonStreamingResponse(fallbackData, {}, _reqId)
+                            : (() => {
+                                let r = '', th = false;
+                                if (Array.isArray(fallbackData.content)) for (const b of fallbackData.content) {
+                                    if (b.type === 'thinking' && b.thinking) {
+                                        if (!th) { th = true; r += '<Thoughts>\n'; }
+                                        r += b.thinking;
+                                    } else if (b.type === 'redacted_thinking') {
+                                        if (!th) { th = true; r += '<Thoughts>\n'; }
+                                        r += '\n{{redacted_thinking}}\n';
+                                    } else if (b.type === 'text') {
+                                        if (th) { th = false; r += '</Thoughts>\n\n'; }
+                                        r += b.text || '';
+                                    }
+                                }
+                                if (th) r += '</Thoughts>\n\n';
+                                return { success: !!r, content: r || '[Anthropic] Empty response' };
+                            })();
+                    }
                     return { success: true, content: CPM.createAnthropicSSEStream(res, abortSignal, _reqId) };
                 } else {
                     const data = await res.json();

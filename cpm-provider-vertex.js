@@ -44,8 +44,34 @@
     // Per-credential token cache (keyed by client_email) for multi-key rotation
     const _tokenCaches = {};
 
+    function looksLikeWindowsPath(raw) {
+        const trimmed = (raw || '').trim();
+        return /^[A-Za-z]:\\/.test(trimmed) || /^\\\\[^\\]/.test(trimmed);
+    }
+
+    function parseVertexKeyJson(keyJson) {
+        const trimmed = (keyJson || '').trim();
+        if (!trimmed) throw new Error('Vertex Service Account JSON 키가 비어 있습니다.');
+        if (looksLikeWindowsPath(trimmed)) {
+            throw new Error('Vertex Service Account JSON 키 입력란에는 파일 경로가 아니라 JSON 본문 전체를 붙여넣어야 합니다.');
+        }
+
+        try {
+            const parsed = JSON.parse(trimmed);
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                throw new Error('JSON 객체 형식이어야 합니다.');
+            }
+            return parsed;
+        } catch (error) {
+            if (/Bad Unicode escape/i.test(error.message || '')) {
+                throw new Error('Vertex Service Account JSON 파싱 오류: Windows 경로를 넣었거나 역슬래시(\\)가 이스케이프되지 않았습니다. 파일 경로가 아니라 JSON 본문을 붙여넣으세요.');
+            }
+            throw new Error(`Vertex Service Account JSON 파싱 오류: ${error.message}`);
+        }
+    }
+
     async function getVertexAccessToken(keyJson) {
-        const key = JSON.parse(keyJson);
+        const key = parseVertexKeyJson(keyJson);
         const cacheKey = key.client_email || 'default';
         const cache = _tokenCaches[cacheKey] || { token: null, expiry: 0 };
         const now = Math.floor(Date.now() / 1000);
@@ -100,10 +126,41 @@
 
     function invalidateTokenCache(keyJson) {
         try {
-            const key = JSON.parse(keyJson);
+            const key = parseVertexKeyJson(keyJson);
             const cacheKey = key.client_email || 'default';
             delete _tokenCaches[cacheKey];
         } catch (_) {}
+    }
+
+    const Risu = (window.Risuai || window.risuai);
+    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+    function encodeRequestBody(body) {
+        return typeof body === 'string' ? new TextEncoder().encode(body) : body;
+    }
+
+    async function vertexFetch(url, options = {}) {
+        const nativeFetch = Risu?.nativeFetch;
+        const smartFetch = typeof CPM.smartNativeFetch === 'function' ? CPM.smartNativeFetch : nativeFetch;
+
+        if (typeof nativeFetch === 'function') {
+            try {
+                const nativeOptions = { ...options };
+                if (nativeOptions.body !== undefined) nativeOptions.body = encodeRequestBody(nativeOptions.body);
+                const nativeRes = await nativeFetch(url, nativeOptions);
+                if (nativeRes && (nativeRes.ok || (nativeRes.status && nativeRes.status !== 0))) {
+                    return nativeRes;
+                }
+                console.warn(`[CPM-Vertex] nativeFetch returned unusable response (${nativeRes?.status || 'unknown'}), falling back.`);
+            } catch (e) {
+                console.warn(`[CPM-Vertex] nativeFetch failed, falling back: ${e.message}`);
+            }
+        }
+
+        if (typeof smartFetch === 'function') {
+            return await smartFetch(url, options);
+        }
+        return await fetch(url, options);
     }
 
     CPM.registerProvider({
@@ -120,7 +177,7 @@
                 if (!keyJson) return null;
                 const loc = await CPM.safeGetArg('cpm_vertex_location') || 'global';
                 const accessToken = await getVertexAccessToken(keyJson);
-                const key = JSON.parse(keyJson);
+                const key = parseVertexKeyJson(keyJson);
                 const project = key.project_id;
                 const baseUrl = loc === 'global' ? 'https://aiplatform.googleapis.com' : `https://${loc}-aiplatform.googleapis.com`;
 
@@ -213,14 +270,69 @@
                 config._triedFallback = false;
                 if (!keyJson) return { success: false, content: '[Vertex] No Service Account JSON key provided.' };
                 let project;
-                try { project = JSON.parse(keyJson).project_id; } catch (e) { return { success: false, content: `[Vertex] JSON 파싱 오류: ${e.message}` }; }
+                try { project = parseVertexKeyJson(keyJson).project_id; } catch (e) { return { success: false, content: `[Vertex] JSON 파싱 오류: ${e.message}` }; }
                 const loc = config.location || 'global';
                 const model = config.model || 'gemini-2.5-flash';
                 let accessToken;
                 try { accessToken = await getVertexAccessToken(keyJson); } catch (e) { return { success: false, content: `[Vertex] 토큰 발급 오류: ${e.message}`, _status: 401 }; }
                 const baseUrl = loc === 'global' ? 'https://aiplatform.googleapis.com' : `https://${loc}-aiplatform.googleapis.com`;
                 const isClaude = model.startsWith('claude-');
-                const fetchFn = typeof CPM.smartNativeFetch === 'function' ? CPM.smartNativeFetch : (window.Risuai || window.risuai).nativeFetch;
+
+                const executeRequest = async (requestUrl, requestOptions, { retryAuth = false, label = 'Vertex', maxAttempts = 3 } = {}) => {
+                    let attempt = 0;
+                    let response;
+
+                    while (attempt < maxAttempts) {
+                        response = await vertexFetch(requestUrl, requestOptions);
+                        if (response.ok) return response;
+
+                        const status = response.status || 0;
+                        if (retryAuth && (status === 401 || status === 403) && attempt < maxAttempts - 1) {
+                            response.body?.cancel?.();
+                            invalidateTokenCache(keyJson);
+                            try {
+                                accessToken = await getVertexAccessToken(keyJson);
+                                requestOptions = {
+                                    ...requestOptions,
+                                    headers: { ...(requestOptions.headers || {}), 'Authorization': `Bearer ${accessToken}` }
+                                };
+                                console.warn(`[CPM-Vertex] ${label} auth retry ${attempt + 1}/${maxAttempts - 1}`);
+                                attempt++;
+                                continue;
+                            } catch (refreshErr) {
+                                console.warn(`[CPM-Vertex] ${label} auth refresh failed: ${refreshErr.message}`);
+                                return response;
+                            }
+                        }
+
+                        const retriable = status === 408 || status === 429 || status >= 500;
+                        if (!retriable || attempt >= maxAttempts - 1) {
+                            return response;
+                        }
+
+                        response.body?.cancel?.();
+                        attempt++;
+                        console.warn(`[CPM-Vertex] ${label} retry ${attempt}/${maxAttempts - 1} after HTTP ${status}`);
+                        await sleep(700 * attempt);
+                    }
+
+                    return response;
+                };
+
+                // Safety: clamp maxTokens based on model type
+                if (isClaude) {
+                    const _VTX_CLAUDE_MAX = 128000;
+                    if (typeof maxTokens === 'number' && maxTokens > _VTX_CLAUDE_MAX) {
+                        console.warn(`[CPM-Vertex] max_tokens ${maxTokens} → clamped to ${_VTX_CLAUDE_MAX} for Claude (API limit)`);
+                        maxTokens = _VTX_CLAUDE_MAX;
+                    }
+                } else {
+                    const _vtxGemMax = /gemini-(?:[3-9]|2\.[5-9])/.test(model) ? 65536 : 8192;
+                    if (typeof maxTokens === 'number' && maxTokens > _vtxGemMax) {
+                        console.warn(`[CPM-Vertex] maxOutputTokens ${maxTokens} → clamped to ${_vtxGemMax} for ${model} (API limit)`);
+                        maxTokens = _vtxGemMax;
+                    }
+                }
 
                 if (isClaude) {
                     // ── Claude on Vertex (Model Garden) ──
@@ -276,18 +388,59 @@
                     if (body.max_tokens > 8192) claudeBetas.push('output-128k-2025-02-19');
                     if (claudeBetas.length > 0) claudeHeaders['anthropic-beta'] = claudeBetas.join(',');
 
-                    const res = await fetchFn(url, {
+                    const requestBody = JSON.stringify(body);
+                    console.log(`[CPM-Vertex] Request path: provider=claude, streaming=${streamingEnabled}, url=${url}`);
+                    let res = await executeRequest(url, {
                         method: 'POST',
                         headers: claudeHeaders,
-                        body: JSON.stringify(body),
+                        body: requestBody,
                         signal: abortSignal
-                    });
+                    }, { retryAuth: true, label: 'Vertex Claude' });
                     if (!res.ok) {
                         if (res.status === 401 || res.status === 403) invalidateTokenCache(keyJson);
                         return { success: false, content: `[Vertex Claude Error ${res.status}] ${await res.text()}`, _status: res.status };
                     }
 
                     if (streamingEnabled) {
+                        if (!res.body || typeof res.body.getReader !== 'function') {
+                            console.warn('[CPM-Vertex] Claude streaming response has no readable body; retrying as non-streaming.');
+                            const nonStreamUrl = `${baseUrl}/v1/projects/${project}/locations/${loc}/publishers/anthropic/models/${model}:rawPredict`;
+                            console.log(`[CPM-Vertex] Claude stream fallback path: ${nonStreamUrl}`);
+                            res = await executeRequest(nonStreamUrl, {
+                                method: 'POST',
+                                headers: { ...claudeHeaders, 'Authorization': `Bearer ${accessToken}` },
+                                body: requestBody,
+                                signal: abortSignal
+                            }, { retryAuth: true, label: 'Vertex Claude fallback' });
+                            if (!res.ok) {
+                                if (res.status === 401 || res.status === 403) invalidateTokenCache(keyJson);
+                                return { success: false, content: `[Vertex Claude Error ${res.status}] ${await res.text()}`, _status: res.status };
+                            }
+
+                            const data = await res.json();
+                            if (typeof CPM.parseClaudeNonStreamingResponse === 'function') {
+                                return CPM.parseClaudeNonStreamingResponse(data, {}, _reqId);
+                            }
+                            let fallbackOut = '';
+                            let fbThinking = false;
+                            if (Array.isArray(data.content)) {
+                                for (const block of data.content) {
+                                    if (block.type === 'thinking' && block.thinking) {
+                                        if (!fbThinking) { fbThinking = true; fallbackOut += '<Thoughts>\n'; }
+                                        fallbackOut += block.thinking;
+                                    } else if (block.type === 'redacted_thinking') {
+                                        if (!fbThinking) { fbThinking = true; fallbackOut += '<Thoughts>\n'; }
+                                        fallbackOut += '\n{{redacted_thinking}}\n';
+                                    } else if (block.type === 'text') {
+                                        if (fbThinking) { fbThinking = false; fallbackOut += '</Thoughts>\n\n'; }
+                                        fallbackOut += block.text;
+                                    }
+                                }
+                            }
+                            if (fbThinking) fallbackOut += '</Thoughts>\n\n';
+                            return { success: !!fallbackOut, content: fallbackOut || '[Vertex Claude] Empty response' };
+                        }
+
                         return { success: true, content: CPM.createAnthropicSSEStream(res, abortSignal, _reqId) };
                     } else {
                         // Non-streaming: parse JSON response
@@ -318,9 +471,9 @@
                 }
 
                 // ── Gemini models ──
-                const geminiEndpoint = streamingEnabled ? 'streamGenerateContent' : 'generateContent';
-                const geminiSuffix = streamingEnabled ? '?alt=sse' : '';
-                const url = `${baseUrl}/v1/projects/${project}/locations/${loc}/publishers/google/models/${model}:${geminiEndpoint}${geminiSuffix}`;
+                const streamUrl = `${baseUrl}/v1/projects/${project}/locations/${loc}/publishers/google/models/${model}:streamGenerateContent?alt=sse`;
+                const nonStreamUrl = `${baseUrl}/v1/projects/${project}/locations/${loc}/publishers/google/models/${model}:generateContent`;
+                const url = streamingEnabled ? streamUrl : nonStreamUrl;
 
                 const { contents, systemInstruction: sys } = CPM.formatToGemini(messages, config);
                 const body = { contents, generationConfig: { temperature: temp, maxOutputTokens: maxTokens } };
@@ -362,12 +515,14 @@
                     }));
                 }
 
-                const res = await fetchFn(url, {
+                const requestBody = JSON.stringify(body);
+                console.log(`[CPM-Vertex] Request path: provider=gemini, streaming=${streamingEnabled}, url=${url}`);
+                let res = await executeRequest(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
-                    body: JSON.stringify(body),
+                    body: requestBody,
                     signal: abortSignal
-                });
+                }, { retryAuth: true, label: 'Vertex Gemini' });
                 if (!res.ok) {
                     const errText = await res.text();
                     if (res.status === 401 || res.status === 403) invalidateTokenCache(keyJson);
@@ -379,17 +534,32 @@
                         for (const fallbackLoc of FALLBACK_LOCATIONS) {
                             if (fallbackLoc === loc) continue;
                             const fbBaseUrl = `https://${fallbackLoc}-aiplatform.googleapis.com`;
-                            const fbUrl = `${fbBaseUrl}/v1/projects/${project}/locations/${fallbackLoc}/publishers/google/models/${model}:${geminiEndpoint}${geminiSuffix}`;
+                            const fbUrl = `${fbBaseUrl}/v1/projects/${project}/locations/${fallbackLoc}/publishers/google/models/${model}:${streamingEnabled ? 'streamGenerateContent?alt=sse' : 'generateContent'}`;
                             try {
-                                const fbRes = await fetchFn(fbUrl, {
+                                const fbRes = await executeRequest(fbUrl, {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
-                                    body: JSON.stringify(body),
+                                    body: requestBody,
                                     signal: abortSignal
-                                });
+                                }, { retryAuth: true, label: `Vertex Gemini ${fallbackLoc}` });
                                 if (fbRes.ok) {
                                     console.log(`[CPM-Vertex] Fallback to ${fallbackLoc} succeeded`);
                                     if (streamingEnabled) {
+                                        if (!fbRes.body || typeof fbRes.body.getReader !== 'function') {
+                                            const fbNonStreamUrl = `${fbBaseUrl}/v1/projects/${project}/locations/${fallbackLoc}/publishers/google/models/${model}:generateContent`;
+                                            const fbNonStreamRes = await executeRequest(fbNonStreamUrl, {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
+                                                body: requestBody,
+                                                signal: abortSignal
+                                            }, { retryAuth: true, label: `Vertex Gemini ${fallbackLoc} fallback` });
+                                            if (!fbNonStreamRes.ok) {
+                                                return { success: false, content: `[Vertex Error ${fbNonStreamRes.status}] ${await fbNonStreamRes.text()}`, _status: fbNonStreamRes.status };
+                                            }
+                                            const fbData = await fbNonStreamRes.json();
+                                            return CPM.parseGeminiNonStreamingResponse(fbData, config, _reqId);
+                                        }
+
                                         // BUG-D2 FIX: onComplete for fallback path too
                                         const _fbOnComplete = typeof CPM.saveThoughtSignatureFromStream === 'function'
                                             ? () => CPM.saveThoughtSignatureFromStream(config, _reqId) : undefined;
@@ -409,6 +579,22 @@
                 }
 
                 if (streamingEnabled) {
+                    if (!res.body || typeof res.body.getReader !== 'function') {
+                        console.warn('[CPM-Vertex] Gemini streaming response has no readable body; retrying as non-streaming.');
+                        console.log(`[CPM-Vertex] Gemini stream fallback path: ${nonStreamUrl}`);
+                        const fallbackRes = await executeRequest(nonStreamUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
+                            body: requestBody,
+                            signal: abortSignal
+                        }, { retryAuth: true, label: 'Vertex Gemini fallback' });
+                        if (!fallbackRes.ok) {
+                            return { success: false, content: `[Vertex Error ${fallbackRes.status}] ${await fallbackRes.text()}`, _status: fallbackRes.status };
+                        }
+                        const data = await fallbackRes.json();
+                        return CPM.parseGeminiNonStreamingResponse(data, config, _reqId);
+                    }
+
                     // BUG-D2 FIX: Pass onComplete for thought signature + token usage capture
                     const _onComplete = typeof CPM.saveThoughtSignatureFromStream === 'function'
                         ? () => CPM.saveThoughtSignatureFromStream(config, _reqId) : undefined;
@@ -434,7 +620,7 @@
             renderContent: async (renderInput, lists) => {
                 return `
                     <h3 class="text-3xl font-bold text-blue-400 mb-6 pb-3 border-b border-gray-700">Vertex AI Configuration (설정)</h3>
-                    ${await renderInput('cpm_vertex_key_json', 'Service Account JSON Key (JSON 키 - 여러 개 입력 시 쉼표로 구분, 자동 키회전)', 'textarea')}
+                    ${await renderInput('cpm_vertex_key_json', 'Service Account JSON Key (JSON 키 본문, 파일 경로 아님 - 여러 개 입력 시 쉼표로 구분, 자동 키회전)', 'textarea')}
                     ${await renderInput('cpm_vertex_location', 'Location Endpoint (리전 엔드포인트 ex: global, us-central1)')}
                     ${await renderInput('cpm_dynamic_vertexai', '📡 서버에서 모델 목록 불러오기 (Fetch models from API)', 'checkbox')}
                     ${await renderInput('cpm_vertex_thinking_level', 'Thinking Level (생각 수준 - Gemini 3용)', 'select', lists.thinkingList)}

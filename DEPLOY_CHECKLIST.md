@@ -1,85 +1,100 @@
-# Cupcake Plugin Manager — 배포 체크리스트
+# Cupcake Plugin Manager — 저장소 / 배포 분리 체크리스트
 
-> 매 푸시 전 반드시 확인. 하나라도 실패하면 푸시 금지.
+> 이 문서는 두 가지를 분리해서 관리한다.
+>
+> 1. 저장소에 추적해야 하는 파일
+> 2. 실제 공개 배포물에 포함할 파일
 
 ---
 
-## 1. 배포 대상 파일 (GitHub에 있어야 하는 것)
+## 1. 저장소에 추적해야 하는 것
+
+아래는 개발·검증·마이그레이션을 위해 **Git 저장소에 남겨야 하는 소스 원본**이다.
+
+| 범주 | 예시 |
+|------|------|
+| 소스 | `src/`, `scripts/`, `api/` |
+| 테스트 / 품질 | `tests/`, `.github/`, `.husky/`, `coverage/` 제외 설정 파일들 |
+| 빌드 / 타입체크 설정 | `package.json`, `package-lock.json`, `rollup.config.mjs`, `eslint.config.js`, `vitest.config.js`, `jsconfig.json`, `tsconfig.typecheck.json`, `.lintstagedrc.json` |
+| 문서 | `README.md`, `PLUGIN_GUIDE.md`, `DEPLOY_CHECKLIST.md` |
+| 배포 산출물 메타 | `versions.json`, `update-bundle.json`, `vercel.json`, 필요 시 `release-hashes.json` |
+| 최종 산출물 | `provider-manager.js`, `cpm-*.js` |
+
+핵심 원칙:
+
+- `src/`와 설정 파일은 **배포 대상이 아닐 수는 있어도 저장소 추적 대상**이다.
+- 마이그레이션 전에는 “지금 돌아가는 근거”를 최대한 저장소에 남기는 편이 안전하다.
+- `.gitignore`는 로컬/생성물만 제외하고, 소스 원본은 제외하지 않는다.
+
+---
+
+## 2. 공개 배포물에 포함할 것
+
+실제 사용자에게 전달하거나 원격 업데이트 API가 참조하는 파일만 따로 관리한다.
 
 | 파일 | 설명 |
 |------|------|
-| `provider-manager.js` | **dist/ 에서 빌드된 메인 플러그인** (root에 복사) |
-| `cpm-*.js` (11개) | 서브 플러그인 |
-| `versions.json` | 버전 메타데이터 |
-| `update-bundle.json` | API용 번들 (generate-bundle.cjs로 생성) |
-| `vercel.json` | Vercel 배포 설정 (CORS 헤더만) |
-| `api/versions.js` | Vercel serverless — 버전 조회 |
-| `api/update-bundle.js` | Vercel serverless — 번들 제공 |
-| `PLUGIN_GUIDE.md` | 플러그인 가이드 |
-| `README.md` | 리포 설명 |
-| `.gitignore` | |
+| `provider-manager.js` | 루트에 놓인 메인 플러그인 배포본 |
+| `cpm-*.js` | 루트에 놓인 서브 플러그인 배포본 |
+| `versions.json` | 원격 버전 메타데이터 |
+| `update-bundle.json` | 업데이트 번들 |
+| `vercel.json` | 배포 환경 설정 |
+| `api/versions.js` | 버전 조회 API |
+| `api/update-bundle.js` | 번들 제공 API |
+
+주의:
+
+- 저장소에 있다고 해서 모두 공개 배포물에 넣는 것은 아니다.
+- 배포 방식이 바뀌면 이 목록도 함께 바뀔 수 있다.
+- 현재처럼 마이그레이션 예정인 단계에서는 “저장소 추적”과 “공개 배포”를 절대 같은 의미로 취급하지 않는다.
 
 ---
 
-## 2. 절대 배포하면 안 되는 것
+## 3. 저장소와 배포 둘 다 제외할 것
 
-- [ ] `node_modules/` — git에 추가 금지
-- [ ] `src/` — 소스코드. 로컬 전용
-- [ ] `dist/` — 빌드 결과물 폴더 자체 (root에 복사한 파일만 배포)
-- [ ] `tests/`, `coverage/` — 테스트 관련
-- [ ] `package.json` — **Vercel가 Node.js 프로젝트로 인식하고 빌드 시도 → 배포 실패 원인**
-- [ ] `package-lock.json`
-- [ ] `rollup.config.mjs`, `eslint.config.js`, `vitest.config.js` 등 설정 파일
-- [ ] `.github/`, `.husky/` — CI/훅
-- [ ] API 키, 모델 가중치, credential 등 민감 정보
-- [ ] `*복사본*`, `*.bak`, `*.backup*` — 백업 파일
-- [ ] `generate-bundle.cjs` — 번들 생성 스크립트 (로컬 전용)
+아래는 로컬 산출물 또는 불필요한 임시 파일이다.
+
+- `node_modules/`
+- `dist/`
+- `coverage/`
+- `*복사본*`, `*.bak`, `*.backup*`
+- `backup_before_*/`, `pr6_test/`
+- 개인 설정 덤프 (`cupcake_pm_settings*.json` 등)
+- 민감 정보가 포함된 임시 파일
 
 ---
 
-## 3. 버전 업데이트 순서
+## 4. 작업 순서
 
-1. **메인 플러그인 수정** → `src/` 에서 작업 → `npm run build` → `dist/provider-manager.js` 생성
-2. **dist → root 복사**: `cp dist/provider-manager.js ./provider-manager.js`
-3. **서브 플러그인 수정 시**: 각 `cpm-*.js` 파일 내 `version` 문자열 +1 패치
-4. **versions.json 업데이트**: 모든 변경된 파일의 버전을 versions.json에 동기화
-5. **update-bundle.json 재생성**: `node generate-bundle.cjs`
-   - ⚠ 이거 안 하면 API가 구버전 반환함 (api/versions.js가 update-bundle.json 읽음)
-6. **테스트**: `npm test` (506개 전체 통과 확인)
-7. **커밋 & 푸시**
+1. `src/`에서 수정
+2. 필요 시 테스트 / 린트 / 타입체크 수행
+3. 배포본이 필요한 변경이면 루트 `provider-manager.js`, `cpm-*.js`, `versions.json`, `update-bundle.json` 동기화
+4. 마이그레이션 전까지는 **소스 원본 보존**을 우선
 
 ---
 
-## 4. 푸시 전 최종 점검
+## 5. 푸시 전 확인
 
 ```bash
-# 1) 트래킹 파일 확인 (20개여야 함, dev 파일 없어야 함)
+# 1) 소스 원본이 추적되고 있는지 확인
 git ls-files | sort
 
-# 2) package.json 이 tracked 아닌지 확인 (출력 없어야 정상)
-git ls-files | findstr "package.json"
+# 2) 로컬 산출물이 추적되지 않는지 확인
+git status --ignored
 
-# 3) versions.json 버전 ↔ 실제 파일 내 버전 일치 확인
-# 4) update-bundle.json이 최신인지 확인 (generate-bundle.cjs 재실행)
-# 5) provider-manager.js가 dist/ 빌드본인지 확인
-#    - root와 dist 파일 해시 비교: certutil -hashfile provider-manager.js SHA256
+# 3) 배포 메타데이터가 필요한 경우에만 최신인지 확인
+#    - versions.json
+#    - update-bundle.json
+
+# 4) provider-manager.js가 최신 빌드본인지 확인
+#    - 필요 시 root와 dist 해시 비교
 ```
 
 ---
 
-## 5. vercel.json 주의사항
+## 6. 기억할 원칙
 
-- `buildCommand`, `installCommand` 넣지 마라 — 정적 배포 기본값 사용
-- CORS 헤더 설정만 유지
-- package.json 없는 상태가 정상 (Vercel가 빌드 스킵하고 정적 서빙)
-
----
-
-## 6. 장애 이력 (참고)
-
-| 날짜 | 원인 | 결과 |
-|------|------|------|
-| 2026-03-09 | .gitignore에 `cpm-*.js`, `provider-manager.js` 추가 | 서브플러그인 diff 누락 |
-| 2026-03-09 | package.json (build 스크립트 포함) 커밋 | Vercel 배포 실패 (rollup 빌드 시도) |
-| 2026-03-09 | update-bundle.json 미갱신 | API가 구버전 반환 |
-| 2026-03-09 | node_modules/ 커밋 | 리포 비대화 |
+- `.gitignore`는 “저장소에 남길지”를 결정한다.
+- 배포 체크리스트는 “사용자에게 보낼지”를 결정한다.
+- 둘은 같은 질문이 아니다.
+- 마이그레이션 직전 단계에서는 소스와 설정을 저장소에서 숨기면 나중에 복구 비용이 더 커진다.

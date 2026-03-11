@@ -8,6 +8,18 @@
     const CPM = window.CupcakePM;
     if (!CPM) { console.error('[CPM-OpenRouter] CupcakePM API not found!'); return; }
 
+    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+    const parseRetryAfterMs = (headers) => {
+        const raw = headers?.get?.('retry-after');
+        if (!raw) return 0;
+        const seconds = Number(raw);
+        if (Number.isFinite(seconds) && seconds >= 0) return Math.max(0, Math.floor(seconds * 1000));
+        const retryAt = Date.parse(raw);
+        if (Number.isNaN(retryAt)) return 0;
+        return Math.max(0, retryAt - Date.now());
+    };
+    const isRetriableStatus = (status) => status === 408 || status === 429 || status >= 500;
+
     CPM.registerProvider({
         name: 'OpenRouter',
         models: [
@@ -30,6 +42,29 @@
 
             // Key Rotation: wrap fetch in withKeyRotation for automatic retry on 429/529
             const doFetch = async (apiKey) => {
+                const executeRequest = async (requestFactory, label, maxAttempts = 3) => {
+                    let attempt = 0;
+                    let response;
+
+                    while (attempt < maxAttempts) {
+                        response = await requestFactory();
+                        if (response?.ok) return response;
+
+                        const status = response?.status || 0;
+                        if (!isRetriableStatus(status) || attempt >= maxAttempts - 1 || abortSignal?.aborted) {
+                            return response;
+                        }
+
+                        response?.body?.cancel?.();
+                        attempt++;
+                        const retryDelay = parseRetryAfterMs(response?.headers) || (700 * attempt);
+                        console.warn(`[CPM-OpenRouter] ${label} retry ${attempt}/${maxAttempts - 1} after HTTP ${status}`);
+                        await sleep(retryDelay);
+                    }
+
+                    return response;
+                };
+
                 const modelName = config.model.trim();
                 // Detect models that need developer role (gpt-5, o-series)
                 // BUG-5 FIX: Exclude o1-preview/o1-mini which lack DeveloperRole support
@@ -81,20 +116,44 @@
                 }
 
                 const fetchFn = typeof CPM.smartNativeFetch === 'function' ? CPM.smartNativeFetch : (window.Risuai || window.risuai).nativeFetch;
-                const res = await fetchFn(url, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${apiKey}`,
-                        'HTTP-Referer': 'https://risuai.xyz',
-                        'X-Title': 'RisuAI - CPM'
-                    },
-                    body: JSON.stringify(body),
-                    signal: abortSignal
-                });
+                const requestHeaders = {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiKey}`,
+                    'HTTP-Referer': 'https://risuai.xyz',
+                    'X-Title': 'RisuAI - CPM'
+                };
+                const res = await executeRequest(
+                    () => fetchFn(url, {
+                        method: 'POST',
+                        headers: requestHeaders,
+                        body: JSON.stringify(body),
+                        signal: abortSignal
+                    }),
+                    'request'
+                );
                 if (!res.ok) return { success: false, content: `[OpenRouter Error ${res.status}] ${await res.text()}`, _status: res.status };
 
                 if (streamingEnabled) {
+                    const hasReadableStreamBody = !!(res.body && typeof res.body.getReader === 'function');
+                    if (!hasReadableStreamBody) {
+                        console.warn('[CPM-OpenRouter] Streaming response body unavailable; retrying as non-streaming.');
+                        const fallbackBody = { ...body, stream: false };
+                        delete fallbackBody.stream_options;
+                        const fallbackRes = await executeRequest(
+                            () => fetchFn(url, {
+                                method: 'POST',
+                                headers: requestHeaders,
+                                body: JSON.stringify(fallbackBody),
+                                signal: abortSignal
+                            }),
+                            'non-stream fallback'
+                        );
+                        if (!fallbackRes.ok) return { success: false, content: `[OpenRouter Error ${fallbackRes.status}] ${await fallbackRes.text()}`, _status: fallbackRes.status };
+                        const fallbackData = await fallbackRes.json();
+                        return typeof CPM.parseOpenAINonStreamingResponse === 'function'
+                            ? CPM.parseOpenAINonStreamingResponse(fallbackData, _reqId)
+                            : { success: true, content: fallbackData.choices?.[0]?.message?.content || '' };
+                    }
                     return { success: true, content: typeof CPM.createOpenAISSEStream === 'function'
                         ? CPM.createOpenAISSEStream(res, abortSignal, _reqId)
                         : CPM.createSSEStream(res, CPM.parseOpenAISSELine, abortSignal) };
