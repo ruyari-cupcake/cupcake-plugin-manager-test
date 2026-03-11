@@ -1,7 +1,7 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.19.7
+//@version 1.19.8
 //@update-url https://cupcake-plugin-manager-test.vercel.app/provider-manager.js
 
 // ==========================================
@@ -128,7 +128,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.19.7';
+    const CPM_VERSION = '1.19.8';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -4136,17 +4136,19 @@ var CupcakeProviderManager = (function (exports) {
                 const cacheBuster = this.VERSIONS_URL + '?_t=' + Date.now();
                 console.log(`[CPM AutoCheck] Fetching version manifest...`);
 
-                const result = await Risu.risuFetch(cacheBuster, { method: 'GET', plainFetchForce: true });
+                const fetchPromise = Risu.risuFetch(cacheBuster, { method: 'GET', plainFetchForce: true });
+                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Version manifest fetch timed out (15s)')), 15000));
+                const result = await Promise.race([fetchPromise, timeoutPromise]);
 
                 if (!result.data || (result.status && result.status >= 400)) {
-                    console.debug(`[CPM AutoCheck] Fetch failed (${result.status}), silently skipped.`);
+                    console.warn(`[CPM AutoCheck] Fetch failed (status=${result.status}), silently skipped.`);
                     return;
                 }
 
                 const manifest = (typeof result.data === 'string') ? JSON.parse(result.data) : result.data;
                 const manifestResult = validateSchema(manifest, schemas.updateBundleVersions);
                 if (!manifestResult.ok) {
-                    console.debug(`[CPM AutoCheck] Invalid manifest structure: ${manifestResult.error}`);
+                    console.warn(`[CPM AutoCheck] Invalid manifest structure: ${manifestResult.error}`);
                     return;
                 }
                 if (!manifest || typeof manifest !== 'object') return;
@@ -4169,14 +4171,17 @@ var CupcakeProviderManager = (function (exports) {
                 let mainUpdateInfo = null;
                 const mainRemote = manifest['Cupcake Provider Manager'];
                 if (mainRemote && mainRemote.version) {
+                    // Mark that manifest provided main plugin version info — prevents redundant JS fallback
+                    /** @type {any} */ (window)._cpmMainVersionFromManifest = true;
                     const mainCmp = this.compareVersions(CPM_VERSION, mainRemote.version);
                     if (mainCmp > 0) {
                         mainUpdateInfo = {
                             localVersion: CPM_VERSION, remoteVersion: mainRemote.version,
                             changes: mainRemote.changes || '',
                         };
-                        /** @type {any} */ (window)._cpmMainVersionFromManifest = true;
                         console.log(`[CPM AutoCheck] Main plugin update available: ${CPM_VERSION}→${mainRemote.version}`);
+                    } else {
+                        console.log(`[CPM AutoCheck] Main plugin is up to date (${CPM_VERSION}).`);
                     }
                 }
 
@@ -4283,16 +4288,39 @@ var CupcakeProviderManager = (function (exports) {
                 const cacheBuster = this.MAIN_UPDATE_URL + '?_t=' + Date.now();
                 console.log('[CPM MainAutoCheck] Fallback: fetching remote provider-manager.js...');
 
-                const result = await Risu.risuFetch(cacheBuster, { method: 'GET', plainFetchForce: true });
-
-                if (!result.data || (result.status && result.status >= 400)) {
-                    console.debug(`[CPM MainAutoCheck] Fetch failed (${result.status}), silently skipped.`);
-                    return;
+                let code;
+                try {
+                    // Prefer nativeFetch (standard Response) — risuFetch may hang in iframe sandbox for large files
+                    const response = await Promise.race([
+                        Risu.nativeFetch(cacheBuster, { method: 'GET' }),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('nativeFetch timed out (20s)')), 20000)),
+                    ]);
+                    if (!response.ok || response.status < 200 || response.status >= 300) {
+                        console.warn(`[CPM MainAutoCheck] nativeFetch failed (HTTP ${response.status}), skipped.`);
+                        return;
+                    }
+                    code = await response.text();
+                    console.log(`[CPM MainAutoCheck] nativeFetch OK (${(code.length / 1024).toFixed(1)}KB)`);
+                } catch (nativeErr) {
+                    console.warn(`[CPM MainAutoCheck] nativeFetch failed: ${nativeErr.message || nativeErr}, trying risuFetch...`);
+                    try {
+                        const result = await Promise.race([
+                            Risu.risuFetch(cacheBuster, { method: 'GET', plainFetchForce: true }),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error('risuFetch timed out (20s)')), 20000)),
+                        ]);
+                        if (!result.data || (result.status && result.status >= 400)) {
+                            console.warn(`[CPM MainAutoCheck] risuFetch also failed (status=${result.status}), skipped.`);
+                            return;
+                        }
+                        code = typeof result.data === 'string' ? result.data : String(result.data || '');
+                        console.log(`[CPM MainAutoCheck] risuFetch OK (${(code.length / 1024).toFixed(1)}KB)`);
+                    } catch (risuErr) {
+                        console.warn(`[CPM MainAutoCheck] Both fetch methods failed: ${risuErr.message || risuErr}`);
+                        return;
+                    }
                 }
-
-                const code = typeof result.data === 'string' ? result.data : String(result.data || '');
                 const verMatch = code.match(/\/\/\s*@version\s+([^\r\n]+)/i);
-                if (!verMatch) { console.debug('[CPM MainAutoCheck] Remote version tag not found, skipped.'); return; }
+                if (!verMatch) { console.warn('[CPM MainAutoCheck] Remote version tag not found in fetched code, skipped.'); return; }
                 const changesMatch = code.match(/\/\/\s*@changes\s+(.+)/i);
                 const changes = changesMatch ? changesMatch[1].trim() : '';
 
@@ -7209,9 +7237,10 @@ var CupcakeProviderManager = (function (exports) {
             }
 
             // ── Phase: Silent Update Check (deferred 5s) ──
-            setTimeout(() => {
-                SubPluginManager.checkVersionsQuiet().catch(() => {});
-                SubPluginManager.checkMainPluginVersionQuiet().catch(() => {});
+            // Sequential: manifest check first, then JS fallback only if manifest didn't cover main plugin
+            setTimeout(async () => {
+                try { await SubPluginManager.checkVersionsQuiet(); } catch (_) { }
+                try { await SubPluginManager.checkMainPluginVersionQuiet(); } catch (_) { }
             }, 5000);
 
             // ── Phase: Keyboard Shortcut + Touch Gesture ──

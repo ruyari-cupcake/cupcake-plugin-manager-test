@@ -333,9 +333,10 @@ setupCupcakeAPI();
         }
 
         // ── Phase: Silent Update Check (deferred 5s) ──
-        setTimeout(() => {
-            SubPluginManager.checkVersionsQuiet().catch(() => {});
-            SubPluginManager.checkMainPluginVersionQuiet().catch(() => {});
+        // Sequential: manifest check first, then JS fallback only if manifest didn't cover main plugin
+        setTimeout(async () => {
+            try { await SubPluginManager.checkVersionsQuiet(); } catch (_) { }
+            try { await SubPluginManager.checkMainPluginVersionQuiet(); } catch (_) { }
         }, 5000);
 
         // ── Phase: Keyboard Shortcut + Touch Gesture ──

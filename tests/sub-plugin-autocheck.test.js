@@ -95,6 +95,19 @@ describe('SubPluginManager auto update checks', () => {
         expect(SubPluginManager._pendingUpdateNames).toEqual([]);
     });
 
+    it('sets _cpmMainVersionFromManifest flag even when main plugin is up to date (no update)', async () => {
+        mockRisuFetch.mockResolvedValue({
+            status: 200,
+            data: JSON.stringify({
+                'Cupcake Provider Manager': { version: '1.19.6', changes: '' },
+            }),
+        });
+
+        expect(window._cpmMainVersionFromManifest).toBeUndefined();
+        await SubPluginManager.checkVersionsQuiet();
+        expect(window._cpmMainVersionFromManifest).toBe(true);
+    });
+
     it('checkMainPluginVersionQuiet skips JS fallback when manifest already handled main version', async () => {
         window._cpmMainVersionFromManifest = true;
 
