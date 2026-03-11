@@ -1,7 +1,7 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.19.6
+//@version 1.19.7
 //@update-url https://cupcake-plugin-manager-test.vercel.app/provider-manager.js
 
 // ==========================================
@@ -128,7 +128,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.19.6';
+    const CPM_VERSION = '1.19.7';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
