@@ -1,7 +1,7 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.19.17
+//@version 1.20.0
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================
@@ -95,6 +95,44 @@ var CupcakeProviderManager = (function (exports) {
 
     // @ts-check
     /**
+     * cpm-url.config.js — Single source of truth for the CPM deployment URL.
+     *
+     * Both `src/lib/endpoints.js` (runtime) and `rollup.config.mjs` (build-time
+     * banner injection into plugin-header.js) read from this file.
+     *
+     * To switch between test and production deployments, change ONLY this value:
+     *
+     * - Test:       https://cupcake-plugin-manager-test.vercel.app
+     * - Production: https://cupcake-plugin-manager.vercel.app
+     */
+
+    /** @type {string} */
+    const CPM_BASE_URL = 'https://cupcake-plugin-manager-test.vercel.app';
+
+    // @ts-check
+    /**
+     * endpoints.js — Centralized endpoint URL constants.
+     *
+     * All remote URLs used by CPM live here.
+     * The base URL is imported from `src/cpm-url.config.js` — the single
+     * source of truth shared with the Rollup build (which injects it into
+     * the plugin-header.js banner at build time).
+     *
+     * To switch between test / production, edit ONLY `src/cpm-url.config.js`.
+     */
+
+
+    /** Version manifest endpoint (GET → JSON). */
+    const VERSIONS_URL = `${CPM_BASE_URL}/api/versions`;
+
+    /** Main plugin JS download endpoint (GET → text/javascript). */
+    const MAIN_UPDATE_URL = `${CPM_BASE_URL}/api/main-plugin`;
+
+    /** Single-bundle update endpoint (GET → JSON with code + hashes). */
+    const UPDATE_BUNDLE_URL = `${CPM_BASE_URL}/api/update-bundle`;
+
+    // @ts-check
+    /**
      * shared-state.js — Central shared mutable state for Cupcake Provider Manager.
      *
      * Uses a state object pattern so other modules can mutate values
@@ -128,7 +166,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.19.17';
+    const CPM_VERSION = '1.20.0';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -199,6 +237,7 @@ var CupcakeProviderManager = (function (exports) {
     /**
      * Check if dynamic model fetching is enabled for a given provider.
      * Setting key: cpm_dynamic_<providerName_lowercase> = 'true'.
+     * @param {string} providerName
      */
     async function isDynamicFetchEnabled(providerName) {
         const key = `cpm_dynamic_${providerName.toLowerCase()}`;
@@ -238,6 +277,7 @@ var CupcakeProviderManager = (function (exports) {
     /**
      * Safe JSON.stringify: replacer removes null/undefined from all arrays during serialization.
      * Catches nulls from toJSON(), undefined→null conversion, etc.
+     * @param {any} obj
      */
     function safeStringify(obj) {
         return JSON.stringify(obj, function (_key, value) {
@@ -250,6 +290,7 @@ var CupcakeProviderManager = (function (exports) {
 
     /**
      * Check if message content is non-empty (string, array, or object).
+     * @param {any} content
      */
     function hasNonEmptyMessageContent(content) {
         if (content === null || content === undefined) return false;
@@ -261,6 +302,7 @@ var CupcakeProviderManager = (function (exports) {
 
     /**
      * Check if a message has attached multimodal content (images, audio, etc.).
+     * @param {any} message
      */
     function hasAttachedMultimodals(message) {
         return !!(message && Array.isArray(message.multimodals) && message.multimodals.length > 0);
@@ -269,6 +311,7 @@ var CupcakeProviderManager = (function (exports) {
     /**
      * Escape HTML special characters to prevent XSS when interpolating into innerHTML.
      * Shared across all settings-ui modules.
+     * @param {any} s
      */
     function escHtml(s) {
         return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -294,7 +337,7 @@ var CupcakeProviderManager = (function (exports) {
     /**
      * Extract image URL from an OpenAI-format content part (image_url or input_image).
      * Handles both string and object forms of image_url.
-     * @param {Object} part - Content part with image_url field
+     * @param {Record<string, any>} part - Content part with image_url field
      * @returns {string} URL or empty string
      */
     function extractImageUrlFromPart(part) {
@@ -381,7 +424,7 @@ var CupcakeProviderManager = (function (exports) {
      * Extract and normalize message payload into { text, multimodals }.
      * Handles RisuAI multimodals array, OpenAI content parts (image_url, input_audio, input_image),
      * Anthropic image blocks, and Gemini inlineData.
-     * @param {Object} message
+     * @param {Record<string, any>} message
      * @returns {NormalizedPayload}
      */
     function extractNormalizedMessagePayload(message) {
@@ -469,8 +512,8 @@ var CupcakeProviderManager = (function (exports) {
      * Deep-sanitize messages array: remove null/undefined entries,
      * strip internal RisuAI tags, filter messages with empty content.
      * Returns a NEW array — never mutates the input.
-     * @param {Array<Object>} messages
-     * @returns {Array<Object>}
+     * @param {Array<Record<string, any>>} messages
+     * @returns {Array<Record<string, any>>}
      */
     function sanitizeMessages(messages) {
         if (!Array.isArray(messages)) return [];
@@ -503,7 +546,7 @@ var CupcakeProviderManager = (function (exports) {
             const obj = JSON.parse(jsonStr);
             if (Array.isArray(obj.messages)) {
                 const before = obj.messages.length;
-                obj.messages = obj.messages.filter(m => {
+                obj.messages = obj.messages.filter((/** @type {any} */ m) => {
                     if (m == null || typeof m !== 'object') return false;
                     if (!hasNonEmptyMessageContent(m.content) && !hasAttachedMultimodals(m)) return false;
                     if (typeof m.role !== 'string' || !m.role) return false;
@@ -516,7 +559,7 @@ var CupcakeProviderManager = (function (exports) {
             }
             if (Array.isArray(obj.contents)) {
                 const before = obj.contents.length;
-                obj.contents = obj.contents.filter(m => m != null && typeof m === 'object');
+                obj.contents = obj.contents.filter((/** @type {any} */ m) => m != null && typeof m === 'object');
                 if (obj.contents.length < before) {
                     console.warn(`[Cupcake PM] sanitizeBodyJSON: removed ${before - obj.contents.length} null entries from contents`);
                 }
@@ -533,7 +576,7 @@ var CupcakeProviderManager = (function (exports) {
             if (typeof jsonStr === 'string' && !jsonStr.trimStart().startsWith('{') && !jsonStr.trimStart().startsWith('[')) {
                 return jsonStr;
             }
-            console.error('[Cupcake PM] sanitizeBodyJSON: JSON parse/stringify failed:', e.message);
+            console.error('[Cupcake PM] sanitizeBodyJSON: JSON parse/stringify failed:', /** @type {Error} */ (e).message);
             return jsonStr;
         }
     }
@@ -558,7 +601,7 @@ var CupcakeProviderManager = (function (exports) {
             const afterLastMarker = cleaned.substring(lastMarkerIdx);
             const contentMatch = afterLastMarker.match(/\n{3,}\s*(?=[^\s>\\])/);
             if (contentMatch) {
-                cleaned = afterLastMarker.substring(contentMatch.index).trim();
+                cleaned = afterLastMarker.substring(contentMatch.index ?? 0).trim();
             } else {
                 cleaned = '';
             }
@@ -589,7 +632,7 @@ var CupcakeProviderManager = (function (exports) {
     /**
      * Try known explicit Anthropic/proxy reasoning token fields first.
      * Future-proofed for proxy adapters that may expose separate reasoning counts.
-     * @param {Object} raw
+     * @param {Record<string, any>} raw
      * @returns {number}
      */
     function _extractAnthropicReasoningTokens(raw) {
@@ -651,7 +694,7 @@ var CupcakeProviderManager = (function (exports) {
         // Evict oldest entries when store exceeds max size to prevent memory leak
         if (_tokenUsageStore.size > _TOKEN_USAGE_STORE_MAX) {
             const it = _tokenUsageStore.keys();
-            _tokenUsageStore.delete(it.next().value);
+            _tokenUsageStore.delete(/** @type {string} */ (it.next().value));
         }
     }
 
@@ -678,7 +721,7 @@ var CupcakeProviderManager = (function (exports) {
 
     /**
      * Normalize token usage from different API formats into a unified shape.
-     * @param {Object} raw - Raw usage object from API response
+     * @param {Record<string, any>} raw - Raw usage object from API response
      * @param {'openai'|'anthropic'|'gemini'} format
      * @param {{ anthropicHasThinking?: boolean, anthropicVisibleText?: string }} [meta]
      * @returns {TokenUsage | null}
@@ -726,6 +769,7 @@ var CupcakeProviderManager = (function (exports) {
         return null;
     }
 
+    // @ts-check
     /**
      * token-toast.js — Lightweight toast notification for token usage display.
      * Shows input/output/reasoning/cached token counts at top-right corner.
@@ -749,7 +793,7 @@ var CupcakeProviderManager = (function (exports) {
             if (existing) { try { await existing.remove(); } catch (_) { } }
 
             // Format numbers with commas
-            const fmt = (n) => n != null ? n.toLocaleString() : '0';
+            const fmt = (/** @type {number} */ n) => n != null ? n.toLocaleString() : '0';
             const durationStr = durationMs ? `${(durationMs / 1000).toFixed(1)}s` : '';
 
             // Build detail parts
@@ -825,10 +869,11 @@ var CupcakeProviderManager = (function (exports) {
             }, 6000);
 
         } catch (e) {
-            console.debug('[CPM TokenToast] Failed:', e.message);
+            console.debug('[CPM TokenToast] Failed:', /** @type {Error} */ (e).message);
         }
     }
 
+    // @ts-check
     /**
      * format-openai.js — Format messages for OpenAI-compatible APIs.
      * Handles multimodal content, role normalization, developer role conversion.
@@ -836,17 +881,18 @@ var CupcakeProviderManager = (function (exports) {
 
     /**
      * Format messages for OpenAI Chat Completions API.
-     * @param {Array} messages - Raw message array from RisuAI
-     * @param {Object} config - Formatting options
+     * @param {Array<any>} messages - Raw message array from RisuAI
+     * @param {object} config - Formatting options
      * @param {boolean} [config.mergesys] - Merge system messages into first user message
      * @param {boolean} [config.mustuser] - Ensure first message is user/system
      * @param {boolean} [config.altrole] - Convert assistant→model (for Gemini-style APIs)
      * @param {boolean} [config.sysfirst] - Move first system message to top
      * @param {boolean} [config.developerRole] - Convert system→developer (GPT-5 series)
-     * @returns {Array} Formatted messages array
+     * @returns {Array<any>} Formatted messages array
      */
     function formatToOpenAI(messages, config = {}) {
         // Step 1: Deep sanitize — remove nulls, strip internal RisuAI tags
+        /** @type {Record<string, any>[]} */
         let msgs = sanitizeMessages(messages);
 
         if (config.mergesys) {
@@ -893,7 +939,7 @@ var CupcakeProviderManager = (function (exports) {
                         if (modal.base64) contentParts.push({ type: 'image_url', image_url: { url: modal.base64 } });
                         else if (modal.url) contentParts.push({ type: 'image_url', image_url: { url: modal.url } });
                     } else if (modal.type === 'audio') {
-                        const { mimeType: _audioMime, data: _audioData } = parseBase64DataUri(modal.base64);
+                        const { mimeType: _audioMime, data: _audioData } = parseBase64DataUri(modal.base64 ?? '');
                         let _audioFormat = 'mp3';
                         if (_audioMime) {
                             const _m = _audioMime.toLowerCase();
@@ -988,6 +1034,7 @@ var CupcakeProviderManager = (function (exports) {
         return arr;
     }
 
+    // @ts-check
     /**
      * format-anthropic.js — Format messages for Anthropic Claude API.
      * Handles system prompt extraction, consecutive message merging, multimodal content,
@@ -997,9 +1044,9 @@ var CupcakeProviderManager = (function (exports) {
     /**
      * Merge content parts into the previous message if same role, otherwise push a new entry.
      * Eliminates the repeated consecutive-merge pattern throughout formatToAnthropic.
-     * @param {Array} formattedMsgs - The formatted message array (mutated in place)
+     * @param {Array<any>} formattedMsgs - The formatted message array (mutated in place)
      * @param {string} role - 'user' | 'assistant'
-     * @param {Array} contentParts - Array of Anthropic content blocks to merge/push
+     * @param {Array<any>} contentParts - Array of Anthropic content blocks to merge/push
      */
     function _mergeOrPush(formattedMsgs, role, contentParts) {
         if (formattedMsgs.length > 0 && formattedMsgs[formattedMsgs.length - 1].role === role) {
@@ -1016,13 +1063,14 @@ var CupcakeProviderManager = (function (exports) {
 
     /**
      * Format messages for Anthropic Messages API.
-     * @param {Array} messages - Raw message array
+     * @param {Array<any>} messages - Raw message array
      * @param {Object} config - Formatting options
      * @param {boolean} [config.caching] - Enable cache_control breakpoints
      * @param {boolean} [config.claude1HourCaching] - Use 1h TTL for cache_control
-     * @returns {{ messages: Array, system: string }}
+     * @returns {{ messages: Array<any>, system: string }}
      */
     function formatToAnthropic(messages, config = {}) {
+        /** @type {any[]} */
         const validMsgs = sanitizeMessages(messages);
 
         // Extract leading system messages
@@ -1040,6 +1088,7 @@ var CupcakeProviderManager = (function (exports) {
         const remainingMsgs = validMsgs.slice(splitIdx);
 
         // Non-leading system messages → user role with "system: " prefix
+        /** @type {any[]} */
         const chatMsgs = remainingMsgs.map(m => {
             if (m.role === 'system') {
                 const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
@@ -1048,6 +1097,7 @@ var CupcakeProviderManager = (function (exports) {
             return m;
         });
 
+        /** @type {any[]} */
         const formattedMsgs = [];
         for (const m of chatMsgs) {
             const role = m.role === 'assistant' ? 'assistant' : 'user';
@@ -1069,7 +1119,7 @@ var CupcakeProviderManager = (function (exports) {
                             });
                             continue;
                         }
-                        const { mimeType: mediaType_raw, data } = parseBase64DataUri(modal.base64);
+                        const { mimeType: mediaType_raw, data } = parseBase64DataUri(/** @type {string} */ (modal.base64));
                         const mediaType = mediaType_raw || 'image/png';
                         imageParts.push({
                             type: 'image',
@@ -1165,6 +1215,7 @@ var CupcakeProviderManager = (function (exports) {
         return { messages: formattedMsgs, system: systemPrompt };
     }
 
+    // @ts-check
     /**
      * format-gemini.js — Format messages for Google Gemini API.
      * Includes safety settings, thinking config, parameter validation,
@@ -1200,6 +1251,7 @@ var CupcakeProviderManager = (function (exports) {
     /**
      * Validate and clamp Gemini API parameters to valid ranges.
      * Mutates the generationConfig object in place.
+     * @param {Record<string, any>} generationConfig
      */
     function validateGeminiParams(generationConfig) {
         if (!generationConfig || typeof generationConfig !== 'object') return;
@@ -1224,6 +1276,7 @@ var CupcakeProviderManager = (function (exports) {
 
     /**
      * Check if a model is an experimental Gemini model.
+     * @param {string} modelId
      */
     function isExperimentalGeminiModel(modelId) {
         return modelId && (modelId.includes('exp') || modelId.includes('experimental'));
@@ -1231,6 +1284,7 @@ var CupcakeProviderManager = (function (exports) {
 
     /**
      * Check if a Gemini model supports penalty parameters.
+     * @param {string} modelId
      */
     function geminiSupportsPenalty(modelId) {
         if (!modelId) return false;
@@ -1245,6 +1299,8 @@ var CupcakeProviderManager = (function (exports) {
     /**
      * Strip frequencyPenalty/presencePenalty from generationConfig if model doesn't
      * support them, or if values are 0.
+     * @param {Record<string, any>} generationConfig
+     * @param {string} modelId
      */
     function cleanExperimentalModelParams(generationConfig, modelId) {
         const supported = geminiSupportsPenalty(modelId);
@@ -1289,7 +1345,7 @@ var CupcakeProviderManager = (function (exports) {
             return { includeThoughts: true, thinkingBudget: budgetNum };
         }
         if (level && level !== 'off' && level !== 'none') {
-            const budgets = { 'MINIMAL': 1024, 'LOW': 4096, 'MEDIUM': 10240, 'HIGH': 24576 };
+            const budgets = /** @type {Record<string, number>} */ ({ 'MINIMAL': 1024, 'LOW': 4096, 'MEDIUM': 10240, 'HIGH': 24576 });
             const mapped = budgets[level] || parseInt(level) || 10240;
             return { includeThoughts: true, thinkingBudget: mapped };
         }
@@ -1305,10 +1361,15 @@ var CupcakeProviderManager = (function (exports) {
     const ThoughtSignatureCache = {
         _cache: new Map(),
         _maxSize: 50,
+        /** @param {any} responseText */
         _keyOf(responseText) {
             const normalized = stripThoughtDisplayContent(stripInternalTags(String(responseText || '')) || '');
             return normalized.substring(0, 500);
         },
+        /**
+         * @param {any} responseText
+         * @param {any} signature
+         */
         save(responseText, signature) {
             if (!responseText || !signature) return;
             const key = this._keyOf(responseText);
@@ -1318,6 +1379,7 @@ var CupcakeProviderManager = (function (exports) {
                 this._cache.delete(firstKey);
             }
         },
+        /** @param {any} responseText */
         get(responseText) {
             if (!responseText) return null;
             const key = this._keyOf(responseText);
@@ -1330,8 +1392,8 @@ var CupcakeProviderManager = (function (exports) {
 
     /**
      * Convert a normalized multimodal object to a Gemini content part.
-     * @param {Object} modal - Normalized modal { type, base64?, url?, mimeType? }
-     * @returns {Object} Gemini part (inlineData or fileData)
+     * @param {Record<string, any>} modal - Normalized modal { type, base64?, url?, mimeType? }
+     * @returns {any} Gemini part (inlineData or fileData)
      */
     function _modalToGeminiPart(modal) {
         if (modal.url && modal.type === 'image') {
@@ -1343,14 +1405,14 @@ var CupcakeProviderManager = (function (exports) {
 
     /**
      * Format messages for Gemini generateContent / streamGenerateContent API.
-     * @param {Array} messagesRaw - Raw message array
+     * @param {Array<any>} messagesRaw - Raw message array
      * @param {Object} config - Formatting options
      * @param {boolean} [config.preserveSystem] - Keep system instructions in dedicated field
      * @param {boolean} [config.useThoughtSignature] - Inject cached thought signatures
-     * @returns {{ contents: Array, systemInstruction: string[] }}
+     * @returns {{ contents: Array<any>, systemInstruction: string[] }}
      */
     function formatToGemini(messagesRaw, config = {}) {
-        const messages = sanitizeMessages(messagesRaw);
+        const messages = /** @type {any[]} */ (sanitizeMessages(messagesRaw));
         const systemInstruction = [];
         const contents = [];
 
@@ -1393,7 +1455,7 @@ var CupcakeProviderManager = (function (exports) {
 
             // Multimodal handling
             if (normalizedMultimodals.length > 0) {
-                const lastMessage = contents.length > 0 ? contents[contents.length - 1] : null;
+                const lastMessage = /** @type {any} */ (contents.length > 0 ? contents[contents.length - 1] : null);
 
                 if (lastMessage && lastMessage.role === role) {
                     if (trimmed) {
@@ -1423,6 +1485,7 @@ var CupcakeProviderManager = (function (exports) {
             }
 
             // Text-only message
+            /** @type {Record<string, any>} */
             const part = { text: trimmed || text };
             if (config.useThoughtSignature && role === 'model') {
                 const cachedSig = ThoughtSignatureCache.get(trimmed || text);
@@ -1453,6 +1516,7 @@ var CupcakeProviderManager = (function (exports) {
         return { contents, systemInstruction };
     }
 
+    // @ts-check
     /**
      * sse-parsers.js — SSE line parsers for different API formats.
      * Pure functions that extract delta text from SSE "data: {...}" lines.
@@ -1512,7 +1576,7 @@ var CupcakeProviderManager = (function (exports) {
      * Gemini SSE line parser: extracts text parts from streamed JSON chunks.
      * Handles thinking blocks, thought signatures, safety blocks, and usageMetadata.
      * @param {string} line - SSE data line
-     * @param {Object} config - Mutable config for tracking state across chunks
+     * @param {Record<string, any>} config - Mutable config for tracking state across chunks
      * @returns {string|null} Delta text content or null
      */
     function parseGeminiSSELine(line, config = {}) {
@@ -1570,6 +1634,7 @@ var CupcakeProviderManager = (function (exports) {
         } catch { return null; }
     }
 
+    // @ts-check
     /**
      * key-pool.js — API Key rotation engine.
      * Supports whitespace-separated key pools and JSON credential rotation (Vertex AI).
@@ -1581,13 +1646,14 @@ var CupcakeProviderManager = (function (exports) {
      * Random pick per request; on 429/529/503, drain failed key and retry.
      */
     const KeyPool = {
+        /** @type {Record<string, any>} */
         _pools: {},
-        /** Injected safeGetArg function. Set via setGetArgFn(). */
+        /** Injected safeGetArg function. Set via setGetArgFn(). @type {((key: string, defaultValue?: string) => Promise<string>) | null} */
         _getArgFn: null,
 
         /**
          * Set the argument retrieval function (dependency injection).
-         * @param {function} fn - async (key, defaultValue) => string
+         * @param {(key: string, defaultValue?: string) => Promise<string>} fn
          */
         setGetArgFn(fn) {
             this._getArgFn = fn;
@@ -1596,6 +1662,7 @@ var CupcakeProviderManager = (function (exports) {
         /**
          * Parse keys from the setting string (whitespace-separated), cache them,
          * and return a random key from the pool.
+         * @param {string} argName
          */
         async pick(argName) {
             const pool = this._pools[argName];
@@ -1618,6 +1685,8 @@ var CupcakeProviderManager = (function (exports) {
 
         /**
          * Remove a failed key from the pool. Returns remaining count.
+         * @param {string} argName
+         * @param {string} failedKey
          */
         drain(argName, failedKey) {
             const pool = this._pools[argName];
@@ -1629,6 +1698,7 @@ var CupcakeProviderManager = (function (exports) {
 
         /**
          * Get the number of remaining keys in the pool.
+         * @param {string} argName
          */
         remaining(argName) {
             return this._pools[argName]?.keys?.length || 0;
@@ -1636,6 +1706,7 @@ var CupcakeProviderManager = (function (exports) {
 
         /**
          * Force re-parse keys from settings on next pick.
+         * @param {string} argName
          */
         reset(argName) {
             delete this._pools[argName];
@@ -1643,10 +1714,13 @@ var CupcakeProviderManager = (function (exports) {
 
         /**
          * Pick key → fetchFn(key) → on retryable error, drain and retry.
+         * @param {string} argName
+         * @param {(key: string) => Promise<any>} fetchFn
+         * @param {{maxRetries?: number, isRetryable?: (result: any) => boolean}} [opts]
          */
         async withRotation(argName, fetchFn, opts = {}) {
             const maxRetries = opts.maxRetries || 30;
-            const isRetryable = opts.isRetryable || ((result) => {
+            const isRetryable = opts.isRetryable || ((/** @type {any} */ result) => {
                 if (!result._status) return false;
                 return result._status === 429 || result._status === 529 || result._status === 503;
             });
@@ -1674,11 +1748,16 @@ var CupcakeProviderManager = (function (exports) {
 
         // ── JSON Credential Rotation (Vertex AI 등 JSON 크레덴셜용) ──
 
+        /** @param {string} raw */
         _looksLikeWindowsPath(raw) {
             const trimmed = (raw || '').trim();
             return /^[A-Za-z]:\\/.test(trimmed) || /^\\\\[^\\]/.test(trimmed);
         },
 
+        /**
+         * @param {string} raw
+         * @param {any} [error]
+         */
         _buildJsonCredentialError(raw, error) {
             if (this._looksLikeWindowsPath(raw)) {
                 return new Error('JSON 인증 정보 대신 Windows 파일 경로가 입력되었습니다. 파일 경로가 아니라 Service Account JSON 본문 전체를 붙여넣어야 합니다.');
@@ -1695,6 +1774,7 @@ var CupcakeProviderManager = (function (exports) {
         /**
          * Extract individual JSON objects from raw textarea input.
          * Supports: single, comma-separated, JSON array, or newline-separated.
+         * @param {string} raw
          */
         _parseJsonCredentials(raw) {
             const trimmed = (raw || '').trim();
@@ -1718,7 +1798,7 @@ var CupcakeProviderManager = (function (exports) {
                 const obj = JSON.parse(trimmed);
                 if (obj && typeof obj === 'object' && !Array.isArray(obj)) return [trimmed];
             } catch (error) { lastError = error; }
-            if (lastError && /Bad Unicode escape/i.test(lastError.message || '')) {
+            if (lastError && /Bad Unicode escape/i.test(/** @type {Error} */ (lastError).message || '')) {
                 throw this._buildJsonCredentialError(trimmed, lastError);
             }
             return [];
@@ -1727,6 +1807,7 @@ var CupcakeProviderManager = (function (exports) {
         /**
          * Parse JSON credentials from a textarea field, cache them,
          * and return a random one from the pool.
+         * @param {string} argName
          */
         async pickJson(argName) {
             const getArg = this._getArgFn;
@@ -1738,7 +1819,7 @@ var CupcakeProviderManager = (function (exports) {
                     const jsons = this._parseJsonCredentials(raw);
                     this._pools[argName] = { lastRaw: raw, keys: jsons, error: '' };
                 } catch (error) {
-                    this._pools[argName] = { lastRaw: raw, keys: [], error: error.message };
+                    this._pools[argName] = { lastRaw: raw, keys: [], error: /** @type {Error} */ (error).message };
                 }
             }
             const keys = this._pools[argName].keys;
@@ -1748,10 +1829,13 @@ var CupcakeProviderManager = (function (exports) {
 
         /**
          * Like withRotation but uses pickJson for JSON credential parsing.
+         * @param {string} argName
+         * @param {(key: string) => Promise<any>} fetchFn
+         * @param {{maxRetries?: number, isRetryable?: (result: any) => boolean}} [opts]
          */
         async withJsonRotation(argName, fetchFn, opts = {}) {
             const maxRetries = opts.maxRetries || 30;
-            const isRetryable = opts.isRetryable || ((result) => {
+            const isRetryable = opts.isRetryable || ((/** @type {any} */ result) => {
                 if (!result._status) return false;
                 return result._status === 429 || result._status === 529 || result._status === 503;
             });
@@ -1784,6 +1868,7 @@ var CupcakeProviderManager = (function (exports) {
         }
     };
 
+    // @ts-check
     /**
      * slot-inference.js — Infer which auxiliary slot a request is targeting.
      * Uses model assignment matching + prompt content heuristics for disambiguation.
@@ -1856,7 +1941,7 @@ var CupcakeProviderManager = (function (exports) {
      * @returns {number} Score (higher = more confident match)
      */
     function scoreSlotHeuristic(promptText, slotName) {
-        const heuristic = SLOT_HEURISTICS[slotName];
+        const heuristic = SLOT_HEURISTICS[/** @type {keyof typeof SLOT_HEURISTICS} */ (slotName)];
         if (!heuristic || !promptText) return 0;
         let score = 0;
         for (const pattern of heuristic.patterns) {
@@ -1884,8 +1969,8 @@ var CupcakeProviderManager = (function (exports) {
      *
      * When heuristics fail, Risu's native parameter values are used as-is.
      *
-     * @param {Object} activeModelDef - Model definition with uniqueId
-     * @param {Object} args - Request arguments (contains prompt_chat)
+     * @param {Record<string, any>} activeModelDef - Model definition with uniqueId
+     * @param {Record<string, any>} args - Request arguments (contains prompt_chat)
      * @returns {Promise<{slot: string, heuristicConfirmed: boolean}>}
      *          slot = 'chat' | 'translation' | 'emotion' | 'memory' | 'other'
      *          heuristicConfirmed = true when the slot was confirmed via content analysis
@@ -1959,6 +2044,7 @@ var CupcakeProviderManager = (function (exports) {
         return { slot: 'chat', heuristicConfirmed: false };
     }
 
+    // @ts-check
     /**
      * aws-signer.js — AWS Signature Version 4 signer.
      * Self-contained implementation using Web Crypto API (available in iframe sandbox).
@@ -1981,6 +2067,10 @@ var CupcakeProviderManager = (function (exports) {
 
     const HEX_CHARS = '0123456789abcdef'.split('');
 
+    /**
+     * @param {ArrayBuffer} arrayBuffer
+     * @returns {string}
+     */
     function buf2hex(arrayBuffer) {
         const buffer = new Uint8Array(arrayBuffer);
         let out = '';
@@ -1992,10 +2082,19 @@ var CupcakeProviderManager = (function (exports) {
         return out;
     }
 
+    /**
+     * @param {string} urlEncodedStr
+     * @returns {string}
+     */
     function encodeRfc3986(urlEncodedStr) {
-        return urlEncodedStr.replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+        return urlEncodedStr.replace(/[!'()*]/g, (/** @type {string} */ c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
     }
 
+    /**
+     * @param {string|ArrayBuffer} key
+     * @param {string} string
+     * @returns {Promise<ArrayBuffer>}
+     */
     async function hmac(key, string) {
         const cryptoKey = await crypto.subtle.importKey(
             'raw',
@@ -2007,6 +2106,10 @@ var CupcakeProviderManager = (function (exports) {
         return crypto.subtle.sign('HMAC', cryptoKey, encoder.encode(string));
     }
 
+    /**
+     * @param {string|ArrayBuffer} content
+     * @returns {Promise<ArrayBuffer>}
+     */
     async function hash(content) {
         return crypto.subtle.digest(
             'SHA-256',
@@ -2014,6 +2117,11 @@ var CupcakeProviderManager = (function (exports) {
         );
     }
 
+    /**
+     * @param {URL} url
+     * @param {Headers} headers
+     * @returns {[string, string]}
+     */
     function guessServiceRegion(url, headers) {
         const { hostname, pathname } = url;
 
@@ -2052,7 +2160,7 @@ var CupcakeProviderManager = (function (exports) {
             [service, region] = [region, service];
         }
 
-        return [HOST_SERVICES[service] || service, region || ''];
+        return [/** @type {Record<string, string>} */ (HOST_SERVICES)[service] || service, region || ''];
     }
 
     /**
@@ -2060,6 +2168,24 @@ var CupcakeProviderManager = (function (exports) {
      * Signs HTTP requests for AWS services (Bedrock, STS, etc.) using Web Crypto API.
      */
     class AwsV4Signer {
+        /**
+         * @param {object} options
+         * @param {string} [options.method]
+         * @param {string|URL} options.url
+         * @param {HeadersInit} [options.headers]
+         * @param {string|ArrayBuffer|null} [options.body]
+         * @param {string} options.accessKeyId
+         * @param {string} options.secretAccessKey
+         * @param {string} [options.sessionToken]
+         * @param {string} [options.service]
+         * @param {string} [options.region]
+         * @param {Map<string, ArrayBuffer>} [options.cache]
+         * @param {string} [options.datetime]
+         * @param {boolean} [options.signQuery]
+         * @param {boolean} [options.appendSessionToken]
+         * @param {boolean} [options.allHeaders]
+         * @param {boolean} [options.singleEncode]
+         */
         constructor({ method, url, headers, body, accessKeyId, secretAccessKey, sessionToken, service, region, cache, datetime, signQuery, appendSessionToken, allHeaders, singleEncode }) {
             if (url == null) throw new TypeError('url is a required option');
             if (accessKeyId == null) throw new TypeError('accessKeyId is a required option');
@@ -2202,6 +2328,7 @@ var CupcakeProviderManager = (function (exports) {
         }
     }
 
+    // @ts-check
     /**
      * api-request-log.js — API Request History (ring buffer for API View feature).
      * Tracks HTTP requests/responses for debugging UI. Max 20 entries.
@@ -2209,6 +2336,7 @@ var CupcakeProviderManager = (function (exports) {
 
     const _apiRequestHistory = new Map();
     const _API_REQUEST_HISTORY_MAX = 20;
+    /** @type {string | null} */
     let _apiRequestLatestId = null;
 
     /**
@@ -2248,7 +2376,7 @@ var CupcakeProviderManager = (function (exports) {
 
     /**
      * Get all API request entries as an array, newest first.
-     * @returns {Array}
+     * @returns {any[]}
      */
     function getAllApiRequests() {
         const entries = [];
@@ -2348,6 +2476,7 @@ var CupcakeProviderManager = (function (exports) {
         return /(?:^|\/)(?:gpt-(?:4\.5|5)|o[1-9])/i.test(modelName);
     }
 
+    // @ts-check
     /**
      * response-parsers.js — Non-streaming response parsers for all providers.
      * Pure functions that extract text content from API JSON responses.
@@ -2356,7 +2485,7 @@ var CupcakeProviderManager = (function (exports) {
     /**
      * Parse OpenAI Chat Completions non-streaming response.
      * Handles reasoning_content (o-series), reasoning (OpenRouter), DeepSeek <think> blocks.
-     * @param {Object} data - Parsed JSON response
+     * @param {Record<string, any>} data - Parsed JSON response
      * @param {string} [_requestId] - Optional API View request ID
      * @returns {{ success: boolean, content: string }}
      */
@@ -2388,7 +2517,8 @@ var CupcakeProviderManager = (function (exports) {
         out += content;
 
         if (data.usage) {
-            _setTokenUsage(_requestId, _normalizeTokenUsage(data.usage, 'openai'), false);
+            const _tu = _normalizeTokenUsage(data.usage, 'openai');
+            if (_tu) _setTokenUsage(/** @type {string} */ (_requestId), _tu, false);
         }
         return { success: !!out, content: out || '[OpenAI] Empty response' };
     }
@@ -2396,7 +2526,7 @@ var CupcakeProviderManager = (function (exports) {
     /**
      * Parse OpenAI Responses API non-streaming response (GPT-5.4+).
      * Extracts text from output[].content[].text and reasoning from output[].summary[].
-     * @param {Object} data - Parsed JSON response
+     * @param {Record<string, any>} data - Parsed JSON response
      * @param {string} [_requestId] - Optional API View request ID
      * @returns {{ success: boolean, content: string }}
      */
@@ -2411,8 +2541,8 @@ var CupcakeProviderManager = (function (exports) {
             if (!item || typeof item !== 'object') continue;
             if (item.type === 'reasoning' && Array.isArray(item.summary)) {
                 const reasoningText = item.summary
-                    .filter(s => s && s.type === 'summary_text')
-                    .map(s => s.text || '')
+                    .filter(/** @type {(s: any) => boolean} */ (s) => s && s.type === 'summary_text')
+                    .map(/** @type {(s: any) => string} */ (s) => s.text || '')
                     .join('');
                 if (reasoningText) out += '<Thoughts>\n' + reasoningText + '\n</Thoughts>\n';
             }
@@ -2425,7 +2555,8 @@ var CupcakeProviderManager = (function (exports) {
         }
 
         if (data.usage) {
-            _setTokenUsage(_requestId, _normalizeTokenUsage(data.usage, 'openai'), false);
+            const _tu = _normalizeTokenUsage(data.usage, 'openai');
+            if (_tu) _setTokenUsage(/** @type {string} */ (_requestId), _tu, false);
         }
         return { success: !!out, content: out || '[Responses API] Empty response' };
     }
@@ -2433,8 +2564,8 @@ var CupcakeProviderManager = (function (exports) {
     /**
      * Parse Gemini generateContent non-streaming response.
      * Handles safety blocks, thoughts, thought_signature caching.
-     * @param {Object} data - Parsed JSON response
-     * @param {Object} [config] - { useThoughtSignature }
+     * @param {Record<string, any>} data - Parsed JSON response
+     * @param {Record<string, any>} [config] - { useThoughtSignature }
      * @param {string} [_requestId] - Optional API View request ID
      * @returns {{ success: boolean, content: string }}
      */
@@ -2473,7 +2604,8 @@ var CupcakeProviderManager = (function (exports) {
             ThoughtSignatureCache.save(result, extractedSignature);
         }
         if (data.usageMetadata) {
-            _setTokenUsage(_requestId, _normalizeTokenUsage(data.usageMetadata, 'gemini'), false);
+            const _tu = _normalizeTokenUsage(data.usageMetadata, 'gemini');
+            if (_tu) _setTokenUsage(/** @type {string} */ (_requestId), _tu, false);
         }
         return { success: !!result, content: result || '[Gemini] Empty response' };
     }
@@ -2481,8 +2613,8 @@ var CupcakeProviderManager = (function (exports) {
     /**
      * Parse Claude (Anthropic) non-streaming response.
      * Handles thinking/redacted_thinking blocks.
-     * @param {Object} data - Parsed JSON response
-     * @param {Object} [_config] - Unused, reserved for future options
+     * @param {Record<string, any>} data - Parsed JSON response
+     * @param {Record<string, any>} [_config] - Unused, reserved for future options
      * @param {string} [_requestId] - Optional API View request ID
      * @returns {{ success: boolean, content: string }}
      */
@@ -2520,10 +2652,11 @@ var CupcakeProviderManager = (function (exports) {
 
         if (inThinking) result += '</Thoughts>\n\n';
         if (data.usage) {
-            _setTokenUsage(_requestId, _normalizeTokenUsage(data.usage, 'anthropic', {
+            const _tu = _normalizeTokenUsage(data.usage, 'anthropic', {
                 anthropicHasThinking: hasThinking,
                 anthropicVisibleText: visibleText,
-            }), false);
+            });
+            if (_tu) _setTokenUsage(/** @type {string} */ (_requestId), _tu, false);
         }
         return { success: !!result, content: result || '[Claude] Empty response' };
     }
@@ -2535,7 +2668,8 @@ var CupcakeProviderManager = (function (exports) {
      * Uses dependency injection for _updateApiRequest to avoid tight coupling.
      */
 
-    /** Module-level reference to the API request logger. Set via setApiRequestLogger(). */
+    /** Module-level reference to the API request logger. Set via setApiRequestLogger().
+     * @type {Function|null} */
     let _logFn = null;
 
     /**
@@ -2546,6 +2680,7 @@ var CupcakeProviderManager = (function (exports) {
         _logFn = typeof fn === 'function' ? fn : null;
     }
 
+    /** @param {string|undefined} requestId @param {any} updates */
     function _log(requestId, updates) {
         if (_logFn && requestId) _logFn(requestId, updates);
     }
@@ -2562,7 +2697,7 @@ var CupcakeProviderManager = (function (exports) {
      * @returns {ReadableStream<string>}
      */
     function createSSEStream(response, lineParser, abortSignal, onComplete, _logRequestId) {
-        const reader = response.body.getReader();
+        const reader = /** @type {ReadableStream<Uint8Array>} */ (response.body).getReader();
         const decoder = new TextDecoder();
         let buffer = '';
         let _accumulatedContent = '';
@@ -2601,9 +2736,9 @@ var CupcakeProviderManager = (function (exports) {
                         }
                     }
                 } catch (e) {
-                    if (e.name !== 'AbortError') {
+                    if (/** @type {any} */ (e).name !== 'AbortError') {
                         if (typeof onComplete === 'function') try { const _f = onComplete(); if (_f) controller.enqueue(_f); } catch (_) { /* */ }
-                        _log(_logRequestId, { response: _accumulatedContent + `\n[Stream Error: ${e.message}]` });
+                        _log(_logRequestId, { response: _accumulatedContent + `\n[Stream Error: ${/** @type {any} */ (e).message}]` });
                         controller.error(e);
                     } else {
                         if (typeof onComplete === 'function') try { const _f = onComplete(); if (_f) controller.enqueue(_f); } catch (_) { /* */ }
@@ -2631,8 +2766,10 @@ var CupcakeProviderManager = (function (exports) {
      */
     function createOpenAISSEStream(response, abortSignal, _logRequestId) {
         let inReasoning = false;
+        /** @type {any} */
         let _streamUsage = null;
 
+        /** @param {string} line */
         function parser(line) {
             if (!line.startsWith('data:')) return null;
             const jsonStr = line.slice(5).trim();
@@ -2657,7 +2794,7 @@ var CupcakeProviderManager = (function (exports) {
         }
 
         function onComplete() {
-            if (_streamUsage) _setTokenUsage(_logRequestId, _streamUsage, true);
+            if (_streamUsage) _setTokenUsage(/** @type {string} */ (_logRequestId), _streamUsage, true);
             if (inReasoning) { inReasoning = false; return '\n</Thoughts>\n'; }
             return null;
         }
@@ -2677,8 +2814,10 @@ var CupcakeProviderManager = (function (exports) {
      */
     function createResponsesAPISSEStream(response, abortSignal, _logRequestId) {
         let inReasoning = false;
+        /** @type {any} */
         let _streamUsage = null;
 
+        /** @param {string} line */
         function parser(line) {
             if (!line.startsWith('data:')) return null;
             const jsonStr = line.slice(5).trim();
@@ -2705,7 +2844,7 @@ var CupcakeProviderManager = (function (exports) {
         }
 
         function onComplete() {
-            if (_streamUsage) _setTokenUsage(_logRequestId, _streamUsage, true);
+            if (_streamUsage) _setTokenUsage(/** @type {string} */ (_logRequestId), _streamUsage, true);
             if (inReasoning) { inReasoning = false; return '\n</Thoughts>\n'; }
             return null;
         }
@@ -2724,7 +2863,7 @@ var CupcakeProviderManager = (function (exports) {
      * @returns {ReadableStream<string>}
      */
     function createAnthropicSSEStream(response, abortSignal, _logRequestId) {
-        const reader = response.body.getReader();
+        const reader = /** @type {ReadableStream<Uint8Array>} */ (response.body).getReader();
         const decoder = new TextDecoder();
         let buffer = '';
         let currentEvent = '';
@@ -2745,10 +2884,10 @@ var CupcakeProviderManager = (function (exports) {
                                 thinking = false;
                             }
                             if (_streamUsage.input_tokens > 0 || _streamUsage.output_tokens > 0) {
-                                _setTokenUsage(_logRequestId, _normalizeTokenUsage(_streamUsage, 'anthropic', {
+                                _setTokenUsage(/** @type {string} */ (_logRequestId), /** @type {any} */ (_normalizeTokenUsage(_streamUsage, 'anthropic', {
                                     anthropicHasThinking: hasThinking,
                                     anthropicVisibleText: _visibleText,
-                                }), true);
+                                })), true);
                             }
                             reader.cancel();
                             _log(_logRequestId, { response: _accumulatedContent || '(aborted)' });
@@ -2764,10 +2903,10 @@ var CupcakeProviderManager = (function (exports) {
                                 thinking = false;
                             }
                             if (_streamUsage.input_tokens > 0 || _streamUsage.output_tokens > 0) {
-                                _setTokenUsage(_logRequestId, _normalizeTokenUsage(_streamUsage, 'anthropic', {
+                                _setTokenUsage(/** @type {string} */ (_logRequestId), /** @type {any} */ (_normalizeTokenUsage(_streamUsage, 'anthropic', {
                                     anthropicHasThinking: hasThinking,
                                     anthropicVisibleText: _visibleText,
-                                }), true);
+                                })), true);
                             }
                             _log(_logRequestId, { response: _accumulatedContent || '(empty stream)' });
                             if (_accumulatedContent) console.log('[CupcakePM] 📥 Streamed Response Body (Anthropic):', _accumulatedContent);
@@ -2842,13 +2981,13 @@ var CupcakeProviderManager = (function (exports) {
                         thinking = false;
                     }
                     if (_streamUsage.input_tokens > 0 || _streamUsage.output_tokens > 0) {
-                        _setTokenUsage(_logRequestId, _normalizeTokenUsage(_streamUsage, 'anthropic', {
+                        _setTokenUsage(/** @type {string} */ (_logRequestId), /** @type {any} */ (_normalizeTokenUsage(_streamUsage, 'anthropic', {
                             anthropicHasThinking: hasThinking,
                             anthropicVisibleText: _visibleText,
-                        }), true);
+                        })), true);
                     }
-                    if (e.name !== 'AbortError') {
-                        _log(_logRequestId, { response: _accumulatedContent + `\n[Stream Error: ${e.message}]` });
+                    if (/** @type {any} */ (e).name !== 'AbortError') {
+                        _log(_logRequestId, { response: _accumulatedContent + `\n[Stream Error: ${/** @type {any} */ (e).message}]` });
                         controller.error(e);
                     } else {
                         _log(_logRequestId, { response: _accumulatedContent || '(aborted)' });
@@ -2859,10 +2998,10 @@ var CupcakeProviderManager = (function (exports) {
             cancel() {
                 _log(_logRequestId, { response: _accumulatedContent || '(cancelled)' });
                 if (_streamUsage.input_tokens > 0 || _streamUsage.output_tokens > 0) {
-                    _setTokenUsage(_logRequestId, _normalizeTokenUsage(_streamUsage, 'anthropic', {
+                    _setTokenUsage(/** @type {string} */ (_logRequestId), /** @type {any} */ (_normalizeTokenUsage(_streamUsage, 'anthropic', {
                         anthropicHasThinking: hasThinking,
                         anthropicVisibleText: _visibleText,
-                    }), true);
+                    })), true);
                 }
                 reader.cancel();
             },
@@ -2873,7 +3012,7 @@ var CupcakeProviderManager = (function (exports) {
 
     /**
      * onComplete callback for Gemini streams — saves thought_signature from config.
-     * @param {Object} config - Mutable config object populated during streaming
+     * @param {Record<string, any>} config - Mutable config object populated during streaming
      * @param {string} [_requestId]
      * @returns {string|undefined} Final chunk to enqueue (e.g. closing </Thoughts>)
      */
@@ -2889,11 +3028,12 @@ var CupcakeProviderManager = (function (exports) {
         }
         if (config._streamUsageMetadata) {
             const _usageReqId = _requestId || config._tokenUsageReqId;
-            _setTokenUsage(_usageReqId, _normalizeTokenUsage(config._streamUsageMetadata, 'gemini'), true);
+            _setTokenUsage(_usageReqId, /** @type {any} */ (_normalizeTokenUsage(config._streamUsageMetadata, 'gemini')), true);
         }
         return finalChunk || undefined;
     }
 
+    // @ts-check
     /**
      * stream-utils.js — Stream utility functions.
      * Provides stream collection and bridge capability detection.
@@ -2923,6 +3063,7 @@ var CupcakeProviderManager = (function (exports) {
     }
 
     /** Cached result of stream bridge capability detection. */
+    /** @type {boolean | null} */
     let _streamBridgeCapable = null;
 
     /**
@@ -2985,6 +3126,7 @@ var CupcakeProviderManager = (function (exports) {
         _streamBridgeCapable = null;
     }
 
+    // @ts-check
     /**
      * copilot-token.js — GitHub Copilot API token management.
      * Handles OAuth → API token exchange with caching and single-flight dedup.
@@ -2992,11 +3134,11 @@ var CupcakeProviderManager = (function (exports) {
      */
 
     let _copilotTokenCache = { token: '', expiry: 0 };
-    let _copilotTokenPromise = null;
+    let _copilotTokenPromise = /** @type {Promise<string> | null} */ (null);
 
     /** Injected dependencies */
-    let _getArgFn = null;
-    let _fetchFn = null;
+    let _getArgFn = /** @type {Function | null} */ (null);
+    let _fetchFn = /** @type {Function | null} */ (null);
 
     /**
      * Set the safeGetArg dependency for reading stored arguments.
@@ -3100,7 +3242,7 @@ var CupcakeProviderManager = (function (exports) {
         try {
             return await _copilotTokenPromise;
         } catch (e) {
-            console.error('[Cupcake PM] Copilot token exchange error:', e.message);
+            console.error('[Cupcake PM] Copilot token exchange error:', /** @type {Error} */ (e).message);
             return '';
         } finally {
             _copilotTokenPromise = null;
@@ -3115,6 +3257,7 @@ var CupcakeProviderManager = (function (exports) {
         _copilotTokenPromise = null;
     }
 
+    // @ts-check
     /**
      * smart-fetch.js — 3-strategy fetch wrapper for V3 iframe sandbox.
      *
@@ -3186,8 +3329,10 @@ var CupcakeProviderManager = (function (exports) {
     }
 
     /** Cached compatibility mode flag — null = not yet read, boolean = cached value */
+    /** @type {boolean | null} */
     let _compatibilityModeCache = null;
     /** Cached bridge capability — null = not yet checked */
+    /** @type {boolean | null} */
     let _bridgeCapableCache = null;
 
     /**
@@ -3209,6 +3354,11 @@ var CupcakeProviderManager = (function (exports) {
         return !_bridgeCapableCache;
     }
 
+    /**
+     * @param {string} url
+     * @param {RequestInit & Record<string, any>} [options]
+     * @returns {Promise<Response>}
+     */
     async function smartNativeFetch(url, options = {}) {
         // Early abort check — avoid unnecessary work if already cancelled
         if (options.signal && options.signal.aborted) {
@@ -3220,7 +3370,7 @@ var CupcakeProviderManager = (function (exports) {
             try {
                 options = { ...options, body: sanitizeBodyJSON(options.body) };
             } catch (e) {
-                console.error('[CupcakePM] smartNativeFetch: body re-sanitization failed:', e.message);
+                console.error('[CupcakePM] smartNativeFetch: body re-sanitization failed:', /** @type {Error} */ (e).message);
             }
         }
 
@@ -3240,14 +3390,14 @@ var CupcakeProviderManager = (function (exports) {
         // cannot serialize AbortSignal via postMessage. When this DataCloneError
         // occurs, we strip the signal but race the request against the original
         // signal so callers still see AbortError on cancellation.
-        const callNativeFetchWithAbortFallback = async (_url, _options) => {
+        const callNativeFetchWithAbortFallback = async (/** @type {string} */ _url, /** @type {any} */ _options) => {
             if (_options?.signal?.aborted) {
                 throw new DOMException('The operation was aborted.', 'AbortError');
             }
             try {
                 return await Risu.nativeFetch(_url, _options);
             } catch (_err) {
-                const _msg = String(_err?.message || _err || '');
+                const _msg = String(/** @type {any} */ (_err)?.message || _err || '');
                 const _hasSignal = !!(_options && _options.signal);
                 const _cloneIssue = /clone|structured|postmessage|AbortSignal|DataCloneError/i.test(_msg);
                 if (_hasSignal && _cloneIssue) {
@@ -3269,7 +3419,7 @@ var CupcakeProviderManager = (function (exports) {
                 return res;
             } catch (e) {
                 if (_isAbortError(e)) throw e;
-                console.log(`[CupcakePM] Direct fetch failed for ${url.substring(0, 60)}...: ${e.message}`);
+                console.log(`[CupcakePM] Direct fetch failed for ${url.substring(0, 60)}...: ${/** @type {Error} */ (e).message}`);
             }
         }
 
@@ -3290,7 +3440,7 @@ var CupcakeProviderManager = (function (exports) {
                 console.log(`[CupcakePM] Google/Vertex nativeFetch returned unusable response, trying fallbacks: status=${nfRes?.status || 'unknown'}`);
             } catch (e) {
                 if (_isAbortError(e)) throw e;
-                console.log(`[CupcakePM] Google/Vertex nativeFetch error: ${e.message}`);
+                console.log(`[CupcakePM] Google/Vertex nativeFetch error: ${/** @type {Error} */ (e).message}`);
             }
         }
 
@@ -3322,7 +3472,7 @@ var CupcakeProviderManager = (function (exports) {
                 }
             } catch (e) {
                 if (_isAbortError(e)) throw e;
-                console.log(`[CupcakePM] Copilot nativeFetch error: ${e.message}`);
+                console.log(`[CupcakePM] Copilot nativeFetch error: ${/** @type {Error} */ (e).message}`);
             }
         }
 
@@ -3360,7 +3510,7 @@ var CupcakeProviderManager = (function (exports) {
                     try {
                         bodyObj = JSON.parse(JSON.stringify(bodyObj));
                     } catch (serErr) {
-                        console.warn('[CupcakePM] bodyObj JSON round-trip failed, stripping non-serializable keys:', serErr.message);
+                        console.warn('[CupcakePM] bodyObj JSON round-trip failed, stripping non-serializable keys:', /** @type {Error} */ (serErr).message);
                         try { bodyObj = _stripNonSerializable(bodyObj, 0); } catch (_) { }
                     }
                 }
@@ -3376,7 +3526,7 @@ var CupcakeProviderManager = (function (exports) {
                         abortSignal: options.signal,
                     });
                 } catch (_rfErr) {
-                    const _rfMsg = String(_rfErr?.message || _rfErr || '');
+                    const _rfMsg = String(/** @type {any} */ (_rfErr)?.message || _rfErr || '');
                     if (options.signal && /clone|structured|postmessage|AbortSignal|DataCloneError/i.test(_rfMsg)) {
                         console.warn('[CupcakePM] risuFetch signal clone failed; retrying without signal (abort monitored locally):', _rfMsg);
                         result = await _raceWithAbortSignal(
@@ -3397,7 +3547,7 @@ var CupcakeProviderManager = (function (exports) {
                 const responseBody = _extractResponseBody(result);
                 if (responseBody) {
                     console.log(`[CupcakePM] risuFetch succeeded: status=${result.status} for ${url.substring(0, 60)}`);
-                    return new Response(responseBody, {
+                    return new Response(/** @type {any} */ (responseBody), {
                         status: result.status || 200,
                         headers: new Headers(result.headers || {}),
                     });
@@ -3406,7 +3556,7 @@ var CupcakeProviderManager = (function (exports) {
                 console.log(`[CupcakePM] risuFetch not a real response: ${errPreview}`);
             } catch (e) {
                 if (_isAbortError(e)) throw e;
-                console.log(`[CupcakePM] risuFetch error: ${e.message}`);
+                console.log(`[CupcakePM] risuFetch error: ${/** @type {Error} */ (e).message}`);
             }
         }
 
@@ -3424,7 +3574,7 @@ var CupcakeProviderManager = (function (exports) {
                 return res;
             } catch (e) {
                 if (_isAbortError(e)) throw e;
-                console.error(`[CupcakePM] nativeFetch also failed: ${e.message}`);
+                console.error(`[CupcakePM] nativeFetch also failed: ${/** @type {Error} */ (e).message}`);
             }
         }
 
@@ -3433,6 +3583,10 @@ var CupcakeProviderManager = (function (exports) {
 
     // ─── Internal helpers ───
 
+    /**
+     * @param {any} body
+     * @returns {any}
+     */
     function _parseBodyForRisuFetch(body) {
         if (!body) return undefined;
         if (typeof body === 'string') {
@@ -3444,6 +3598,10 @@ var CupcakeProviderManager = (function (exports) {
         return body;
     }
 
+    /**
+     * @param {any} bodyObj
+     * @returns {any}
+     */
     function _deepSanitizeBody(bodyObj) {
         if (Array.isArray(bodyObj.messages)) {
             try {
@@ -3454,22 +3612,28 @@ var CupcakeProviderManager = (function (exports) {
                     if (_rm == null || typeof _rm !== 'object') continue;
                     if (typeof _rm.role !== 'string' || !_rm.role) continue;
                     if (_rm.content === null || _rm.content === undefined) continue;
+                    /** @type {Record<string, any>} */
                     const safeMsg = { role: _rm.role, content: _rm.content };
                     if (_rm.name && typeof _rm.name === 'string') safeMsg.name = _rm.name;
                     bodyObj.messages.push(safeMsg);
                 }
             } catch (_e) {
-                console.error('[CupcakePM] Deep reconstruct of messages failed:', _e.message);
-                bodyObj.messages = bodyObj.messages.filter(m => m != null && typeof m === 'object');
+                console.error('[CupcakePM] Deep reconstruct of messages failed:', /** @type {Error} */ (_e).message);
+                bodyObj.messages = bodyObj.messages.filter((/** @type {any} */ m) => m != null && typeof m === 'object');
             }
         }
         if (Array.isArray(bodyObj.contents)) {
             try { bodyObj.contents = JSON.parse(JSON.stringify(bodyObj.contents)); } catch (_) { }
-            bodyObj.contents = bodyObj.contents.filter(m => m != null && typeof m === 'object');
+            bodyObj.contents = bodyObj.contents.filter((/** @type {any} */ m) => m != null && typeof m === 'object');
         }
         return bodyObj;
     }
 
+    /**
+     * @param {any} obj
+     * @param {number} depth
+     * @returns {any}
+     */
     function _stripNonSerializable(obj, depth) {
         if (depth > 15) return undefined;
         if (obj === null || obj === undefined) return obj;
@@ -3478,6 +3642,7 @@ var CupcakeProviderManager = (function (exports) {
         if (t === 'function' || t === 'symbol' || t === 'bigint') return undefined;
         if (Array.isArray(obj)) return obj.map(v => _stripNonSerializable(v, depth + 1)).filter(v => v !== undefined);
         if (t === 'object') {
+            /** @type {Record<string, any>} */
             const out = {};
             for (const k of Object.keys(obj)) {
                 try { const v = _stripNonSerializable(obj[k], depth + 1); if (v !== undefined) out[k] = v; } catch (_) { }
@@ -3487,6 +3652,10 @@ var CupcakeProviderManager = (function (exports) {
         return undefined;
     }
 
+    /**
+     * @param {any} result
+     * @returns {Uint8Array | null}
+     */
     function _extractResponseBody(result) {
         if (!result || result.data == null) return null;
         if (result.data instanceof Uint8Array) return result.data;
@@ -3514,6 +3683,12 @@ var CupcakeProviderManager = (function (exports) {
         return null;
     }
 
+    /**
+     * @param {string} url
+     * @param {RequestInit & Record<string, any>} options
+     * @param {string} mode
+     * @returns {Promise<Response | null>}
+     */
     async function _tryCopilotRisuFetch(url, options, mode) {
         try {
             const bodyObj = _parseBodyForRisuFetch(options.body);
@@ -3521,6 +3696,7 @@ var CupcakeProviderManager = (function (exports) {
                 throw new Error('Body JSON parse failed — cannot safely pass to risuFetch');
             }
 
+            /** @type {Record<string, any>} */
             const fetchOpts = {
                 method: options.method || 'POST',
                 headers: options.headers || {},
@@ -3535,7 +3711,7 @@ var CupcakeProviderManager = (function (exports) {
             try {
                 result = await Risu.risuFetch(url, fetchOpts);
             } catch (_rfErr) {
-                const _rfMsg = String(_rfErr?.message || _rfErr || '');
+                const _rfMsg = String(/** @type {any} */ (_rfErr)?.message || _rfErr || '');
                 if (options.signal && /clone|structured|postmessage|AbortSignal|DataCloneError/i.test(_rfMsg)) {
                     console.warn(`[CupcakePM] Copilot risuFetch(${mode}) signal clone failed; retrying without signal (abort monitored locally)`);
                     const _signal = options.signal;
@@ -3553,7 +3729,7 @@ var CupcakeProviderManager = (function (exports) {
                     return null;
                 }
                 console.log(`[CupcakePM] Copilot ${mode} risuFetch succeeded: status=${result.status} for ${url.substring(0, 60)}`);
-                return new Response(responseBody, {
+                return new Response(/** @type {any} */ (responseBody), {
                     status: result.status || 200,
                     headers: new Headers(result.headers || {}),
                 });
@@ -3563,11 +3739,12 @@ var CupcakeProviderManager = (function (exports) {
             console.log(`[CupcakePM] Copilot ${mode} risuFetch not a real response: ${errPreview}`);
         } catch (e) {
             if (_isAbortError(e)) throw e;
-            console.log(`[CupcakePM] Copilot ${mode} risuFetch error: ${e.message}`);
+            console.log(`[CupcakePM] Copilot ${mode} risuFetch error: ${/** @type {Error} */ (e).message}`);
         }
         return null;
     }
 
+    // @ts-check
     /**
      * csp-exec.js — CSP-safe code execution (replaces eval() in V3 iframe sandbox).
      * Uses <script> tag injection with nonce for sub-plugin execution.
@@ -3605,19 +3782,19 @@ var CupcakeProviderManager = (function (exports) {
                 ? safeUUID().replace(/-/g, '')
                 : Math.random().toString(36).slice(2));
             const safeName = JSON.stringify(pluginName || 'unknown');
-            let scriptEl = null;
+            let scriptEl = /** @type {HTMLScriptElement | null} */ (null);
 
             const timeout = setTimeout(() => {
-                if (window[cbId]) {
-                    delete window[cbId];
+                if (/** @type {any} */ (window)[cbId]) {
+                    delete /** @type {any} */ (window)[cbId];
                     try { if (scriptEl && scriptEl.parentNode) scriptEl.parentNode.removeChild(scriptEl); } catch (_) {}
                     reject(new Error(`Plugin ${pluginName} script timed out (CSP block?)`));
                 }
             }, 10000);
 
-            window[cbId] = (err) => {
+            /** @type {any} */ (window)[cbId] = (/** @type {any} */ err) => {
                 clearTimeout(timeout);
-                delete window[cbId];
+                delete /** @type {any} */ (window)[cbId];
                 try { if (scriptEl && scriptEl.parentNode) scriptEl.parentNode.removeChild(scriptEl); } catch (_) {}
                 if (err) reject(err);
                 else resolve();
@@ -3772,7 +3949,7 @@ var CupcakeProviderManager = (function (exports) {
         try {
             parsed = JSON.parse(jsonString);
         } catch (e) {
-            return { ok: false, error: `JSON parse failed: ${e.message}`, fallback: schema.fallback };
+            return { ok: false, error: `JSON parse failed: ${/** @type {Error} */ (e).message}`, fallback: schema.fallback };
         }
         return validateSchema(parsed, schema);
     }
@@ -3842,6 +4019,7 @@ var CupcakeProviderManager = (function (exports) {
         },
     };
 
+    // @ts-check
     /**
      * settings-backup.js — Persistent settings backup/restore via pluginStorage.
      * Survives plugin deletion — settings can be auto-restored on reinstall.
@@ -3892,6 +4070,10 @@ var CupcakeProviderManager = (function (exports) {
         'cpm_compatibility_mode',
     ];
 
+    /**
+     * @param {any} key
+     * @returns {boolean}
+     */
     function isManagedSettingKey(key) {
         return typeof key === 'string' && key.length > 0 && (
             key.startsWith('cpm_')
@@ -3902,14 +4084,14 @@ var CupcakeProviderManager = (function (exports) {
 
     function getManagedSettingKeys(providerTabs = registeredProviderTabs) {
         const dynamicKeys = Array.isArray(providerTabs)
-            ? providerTabs.flatMap(tab => tab?.exportKeys || []).filter(isManagedSettingKey)
+            ? providerTabs.flatMap(tab => (/** @type {Record<string, any>} */ (tab))?.exportKeys || []).filter(isManagedSettingKey)
             : [];
         return [...new Set([...getAuxSettingKeys(), ...BASE_SETTING_KEYS, ...dynamicKeys])];
     }
 
     const SettingsBackup = {
         STORAGE_KEY: 'cpm_settings_backup',
-        _cache: null,
+        _cache: /** @type {Record<string, any> | null} */ (null),
 
         getAllKeys() {
             return getManagedSettingKeys();
@@ -3941,32 +4123,34 @@ var CupcakeProviderManager = (function (exports) {
             }
         },
 
-        async updateKey(key, value) {
+        async updateKey(/** @type {string} */ key, /** @type {any} */ value) {
             if (!this._cache) await this.load();
-            this._cache[key] = value;
+            if (this._cache) this._cache[key] = value;
             await this.save();
         },
 
         async snapshotAll() {
             if (!this._cache) this._cache = {};
+            const cache = this._cache;
             for (const key of this.getAllKeys()) {
                 const val = await safeGetArg(key);
                 if (val !== undefined && val !== '') {
-                    this._cache[key] = val;
+                    cache[key] = val;
                 }
             }
             await this.save();
-            console.log(`[CPM Backup] Snapshot saved (${Object.keys(this._cache).length} keys)`);
+            console.log(`[CPM Backup] Snapshot saved (${Object.keys(cache).length} keys)`);
         },
 
         async restoreIfEmpty() {
             if (!this._cache) await this.load();
-            if (!this._cache || Object.keys(this._cache).length === 0) {
+            const cache = this._cache;
+            if (!cache || Object.keys(cache).length === 0) {
                 console.log('[CPM Backup] No backup found, skipping restore.');
                 return 0;
             }
             let restoredCount = 0;
-            for (const [key, value] of Object.entries(this._cache)) {
+            for (const [key, value] of Object.entries(cache)) {
                 const current = await safeGetArg(key);
                 if ((current === undefined || current === null || current === '') && value !== undefined && value !== '') {
                     Risu.setArgument(key, String(value));
@@ -3982,9 +4166,26 @@ var CupcakeProviderManager = (function (exports) {
 
     // @ts-check
     /**
-     * sub-plugin-manager.js — Dynamic sub-plugin lifecycle management.
-     * Handles install, remove, toggle, execute, hot-reload, and auto-update.
+     * auto-updater.js — Main plugin auto-update logic.
+     *
+     * Extracted from sub-plugin-manager.js for maintainability.
+     * All methods are designed to be spread into SubPluginManager and called
+     * with `this` referencing SubPluginManager.
+     *
+     * Responsibilities:
+     *   - Pending update marker persistence (read/write/clear/remember)
+     *   - Retriable error classification
+     *   - Version check (manifest + JS fallback)
+     *   - Download with bundle-first strategy + Content-Length integrity
+     *   - Validate & install to RisuAI DB (header parsing, settings preservation)
+     *   - Boot retry lifecycle
+     *   - Single-bundle sub-plugin update check & apply
+     *   - Concurrent dedup via _mainUpdateInFlight
      */
+
+    // ────────────────────────────────────────────────────────────────
+    // SHA-256 utility (module-level, not a method)
+    // ────────────────────────────────────────────────────────────────
 
     /**
      * Compute SHA-256 hex digest of a string using Web Crypto API.
@@ -4003,116 +4204,64 @@ var CupcakeProviderManager = (function (exports) {
         }
     }
 
-    // DI: _exposeScopeToWindow is injected by init.js to avoid circular dependency.
-    let _exposeScopeToWindow$1 = () => {};
-    function setExposeScopeFunction(fn) { _exposeScopeToWindow$1 = fn; }
+    // ────────────────────────────────────────────────────────────────
+    // Auto-updater method collection
+    // ────────────────────────────────────────────────────────────────
 
-    const SubPluginManager = {
-        STORAGE_KEY: 'cpm_installed_subplugins',
-        plugins: [],
+    /**
+     * @typedef {Object} SubPluginLike
+     * @property {string} id
+     * @property {string} name
+     * @property {string} [version]
+     * @property {string} [code]
+     * @property {string} [description]
+     * @property {string} [icon]
+     * @property {string} [updateUrl]
+     * @property {boolean} [enabled]
+     */
 
-        async loadRegistry() {
-            try {
-                const data = await Risu.pluginStorage.getItem(this.STORAGE_KEY);
-                if (!data) { this.plugins = []; return; }
-                const result = parseAndValidate(data, schemas.subPluginRegistry);
-                if (!result.ok) {
-                    console.warn('[CPM Loader] Registry schema validation failed:', result.error);
-                    this.plugins = result.fallback;
-                } else {
-                    this.plugins = result.data;
-                }
-            } catch (e) {
-                console.error('[CPM Loader] Failed to load registry', e);
-                this.plugins = [];
-            }
-        },
+    /**
+     * Represents the full SubPluginManager object after all spreads are merged.
+     * Used as `@this` context for auto-updater methods.
+     * @typedef {Object} SubPluginManagerCtx
+     * @property {SubPluginLike[]} plugins
+     * @property {(a: string, b: string) => number} compareVersions
+     * @property {(code: string) => {name: string, version: string, description?: string, icon?: string, updateUrl?: string}} extractMetadata
+     * @property {() => Promise<void>} saveRegistry
+     * @property {(updates: any[]) => Promise<void>} showUpdateToast
+     * @property {(local: string, remote: string, changes: string, success: boolean, error?: string) => Promise<void>} _showMainAutoUpdateResult
+     * @property {() => Promise<void>} _waitForMainPluginPersistence
+     * @property {(remoteVersion: string, changes?: string) => Promise<{ok: boolean, error?: string}>} safeMainPluginUpdate
+     * @property {(remoteVersion: string, changes: string) => Promise<void>} _rememberPendingMainUpdate
+     * @property {() => Promise<void>} _clearPendingMainUpdate
+     * @property {(error: string) => boolean} _isRetriableMainUpdateError
+     * @property {() => Promise<string>} _getInstalledMainPluginVersion
+     * @property {(data: any) => Promise<void>} _writePendingMainUpdate
+     * @property {() => Promise<any>} _readPendingMainUpdate
+     * @property {(expectedVersion?: string) => Promise<{ok: boolean, code?: string, error?: string}>} _downloadMainPluginCode
+     * @property {(code: string, remoteVersion: string, changes?: string) => Promise<{ok: boolean, error?: string}>} _validateAndInstallMainPlugin
+     * @property {string} VERSIONS_URL
+     * @property {string} MAIN_UPDATE_URL
+     * @property {string} UPDATE_BUNDLE_URL
+     * @property {number} _VERSION_CHECK_COOLDOWN
+     * @property {string} _VERSION_CHECK_STORAGE_KEY
+     * @property {string} _MAIN_VERSION_CHECK_STORAGE_KEY
+     * @property {string} _MAIN_UPDATE_RETRY_STORAGE_KEY
+     * @property {number} _MAIN_UPDATE_RETRY_COOLDOWN
+     * @property {number} _MAIN_UPDATE_RETRY_MAX_ATTEMPTS
+     * @property {Promise<{ok: boolean, error?: string}>|null} _mainUpdateInFlight
+     * @property {string[]} _pendingUpdateNames
+     */
 
-        async saveRegistry() {
-            await Risu.pluginStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.plugins));
-        },
-
-        extractMetadata(code) {
-            const meta = { name: 'Unnamed Sub-Plugin', version: '', description: '', icon: '📦', updateUrl: '' };
-            const nameMatch = code.match(/\/\/\s*@(?:name|display-name)\s+(.+)/i);
-            if (nameMatch) meta.name = nameMatch[1].trim();
-            const verMatch = code.match(/\/\/\s*@version\s+([^\r\n]+)/i);
-            if (verMatch) meta.version = verMatch[1].trim();
-            const descMatch = code.match(/\/\/\s*@description\s+(.+)/i);
-            if (descMatch) meta.description = descMatch[1].trim();
-            const iconMatch = code.match(/\/\/\s*@icon\s+(.+)/i);
-            if (iconMatch) meta.icon = iconMatch[1].trim();
-            const updateMatch = code.match(/\/\/\s*@update-url\s+(.+)/i);
-            if (updateMatch) meta.updateUrl = updateMatch[1].trim();
-            return meta;
-        },
-
-        async install(code) {
-            const meta = this.extractMetadata(code);
-            const existing = this.plugins.find(p => p.name === meta.name);
-            if (existing) {
-                existing.code = code;
-                existing.version = meta.version;
-                existing.description = meta.description;
-                existing.icon = meta.icon;
-                existing.updateUrl = meta.updateUrl;
-                await this.saveRegistry();
-                return meta.name;
-            }
-            const id = 'subplugin_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
-            this.plugins.push({ id, code, enabled: true, ...meta });
-            await this.saveRegistry();
-            return meta.name;
-        },
-
-        async remove(id) {
-            this.plugins = this.plugins.filter(p => p.id !== id);
-            await this.saveRegistry();
-        },
-
-        async toggle(id, enabled) {
-            const p = this.plugins.find(p => p.id === id);
-            if (p) {
-                p.enabled = enabled;
-                await this.saveRegistry();
-            }
-        },
-
-        async executeEnabled() {
-            _exposeScopeToWindow$1();
-            /** @type {any} */ (window).CupcakePM_SubPlugins = /** @type {any} */ (window).CupcakePM_SubPlugins || [];
-            for (const p of this.plugins) {
-                if (p.enabled) {
-                    try {
-                        state._currentExecutingPluginId = p.id;
-                        if (!_pluginRegistrations[p.id]) _pluginRegistrations[p.id] = { providerNames: [], tabObjects: [], fetcherEntries: [] };
-                        await _executeViaScriptTag(p.code, p.name);
-                        console.log(`[CPM Loader] Loaded Sub-Plugin: ${p.name}`);
-                    } catch (e) {
-                        console.error(`[CPM Loader] Failed to load ${p.name}`, e);
-                    } finally {
-                        state._currentExecutingPluginId = null;
-                    }
-                }
-            }
-        },
-
-        compareVersions(a, b) {
-            const sa = (a || '0.0.0').replace(/[^0-9.]/g, '') || '0.0.0';
-            const sb = (b || '0.0.0').replace(/[^0-9.]/g, '') || '0.0.0';
-            const pa = sa.split('.').map(Number);
-            const pb = sb.split('.').map(Number);
-            for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-                const na = pa[i] || 0, nb = pb[i] || 0;
-                if (nb > na) return 1;
-                if (na > nb) return -1;
-            }
-            return 0;
-        },
-
-        // ── Lightweight Silent Version Check ──
-        VERSIONS_URL: 'https://cupcake-plugin-manager-test.vercel.app/api/versions',
-        MAIN_UPDATE_URL: 'https://cupcake-plugin-manager-test.vercel.app/api/main-plugin',
+    /**
+     * Methods to be spread into SubPluginManager.
+     * Every method uses `this` which will reference SubPluginManager at call-time.
+     * @type {{[K: string]: any}}
+     */
+    const autoUpdaterMethods = {
+        // ── Constants & State ──
+        VERSIONS_URL: VERSIONS_URL,
+        MAIN_UPDATE_URL: MAIN_UPDATE_URL,
         _VERSION_CHECK_COOLDOWN: 600000,
         _VERSION_CHECK_STORAGE_KEY: 'cpm_last_version_check',
         _MAIN_VERSION_CHECK_STORAGE_KEY: 'cpm_last_main_version_check',
@@ -4121,6 +4270,8 @@ var CupcakeProviderManager = (function (exports) {
         _MAIN_UPDATE_RETRY_MAX_ATTEMPTS: 2,
         _mainUpdateInFlight: null,
         _pendingUpdateNames: [],
+
+        // ── Pending update marker persistence ──
 
         async _readPendingMainUpdate() {
             try {
@@ -4144,17 +4295,18 @@ var CupcakeProviderManager = (function (exports) {
                     lastAttemptTs: Number(parsed.lastAttemptTs) || 0,
                     lastError: typeof parsed.lastError === 'string' ? parsed.lastError : '',
                 };
-            } catch (e) {
+            } catch (/** @type {any} */ e) {
                 console.warn('[CPM Retry] Failed to read pending main update marker:', e.message || e);
                 try { await this._clearPendingMainUpdate(); } catch (_) { }
                 return null;
             }
         },
 
+        /** @param {any} data */
         async _writePendingMainUpdate(data) {
             try {
                 await Risu.pluginStorage.setItem(this._MAIN_UPDATE_RETRY_STORAGE_KEY, JSON.stringify(data));
-            } catch (e) {
+            } catch (/** @type {any} */ e) {
                 console.warn('[CPM Retry] Failed to write pending main update marker:', e.message || e);
             }
         },
@@ -4166,11 +4318,15 @@ var CupcakeProviderManager = (function (exports) {
                 } else {
                     await Risu.pluginStorage.setItem(this._MAIN_UPDATE_RETRY_STORAGE_KEY, '');
                 }
-            } catch (e) {
+            } catch (/** @type {any} */ e) {
                 console.warn('[CPM Retry] Failed to clear pending main update marker:', e.message || e);
             }
         },
 
+        /**
+         * @param {string} remoteVersion
+         * @param {string} [changes]
+         */
         async _rememberPendingMainUpdate(remoteVersion, changes) {
             const version = String(remoteVersion || '').trim();
             if (!version) return;
@@ -4186,6 +4342,9 @@ var CupcakeProviderManager = (function (exports) {
             });
         },
 
+        // ── Error classification ──
+
+        /** @param {string|Error} error */
         _isRetriableMainUpdateError(error) {
             const msg = String(error || '').toLowerCase();
             if (!msg) return true;
@@ -4201,15 +4360,19 @@ var CupcakeProviderManager = (function (exports) {
             return !nonRetriablePatterns.some(pattern => msg.includes(pattern.toLowerCase()));
         },
 
+        // ── Installed version helper ──
+
         async _getInstalledMainPluginVersion() {
             try {
                 const db = await Risu.getDatabase();
-                const plugin = db?.plugins?.find?.(p => p?.name === 'Cupcake_Provider_Manager');
+                const plugin = db?.plugins?.find?.((/** @type {any} */ p) => p?.name === 'Cupcake_Provider_Manager');
                 return String(plugin?.versionOfPlugin || CPM_VERSION || '').trim();
             } catch (_) {
                 return String(CPM_VERSION).trim();
             }
         },
+
+        // ── Boot retry lifecycle ──
 
         async retryPendingMainPluginUpdateOnBoot() {
             try {
@@ -4254,11 +4417,13 @@ var CupcakeProviderManager = (function (exports) {
                     }
                 }
                 return true;
-            } catch (e) {
+            } catch (/** @type {any} */ e) {
                 console.warn('[CPM Retry] Pending main update retry failed:', e.message || e);
                 return false;
             }
         },
+
+        // ── Manifest-based version check ──
 
         async checkVersionsQuiet() {
             try {
@@ -4314,7 +4479,6 @@ var CupcakeProviderManager = (function (exports) {
                 let mainUpdateInfo = null;
                 const mainRemote = manifest['Cupcake Provider Manager'];
                 if (mainRemote && mainRemote.version) {
-                    // Mark that manifest provided main plugin version info — prevents redundant JS fallback
                     /** @type {any} */ (window)._cpmMainVersionFromManifest = true;
                     const mainCmp = this.compareVersions(CPM_VERSION, mainRemote.version);
                     if (mainCmp > 0) {
@@ -4347,11 +4511,596 @@ var CupcakeProviderManager = (function (exports) {
                         try { await this.safeMainPluginUpdate(mainUpdateInfo.remoteVersion, mainUpdateInfo.changes); } catch (_) { }
                     }, delay);
                 }
-            } catch (e) {
+            } catch (/** @type {any} */ e) {
                 console.debug(`[CPM AutoCheck] Silent error:`, e.message || e);
             }
         },
 
+        // ── JS fallback version check ──
+
+        async checkMainPluginVersionQuiet() {
+            try {
+                if (/** @type {any} */ (window)._cpmMainVersionFromManifest) {
+                    console.log('[CPM MainAutoCheck] Already checked via manifest, skipping JS fallback.');
+                    return;
+                }
+                if (/** @type {any} */ (window)._cpmMainVersionChecked) return;
+                /** @type {any} */ (window)._cpmMainVersionChecked = true;
+
+                try {
+                    const lastCheck = await Risu.pluginStorage.getItem(this._MAIN_VERSION_CHECK_STORAGE_KEY);
+                    if (lastCheck) {
+                        const elapsed = Date.now() - parseInt(lastCheck, 10);
+                        if (elapsed < this._VERSION_CHECK_COOLDOWN) {
+                            console.log(`[CPM MainAutoCheck] Skipped — last check ${Math.round(elapsed / 60000)}min ago`);
+                            return;
+                        }
+                    }
+                } catch (_) { /* ignore */ }
+
+                const cacheBuster = this.MAIN_UPDATE_URL + '?_t=' + Date.now();
+                console.log('[CPM MainAutoCheck] Fallback: fetching remote main plugin script...');
+
+                let code;
+                try {
+                    const response = await Promise.race([
+                        Risu.nativeFetch(cacheBuster, { method: 'GET' }),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('nativeFetch timed out (20s)')), 20000)),
+                    ]);
+                    if (!response.ok || response.status < 200 || response.status >= 300) {
+                        console.warn(`[CPM MainAutoCheck] nativeFetch failed (HTTP ${response.status}), skipped.`);
+                        return;
+                    }
+                    code = await Promise.race([
+                        response.text(),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('nativeFetch body read timed out (20s)')), 20000)),
+                    ]);
+                    console.log(`[CPM MainAutoCheck] nativeFetch OK (${(code.length / 1024).toFixed(1)}KB)`);
+                } catch (/** @type {any} */ nativeErr) {
+                    console.warn(`[CPM MainAutoCheck] nativeFetch failed: ${nativeErr.message || nativeErr}, trying risuFetch...`);
+                    try {
+                        const result = await Promise.race([
+                            Risu.risuFetch(cacheBuster, { method: 'GET', plainFetchForce: true }),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error('risuFetch timed out (20s)')), 20000)),
+                        ]);
+                        if (!result.data || (result.status && result.status >= 400)) {
+                            console.warn(`[CPM MainAutoCheck] risuFetch also failed (status=${result.status}), skipped.`);
+                            return;
+                        }
+                        code = typeof result.data === 'string' ? result.data : String(result.data || '');
+                        console.log(`[CPM MainAutoCheck] risuFetch OK (${(code.length / 1024).toFixed(1)}KB)`);
+                    } catch (/** @type {any} */ risuErr) {
+                        console.warn(`[CPM MainAutoCheck] Both fetch methods failed: ${risuErr.message || risuErr}`);
+                        return;
+                    }
+                }
+                const verMatch = code.match(/\/\/\s*@version\s+([^\r\n]+)/i);
+                if (!verMatch) { console.warn('[CPM MainAutoCheck] Remote version tag not found in fetched code, skipped.'); return; }
+                const changesMatch = code.match(/\/\/\s*@changes\s+(.+)/i);
+                const changes = changesMatch ? changesMatch[1].trim() : '';
+
+                const remoteVersion = (verMatch[1] || '').trim();
+                const localVersion = CPM_VERSION;
+                const cmp = this.compareVersions(localVersion, remoteVersion);
+
+                try { await Risu.pluginStorage.setItem(this._MAIN_VERSION_CHECK_STORAGE_KEY, String(Date.now())); } catch (_) { /* ignore */ }
+
+                if (cmp > 0) {
+                    console.log(`[CPM MainAutoCheck] Main update available: ${localVersion}→${remoteVersion}`);
+                    try { await this._rememberPendingMainUpdate(remoteVersion, changes); } catch (_) { }
+                    const installResult = await this._validateAndInstallMainPlugin(code, remoteVersion, changes);
+                    if (!installResult.ok) {
+                        console.warn(`[CPM MainAutoCheck] Direct install failed (${installResult.error}), trying fresh verified download...`);
+                        await this.safeMainPluginUpdate(remoteVersion, changes);
+                    }
+                } else {
+                    console.log('[CPM MainAutoCheck] Main plugin is up to date.');
+                }
+            } catch (/** @type {any} */ e) { console.debug('[CPM MainAutoCheck] Silent error:', e.message || e); }
+        },
+
+        // ── Download with integrity verification ──
+
+        /**
+         * Download main plugin code with verification (retry + Content-Length check).
+         * @param {string} [expectedVersion] - Version announced by manifest/API.
+         * @returns {Promise<{ok: boolean, code?: string, error?: string}>}
+         */
+        async _downloadMainPluginCode(expectedVersion) {
+            const LOG = '[CPM Download]';
+            const MAX_RETRIES = 3;
+            const url = this.MAIN_UPDATE_URL;
+
+            // Prefer the update bundle (same source of truth as api/versions).
+            try {
+                const bundleUrl = this.UPDATE_BUNDLE_URL + '?_t=' + Date.now() + '&_r=' + Math.random().toString(36).substr(2, 6);
+                console.log(`${LOG} Trying update bundle first: ${bundleUrl}`);
+                const bundleResult = await Promise.race([
+                    Risu.risuFetch(bundleUrl, { method: 'GET', plainFetchForce: true }),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('update bundle fetch timed out (20s)')), 20000)),
+                ]);
+
+                if (bundleResult?.data && (!bundleResult.status || bundleResult.status < 400)) {
+                    const rawBundle = typeof bundleResult.data === 'string' ? JSON.parse(bundleResult.data) : bundleResult.data;
+                    const parsedBundle = validateSchema(rawBundle, schemas.updateBundle);
+                    if (!parsedBundle.ok) {
+                        throw new Error(`update bundle schema invalid: ${parsedBundle.error}`);
+                    }
+
+                    const bundle = parsedBundle.data;
+                    const mainEntry = bundle.versions?.['Cupcake Provider Manager'];
+                    const fileName = mainEntry?.file || 'provider-manager.js';
+                    const bundledCode = bundle.code?.[fileName];
+
+                    if (!mainEntry?.version) {
+                        throw new Error('main plugin version missing in update bundle');
+                    }
+                    if (expectedVersion && mainEntry.version !== expectedVersion) {
+                        throw new Error(`bundle version mismatch: expected ${expectedVersion}, got ${mainEntry.version}`);
+                    }
+                    if (!bundledCode || typeof bundledCode !== 'string') {
+                        throw new Error(`main plugin code missing in update bundle (${fileName})`);
+                    }
+                    if (!mainEntry.sha256) {
+                        throw new Error('main plugin bundle entry has no sha256 hash — refusing untrusted update');
+                    }
+                    const actualHash = await _computeSHA256(bundledCode);
+                    if (!actualHash) {
+                        throw new Error('SHA-256 computation failed for bundled main plugin code');
+                    }
+                    if (actualHash !== mainEntry.sha256) {
+                        throw new Error(`bundle sha256 mismatch: expected ${mainEntry.sha256.substring(0, 12)}…, got ${actualHash.substring(0, 12)}…`);
+                    }
+                    console.log(`${LOG} Bundle integrity OK [sha256:${mainEntry.sha256.substring(0, 12)}…]`);
+
+                    console.log(`${LOG} Bundle download OK: ${fileName} v${mainEntry.version} (${(bundledCode.length / 1024).toFixed(1)}KB)`);
+                    return { ok: true, code: bundledCode };
+                }
+                throw new Error(`update bundle fetch failed with status ${bundleResult?.status}`);
+            } catch (/** @type {any} */ bundleErr) {
+                console.warn(`${LOG} Update bundle path failed, falling back to direct JS:`, bundleErr.message || bundleErr);
+            }
+
+            for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+                try {
+                    console.log(`${LOG} Attempt ${attempt}/${MAX_RETRIES}: ${url}`);
+                    const cacheBuster = url + '?_t=' + Date.now() + '&_r=' + Math.random().toString(36).substr(2, 6);
+
+                    let response;
+                    try {
+                        response = await Promise.race([
+                            Risu.nativeFetch(cacheBuster, { method: 'GET' }),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error('nativeFetch timed out (20s)')), 20000)),
+                        ]);
+                    } catch (nativeErr) {
+                        console.warn(`${LOG} nativeFetch failed, falling back to risuFetch:`, /** @type {any} */ (nativeErr).message || nativeErr);
+                        const risuResult = await Promise.race([
+                            Risu.risuFetch(cacheBuster, { method: 'GET', plainFetchForce: true }),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error('risuFetch fallback timed out (20s)')), 20000)),
+                        ]);
+                        if (!risuResult.data || (risuResult.status && risuResult.status >= 400)) {
+                            throw new Error(`risuFetch failed with status ${risuResult.status}`);
+                        }
+                        const code = typeof risuResult.data === 'string' ? risuResult.data : String(risuResult.data || '');
+                        return { ok: true, code };
+                    }
+
+                    if (!response.ok || response.status < 200 || response.status >= 300) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+
+                    const text = await Promise.race([
+                        response.text(),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('response body read timed out (20s)')), 20000)),
+                    ]);
+
+                    const contentLength = parseInt(response.headers?.get?.('content-length') || '0', 10);
+                    if (contentLength > 0) {
+                        const actualBytes = new TextEncoder().encode(text).byteLength;
+                        if (actualBytes < contentLength) {
+                            console.warn(`${LOG} Incomplete download (${attempt}/${MAX_RETRIES}): expected ${contentLength}B, got ${actualBytes}B`);
+                            if (attempt < MAX_RETRIES) {
+                                await new Promise(r => setTimeout(r, 1000 * attempt));
+                                continue;
+                            }
+                            return { ok: false, error: `다운로드 불완전: ${contentLength}B 중 ${actualBytes}B만 수신됨` };
+                        }
+                        console.log(`${LOG} Content-Length OK: ${actualBytes}B / ${contentLength}B`);
+                    }
+
+                    return { ok: true, code: text };
+                } catch (/** @type {any} */ e) {
+                    console.warn(`${LOG} Error (${attempt}/${MAX_RETRIES}):`, e.message || e);
+                    if (attempt < MAX_RETRIES) {
+                        await new Promise(r => setTimeout(r, 1000 * attempt));
+                    } else {
+                        return { ok: false, error: `다운로드 실패 (${MAX_RETRIES}회 시도): ${e.message || e}` };
+                    }
+                }
+            }
+            return { ok: false, error: '다운로드 실패 (알 수 없는 오류)' };
+        },
+
+        // ── Validate & install to RisuAI DB ──
+
+        /**
+         * Validate already-downloaded code and install to RisuAI DB.
+         * @param {string} code - Downloaded plugin code
+         * @param {string} remoteVersion - Expected remote version
+         * @param {string} [changes] - Change notes
+         * @returns {Promise<{ok: boolean, error?: string}>}
+         */
+        async _validateAndInstallMainPlugin(code, remoteVersion, changes) {
+            const LOG = '[CPM SafeUpdate]';
+            const PLUGIN_NAME = 'Cupcake_Provider_Manager';
+
+            if (!code || code.length < 100) {
+                return { ok: false, error: '다운로드된 코드가 비어있거나 너무 짧습니다' };
+            }
+
+            const lines = code.split('\n');
+            let parsedName = '', parsedDisplayName = '', parsedVersion = '', parsedUpdateURL = '', parsedApiVersion = '2.0';
+            /** @type {Record<string, 'int'|'string'>} */
+            const parsedArgs = {};
+            /** @type {Record<string, string|number>} */
+            const defaultRealArg = {};
+            /** @type {Record<string, Record<string, string>>} */
+            const parsedArgMeta = {};
+            /** @type {Array<{link: string, hoverText?: string}>} */
+            const parsedCustomLink = [];
+
+            for (const line of lines) {
+                const nameMatch = line.match(/^\/\/@name\s+(.+)/);
+                if (nameMatch) parsedName = nameMatch[1].trim();
+                const displayMatch = line.match(/^\/\/@display-name\s+(.+)/);
+                if (displayMatch) parsedDisplayName = displayMatch[1].trim();
+                const verMatch = line.match(/^\/\/@version\s+(.+)/);
+                if (verMatch) parsedVersion = verMatch[1].trim();
+                const urlMatch = line.match(/^\/\/@update-url\s+(\S+)/);
+                if (urlMatch) parsedUpdateURL = urlMatch[1];
+                if (/^\/\/@api\s/.test(line)) {
+                    const vers = line.replace(/^\/\/@api\s+/, '').trim().split(' ');
+                    for (const v of vers) { if (['2.0', '2.1', '3.0'].includes(v)) { parsedApiVersion = v; break; } }
+                }
+                if (/^\/\/@(?:arg|risu-arg)\s/.test(line)) {
+                    const parts = line.trim().split(' ');
+                    if (parts.length >= 3) {
+                        const key = parts[1];
+                        const type = parts[2];
+                        if (type === 'int' || type === 'string') {
+                            parsedArgs[key] = type;
+                            defaultRealArg[key] = type === 'int' ? 0 : '';
+                        }
+                        if (parts.length > 3) {
+                            /** @type {Record<string, string>} */
+                            const meta = {};
+                            parts.slice(3).join(' ').replace(/\{\{(.+?)(::?(.+?))?\}\}/g, (/** @type {any} */ _, /** @type {string} */ g1, /** @type {any} */ _g2, /** @type {string} */ g3) => {
+                                meta[g1] = g3 || '1';
+                                return '';
+                            });
+                            if (Object.keys(meta).length > 0) parsedArgMeta[key] = meta;
+                        }
+                    }
+                }
+                if (/^\/\/@link\s/.test(line)) {
+                    const link = line.split(' ')[1];
+                    if (link && link.startsWith('https')) {
+                        const hoverText = line.split(' ').slice(2).join(' ').trim();
+                        parsedCustomLink.push({ link, hoverText: hoverText || undefined });
+                    }
+                }
+            }
+
+            if (!parsedName) {
+                return { ok: false, error: '다운로드된 코드에서 플러그인 이름(@name)을 찾을 수 없습니다' };
+            }
+            if (parsedName !== PLUGIN_NAME) {
+                return { ok: false, error: `이름 불일치: "${parsedName}" ≠ "${PLUGIN_NAME}"` };
+            }
+            if (!parsedVersion) {
+                return { ok: false, error: '다운로드된 코드에서 버전 정보(@version)를 찾을 수 없습니다' };
+            }
+            if (parsedApiVersion !== '3.0') {
+                return { ok: false, error: `API 버전이 3.0이 아닙니다: ${parsedApiVersion}` };
+            }
+
+            console.log(`${LOG} Parsed: name=${parsedName} ver=${parsedVersion} api=${parsedApiVersion} args=${Object.keys(parsedArgs).length}`);
+
+            if (remoteVersion && parsedVersion !== remoteVersion) {
+                return { ok: false, error: `버전 불일치: 기대 ${remoteVersion}, 실제 ${parsedVersion}` };
+            }
+
+            try {
+                const db = await Risu.getDatabase();
+                if (!db) {
+                    return { ok: false, error: 'RisuAI 데이터베이스 접근 실패 (권한 거부)' };
+                }
+                if (!db.plugins || !Array.isArray(db.plugins)) {
+                    return { ok: false, error: 'RisuAI 플러그인 목록을 찾을 수 없습니다' };
+                }
+
+                const existingIdx = db.plugins.findIndex((/** @type {any} */ p) => p.name === PLUGIN_NAME);
+                if (existingIdx === -1) {
+                    return { ok: false, error: `기존 "${PLUGIN_NAME}" 플러그인을 DB에서 찾을 수 없습니다` };
+                }
+
+                const existing = db.plugins[existingIdx];
+                const currentInstalledVersion = existing.versionOfPlugin || CPM_VERSION;
+                const installDirection = this.compareVersions(currentInstalledVersion, parsedVersion);
+                if (installDirection === 0) {
+                    return { ok: false, error: `이미 같은 버전입니다: ${parsedVersion}` };
+                }
+                if (installDirection < 0) {
+                    return { ok: false, error: `다운그레이드 차단: 현재 ${currentInstalledVersion} > 다운로드 ${parsedVersion}` };
+                }
+
+                const existingScriptBytes = new TextEncoder().encode(String(existing.script || '')).byteLength;
+                const nextScriptBytes = new TextEncoder().encode(String(code || '')).byteLength;
+                if (existingScriptBytes >= (300 * 1024) && nextScriptBytes < existingScriptBytes * 0.95) {
+                    return { ok: false, error: `불완전한 다운로드 의심: 새 코드(${(nextScriptBytes / 1024).toFixed(1)}KB)가 기존(${(existingScriptBytes / 1024).toFixed(1)}KB)의 95% 미만입니다` };
+                }
+
+                const oldRealArg = existing.realArg || {};
+                /** @type {Record<string, any>} */
+                const mergedRealArg = {};
+                for (const [key, type] of Object.entries(parsedArgs)) {
+                    if (key in oldRealArg && existing.arguments && existing.arguments[key] === type) {
+                        mergedRealArg[key] = oldRealArg[key];
+                    } else {
+                        mergedRealArg[key] = defaultRealArg[key];
+                    }
+                }
+
+                /** @type {any} */
+                const updatedPlugin = {
+                    name: parsedName,
+                    displayName: parsedDisplayName || parsedName,
+                    script: code,
+                    arguments: parsedArgs,
+                    realArg: mergedRealArg,
+                    argMeta: parsedArgMeta,
+                    version: '3.0',
+                    customLink: parsedCustomLink,
+                    versionOfPlugin: parsedVersion,
+                    updateURL: parsedUpdateURL || existing.updateURL || '',
+                    enabled: existing.enabled !== false,
+                };
+
+                const nextPlugins = db.plugins.slice();
+                nextPlugins[existingIdx] = updatedPlugin;
+                await Risu.setDatabaseLite({ plugins: nextPlugins });
+
+                try {
+                    const verifyDb = await Risu.getDatabase();
+                    const verifyPlugin = verifyDb?.plugins?.find?.((/** @type {any} */ p) => p.name === PLUGIN_NAME);
+                    console.log(`${LOG} In-memory verify: version=${verifyPlugin?.versionOfPlugin || 'missing'} script=${verifyPlugin?.script ? 'present' : 'missing'}`);
+                } catch (/** @type {any} */ verifyErr) {
+                    console.warn(`${LOG} In-memory verify failed:`, verifyErr.message || verifyErr);
+                }
+
+                try {
+                    await Risu.pluginStorage.setItem('cpm_last_main_update_flush', JSON.stringify({
+                        ts: Date.now(),
+                        from: currentInstalledVersion,
+                        to: parsedVersion,
+                    }));
+                    console.log(`${LOG} Autosave flush marker written to pluginStorage.`);
+                } catch (/** @type {any} */ flushErr) {
+                    console.warn(`${LOG} Autosave flush marker write failed:`, flushErr.message || flushErr);
+                }
+
+                console.log(`${LOG} Waiting for RisuAI autosave flush before showing success...`);
+                await this._waitForMainPluginPersistence();
+
+                console.log(`${LOG} ✓ Successfully applied main plugin update: ${currentInstalledVersion} → ${parsedVersion}`);
+                console.log(`${LOG}   Settings preserved: ${Object.keys(mergedRealArg).length} args (${Object.keys(oldRealArg).length} existed, ${Object.keys(parsedArgs).length} in new version)`);
+
+                try { /** @type {any} */ (window)._cpmMainUpdateCompletedThisBoot = true; } catch (_) { }
+
+                await this._clearPendingMainUpdate();
+                await this._showMainAutoUpdateResult(currentInstalledVersion, parsedVersion, changes || '', true);
+
+                return { ok: true };
+            } catch (/** @type {any} */ e) {
+                return { ok: false, error: `DB 저장 실패: ${e.message || e}` };
+            }
+        },
+
+        /**
+         * Wait for RisuAI autosave flush.
+         * @returns {Promise<void>}
+         */
+        async _waitForMainPluginPersistence() {
+            await new Promise(resolve => setTimeout(resolve, 3500));
+        },
+
+        // ── Safe update orchestrator (dedup) ──
+
+        /**
+         * Safely update the main CPM plugin: download → validate → install.
+         * @param {string} remoteVersion
+         * @param {string} [changes]
+         * @returns {Promise<{ok: boolean, error?: string}>}
+         */
+        async safeMainPluginUpdate(remoteVersion, changes) {
+            if (/** @type {any} */ (window)._cpmMainUpdateCompletedThisBoot) {
+                console.log('[CPM SafeUpdate] Main update already completed this session — skipping.');
+                try { await this._clearPendingMainUpdate(); } catch (_) { }
+                return { ok: true };
+            }
+
+            if (this._mainUpdateInFlight) {
+                console.log('[CPM SafeUpdate] Main update already in flight — joining existing run.');
+                return await this._mainUpdateInFlight;
+            }
+
+            this._mainUpdateInFlight = (async () => {
+                try {
+                    await this._rememberPendingMainUpdate(remoteVersion, changes);
+
+                    const dl = await this._downloadMainPluginCode(remoteVersion);
+                    if (!dl.ok) {
+                        console.error(`[CPM SafeUpdate] Download failed: ${dl.error}`);
+                        if (!this._isRetriableMainUpdateError(dl.error)) {
+                            await this._clearPendingMainUpdate();
+                        }
+                        await this._showMainAutoUpdateResult(CPM_VERSION, remoteVersion, changes || '', false, dl.error);
+                        return { ok: false, error: dl.error };
+                    }
+                    const result = await this._validateAndInstallMainPlugin(dl.code, remoteVersion, changes);
+                    if (!result.ok) {
+                        console.error(`[CPM SafeUpdate] Install failed: ${result.error}`);
+                        if (!this._isRetriableMainUpdateError(result.error)) {
+                            await this._clearPendingMainUpdate();
+                        }
+                        const isSameVersionNoop = result.error && result.error.includes('이미 같은 버전');
+                        if (!isSameVersionNoop) {
+                            await this._showMainAutoUpdateResult(CPM_VERSION, remoteVersion, changes || '', false, result.error);
+                        }
+                    }
+                    return result;
+                } catch (/** @type {any} */ unexpectedErr) {
+                    console.error(`[CPM SafeUpdate] Unexpected error:`, unexpectedErr);
+                    return { ok: false, error: `예기치 않은 오류: ${unexpectedErr.message || unexpectedErr}` };
+                }
+            })();
+
+            try {
+                return await this._mainUpdateInFlight;
+            } finally {
+                this._mainUpdateInFlight = null;
+            }
+        },
+
+        // ── Single-Bundle Update System ──
+        UPDATE_BUNDLE_URL: UPDATE_BUNDLE_URL,
+
+        async checkAllUpdates() {
+            try {
+                const cacheBuster = this.UPDATE_BUNDLE_URL + '?_t=' + Date.now() + '&_r=' + Math.random().toString(36).substr(2, 8);
+                console.log(`[CPM Update] Fetching update bundle via risuFetch(plainFetchForce): ${cacheBuster}`);
+
+                const result = await Risu.risuFetch(cacheBuster, { method: 'GET', plainFetchForce: true });
+
+                if (!result.data || (result.status && result.status >= 400)) {
+                    console.error(`[CPM Update] Failed to fetch update bundle: ${result.status}`);
+                    return [];
+                }
+
+                const raw = (typeof result.data === 'string') ? JSON.parse(result.data) : result.data;
+                const bundleResult = validateSchema(raw, schemas.updateBundle);
+                if (!bundleResult.ok) {
+                    console.error(`[CPM Update] Bundle schema validation failed: ${bundleResult.error}`);
+                    return [];
+                }
+                const bundle = bundleResult.data;
+                const manifest = bundle.versions || {};
+                const codeBundle = bundle.code || {};
+                console.log(`[CPM Update] Bundle loaded: ${Object.keys(manifest).length} versions, ${Object.keys(codeBundle).length} code files`);
+
+                const results = [];
+                for (const p of this.plugins) {
+                    if (!p.updateUrl || !p.name) continue;
+                    const remote = manifest[p.name];
+                    if (!remote || !remote.version) {
+                        console.warn(`[CPM Update] ${p.name} not found in manifest, skipping.`);
+                        continue;
+                    }
+                    const cmp = this.compareVersions(p.version || '0.0.0', remote.version);
+                    console.log(`[CPM Update] ${p.name}: local=${p.version} remote=${remote.version} cmp=${cmp}`);
+                    if (cmp > 0) {
+                        const code = (remote.file && codeBundle[remote.file]) ? codeBundle[remote.file] : null;
+                        if (code) {
+                            console.log(`[CPM Update] Code ready for ${p.name} (${(code.length / 1024).toFixed(1)}KB)`);
+                            if (!remote.sha256) {
+                                console.error(`[CPM Update] ⚠️ REJECTED ${p.name}: bundle entry has no sha256 hash — refusing untrusted update`);
+                                continue;
+                            }
+                            const actualHash = await _computeSHA256(code);
+                            if (!actualHash) {
+                                console.error(`[CPM Update] ⚠️ REJECTED ${p.name}: SHA-256 computation failed (Web Crypto unavailable) — cannot verify integrity`);
+                                continue;
+                            }
+                            if (actualHash !== remote.sha256) {
+                                console.error(`[CPM Update] ⚠️ INTEGRITY MISMATCH for ${p.name}: expected ${remote.sha256.substring(0, 12)}…, got ${actualHash.substring(0, 12)}… — skipping`);
+                                continue;
+                            }
+                            console.log(`[CPM Update] ✓ Integrity OK for ${p.name} [sha256:${actualHash.substring(0, 12)}…]`);
+                        }
+                        else console.warn(`[CPM Update] ${p.name} (${remote.file}) code not found in bundle`);
+                        results.push({ plugin: p, remoteVersion: remote.version, localVersion: p.version || '0.0.0', remoteFile: remote.file, code, expectedSHA256: remote.sha256 });
+                    }
+                }
+                return results;
+            } catch (e) {
+                console.error(`[CPM Update] Failed to check updates:`, e);
+                return [];
+            }
+        },
+
+        /**
+         * @param {string} pluginId
+         * @param {string} prefetchedCode
+         * @param {string} expectedSHA256
+         */
+        async applyUpdate(pluginId, prefetchedCode, expectedSHA256) {
+            const p = /** @type {any[]} */ (this.plugins).find((/** @type {any} */ x) => x.id === pluginId);
+            if (!p) return false;
+            if (!prefetchedCode) {
+                console.error(`[CPM Update] No pre-fetched code available for ${p.name}. Re-run update check.`);
+                return false;
+            }
+            try {
+                if (!expectedSHA256) {
+                    console.error(`[CPM Update] BLOCKED: No SHA-256 hash provided for ${p.name}. Refusing to apply unverified code.`);
+                    return false;
+                }
+                const actualHash = await _computeSHA256(prefetchedCode);
+                if (!actualHash) {
+                    console.error(`[CPM Update] BLOCKED: SHA-256 computation failed for ${p.name} (Web Crypto unavailable).`);
+                    return false;
+                }
+                if (actualHash !== expectedSHA256) {
+                    console.error(`[CPM Update] BLOCKED: Integrity mismatch for ${p.name}. Expected sha256:${expectedSHA256.substring(0, 12)}…, got ${actualHash.substring(0, 12)}…`);
+                    return false;
+                }
+                console.log(`[CPM Update] ✓ Apply-time integrity OK for ${p.name}`);
+                console.log(`[CPM Update] Applying update for ${p.name} (${(prefetchedCode.length / 1024).toFixed(1)}KB)`);
+                const meta = this.extractMetadata(prefetchedCode);
+                if (meta.name && p.name && meta.name !== p.name) {
+                    console.error(`[CPM Update] BLOCKED: Tried to apply "${meta.name}" code to plugin "${p.name}". Names don't match.`);
+                    return false;
+                }
+                p.code = prefetchedCode;
+                p.name = meta.name || p.name;
+                p.version = meta.version;
+                p.description = meta.description;
+                p.icon = meta.icon;
+                p.updateUrl = meta.updateUrl || p.updateUrl;
+                await this.saveRegistry();
+                console.log(`[CPM Update] Successfully applied update for ${p.name} → v${meta.version}`);
+                return true;
+            } catch (e) {
+                console.error(`[CPM Update] Failed to apply update for ${p.name}:`, e);
+                return false;
+            }
+        },
+    };
+
+    // @ts-check
+    /**
+     * update-toast.js — Toast notification UI for auto-update system.
+     *
+     * Extracted from sub-plugin-manager.js for maintainability.
+     * Methods are spread into SubPluginManager.
+     */
+
+    /**
+     * Toast methods to be spread into SubPluginManager.
+     * @type {{[K: string]: any}}
+     */
+    const updateToastMethods = {
+        /** @param {any[]} updates */
         async showUpdateToast(updates) {
             try {
                 const doc = await Risu.getRootDocument();
@@ -4406,509 +5155,11 @@ var CupcakeProviderManager = (function (exports) {
                         setTimeout(async () => { try { await toast.remove(); } catch (_) { } }, 350);
                     } catch (_) { }
                 }, 8000);
-            } catch (e) { console.debug('[CPM Toast] Failed to show toast:', e.message); }
-        },
-
-        async checkMainPluginVersionQuiet() {
-            try {
-                if (/** @type {any} */ (window)._cpmMainVersionFromManifest) {
-                    console.log('[CPM MainAutoCheck] Already checked via manifest, skipping JS fallback.');
-                    return;
-                }
-                if (/** @type {any} */ (window)._cpmMainVersionChecked) return;
-                /** @type {any} */ (window)._cpmMainVersionChecked = true;
-
-                try {
-                    const lastCheck = await Risu.pluginStorage.getItem(this._MAIN_VERSION_CHECK_STORAGE_KEY);
-                    if (lastCheck) {
-                        const elapsed = Date.now() - parseInt(lastCheck, 10);
-                        if (elapsed < this._VERSION_CHECK_COOLDOWN) {
-                            console.log(`[CPM MainAutoCheck] Skipped — last check ${Math.round(elapsed / 60000)}min ago`);
-                            return;
-                        }
-                    }
-                } catch (_) { /* ignore */ }
-
-                const cacheBuster = this.MAIN_UPDATE_URL + '?_t=' + Date.now();
-                console.log('[CPM MainAutoCheck] Fallback: fetching remote main plugin script...');
-
-                let code;
-                try {
-                    // Prefer nativeFetch (standard Response) — risuFetch may hang in iframe sandbox for large files
-                    const response = await Promise.race([
-                        Risu.nativeFetch(cacheBuster, { method: 'GET' }),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('nativeFetch timed out (20s)')), 20000)),
-                    ]);
-                    if (!response.ok || response.status < 200 || response.status >= 300) {
-                        console.warn(`[CPM MainAutoCheck] nativeFetch failed (HTTP ${response.status}), skipped.`);
-                        return;
-                    }
-                    code = await Promise.race([
-                        response.text(),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('nativeFetch body read timed out (20s)')), 20000)),
-                    ]);
-                    console.log(`[CPM MainAutoCheck] nativeFetch OK (${(code.length / 1024).toFixed(1)}KB)`);
-                } catch (nativeErr) {
-                    console.warn(`[CPM MainAutoCheck] nativeFetch failed: ${nativeErr.message || nativeErr}, trying risuFetch...`);
-                    try {
-                        const result = await Promise.race([
-                            Risu.risuFetch(cacheBuster, { method: 'GET', plainFetchForce: true }),
-                            new Promise((_, reject) => setTimeout(() => reject(new Error('risuFetch timed out (20s)')), 20000)),
-                        ]);
-                        if (!result.data || (result.status && result.status >= 400)) {
-                            console.warn(`[CPM MainAutoCheck] risuFetch also failed (status=${result.status}), skipped.`);
-                            return;
-                        }
-                        code = typeof result.data === 'string' ? result.data : String(result.data || '');
-                        console.log(`[CPM MainAutoCheck] risuFetch OK (${(code.length / 1024).toFixed(1)}KB)`);
-                    } catch (risuErr) {
-                        console.warn(`[CPM MainAutoCheck] Both fetch methods failed: ${risuErr.message || risuErr}`);
-                        return;
-                    }
-                }
-                const verMatch = code.match(/\/\/\s*@version\s+([^\r\n]+)/i);
-                if (!verMatch) { console.warn('[CPM MainAutoCheck] Remote version tag not found in fetched code, skipped.'); return; }
-                const changesMatch = code.match(/\/\/\s*@changes\s+(.+)/i);
-                const changes = changesMatch ? changesMatch[1].trim() : '';
-
-                const remoteVersion = (verMatch[1] || '').trim();
-                const localVersion = CPM_VERSION;
-                const cmp = this.compareVersions(localVersion, remoteVersion);
-
-                try { await Risu.pluginStorage.setItem(this._MAIN_VERSION_CHECK_STORAGE_KEY, String(Date.now())); } catch (_) { /* ignore */ }
-
-                if (cmp > 0) {
-                    console.log(`[CPM MainAutoCheck] Main update available: ${localVersion}→${remoteVersion}`);
-                    try { await this._rememberPendingMainUpdate(remoteVersion, changes); } catch (_) { }
-                    // Code already downloaded from version check — validate and install directly (no double download)
-                    const installResult = await this._validateAndInstallMainPlugin(code, remoteVersion, changes);
-                    if (!installResult.ok) {
-                        console.warn(`[CPM MainAutoCheck] Direct install failed (${installResult.error}), trying fresh verified download...`);
-                        await this.safeMainPluginUpdate(remoteVersion, changes);
-                    }
-                } else {
-                    console.log('[CPM MainAutoCheck] Main plugin is up to date.');
-                }
-            } catch (e) { console.debug('[CPM MainAutoCheck] Silent error:', e.message || e); }
+            } catch (/** @type {any} */ e) { console.debug('[CPM Toast] Failed to show toast:', e.message); }
         },
 
         /**
-         * Download main plugin code with verification (retry + Content-Length check).
-         * Used when we don't already have the code (e.g., manifest-only path).
-         *
-         * @param {string} [expectedVersion] - Version announced by manifest/API.
-         * @returns {Promise<{ok: boolean, code?: string, error?: string}>}
-         */
-        async _downloadMainPluginCode(expectedVersion) {
-            const LOG = '[CPM Download]';
-            const MAX_RETRIES = 3;
-            const url = this.MAIN_UPDATE_URL;
-
-            // Prefer the update bundle because api/versions and api/update-bundle
-            // are generated from the same source of truth on the server.
-            // This avoids static-file drift where provider-manager.js can be stale
-            // while api/versions already advertises a newer main plugin version.
-            try {
-                const bundleUrl = this.UPDATE_BUNDLE_URL + '?_t=' + Date.now() + '&_r=' + Math.random().toString(36).substr(2, 6);
-                console.log(`${LOG} Trying update bundle first: ${bundleUrl}`);
-                const bundleResult = await Promise.race([
-                    Risu.risuFetch(bundleUrl, { method: 'GET', plainFetchForce: true }),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('update bundle fetch timed out (20s)')), 20000)),
-                ]);
-
-                if (bundleResult?.data && (!bundleResult.status || bundleResult.status < 400)) {
-                    const rawBundle = typeof bundleResult.data === 'string' ? JSON.parse(bundleResult.data) : bundleResult.data;
-                    const parsedBundle = validateSchema(rawBundle, schemas.updateBundle);
-                    if (!parsedBundle.ok) {
-                        throw new Error(`update bundle schema invalid: ${parsedBundle.error}`);
-                    }
-
-                    const bundle = parsedBundle.data;
-                    const mainEntry = bundle.versions?.['Cupcake Provider Manager'];
-                    const fileName = mainEntry?.file || 'provider-manager.js';
-                    const bundledCode = bundle.code?.[fileName];
-
-                    if (!mainEntry?.version) {
-                        throw new Error('main plugin version missing in update bundle');
-                    }
-                    if (expectedVersion && mainEntry.version !== expectedVersion) {
-                        throw new Error(`bundle version mismatch: expected ${expectedVersion}, got ${mainEntry.version}`);
-                    }
-                    if (!bundledCode || typeof bundledCode !== 'string') {
-                        throw new Error(`main plugin code missing in update bundle (${fileName})`);
-                    }
-                    if (!mainEntry.sha256) {
-                        throw new Error('main plugin bundle entry has no sha256 hash — refusing untrusted update');
-                    }
-                    const actualHash = await _computeSHA256(bundledCode);
-                    if (!actualHash) {
-                        throw new Error('SHA-256 computation failed for bundled main plugin code');
-                    }
-                    if (actualHash !== mainEntry.sha256) {
-                        throw new Error(`bundle sha256 mismatch: expected ${mainEntry.sha256.substring(0, 12)}…, got ${actualHash.substring(0, 12)}…`);
-                    }
-                    console.log(`${LOG} Bundle integrity OK [sha256:${mainEntry.sha256.substring(0, 12)}…]`);
-
-                    console.log(`${LOG} Bundle download OK: ${fileName} v${mainEntry.version} (${(bundledCode.length / 1024).toFixed(1)}KB)`);
-                    return { ok: true, code: bundledCode };
-                }
-                throw new Error(`update bundle fetch failed with status ${bundleResult?.status}`);
-            } catch (bundleErr) {
-                console.warn(`${LOG} Update bundle path failed, falling back to direct JS:`, bundleErr.message || bundleErr);
-            }
-
-            for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-                try {
-                    console.log(`${LOG} Attempt ${attempt}/${MAX_RETRIES}: ${url}`);
-                    const cacheBuster = url + '?_t=' + Date.now() + '&_r=' + Math.random().toString(36).substr(2, 6);
-
-                    // Prefer nativeFetch (standard Response) for Content-Length access
-                    let response;
-                    try {
-                        response = await Promise.race([
-                            Risu.nativeFetch(cacheBuster, { method: 'GET' }),
-                            new Promise((_, reject) => setTimeout(() => reject(new Error('nativeFetch timed out (20s)')), 20000)),
-                        ]);
-                    } catch (nativeErr) {
-                        console.warn(`${LOG} nativeFetch failed, falling back to risuFetch:`, nativeErr.message || nativeErr);
-                        const risuResult = await Promise.race([
-                            Risu.risuFetch(cacheBuster, { method: 'GET', plainFetchForce: true }),
-                            new Promise((_, reject) => setTimeout(() => reject(new Error('risuFetch fallback timed out (20s)')), 20000)),
-                        ]);
-                        if (!risuResult.data || (risuResult.status && risuResult.status >= 400)) {
-                            throw new Error(`risuFetch failed with status ${risuResult.status}`);
-                        }
-                        const code = typeof risuResult.data === 'string' ? risuResult.data : String(risuResult.data || '');
-                        // risuFetch doesn't give us Content-Length, skip CL check
-                        return { ok: true, code };
-                    }
-
-                    if (!response.ok || response.status < 200 || response.status >= 300) {
-                        throw new Error(`HTTP ${response.status}`);
-                    }
-
-                    const text = await Promise.race([
-                        response.text(),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('response body read timed out (20s)')), 20000)),
-                    ]);
-
-                    // Content-Length integrity check
-                    const contentLength = parseInt(response.headers?.get?.('content-length') || '0', 10);
-                    if (contentLength > 0) {
-                        const actualBytes = new TextEncoder().encode(text).byteLength;
-                        if (actualBytes < contentLength) {
-                            console.warn(`${LOG} Incomplete download (${attempt}/${MAX_RETRIES}): expected ${contentLength}B, got ${actualBytes}B`);
-                            if (attempt < MAX_RETRIES) {
-                                await new Promise(r => setTimeout(r, 1000 * attempt));
-                                continue;
-                            }
-                            return { ok: false, error: `다운로드 불완전: ${contentLength}B 중 ${actualBytes}B만 수신됨` };
-                        }
-                        console.log(`${LOG} Content-Length OK: ${actualBytes}B / ${contentLength}B`);
-                    }
-
-                    return { ok: true, code: text };
-                } catch (e) {
-                    console.warn(`${LOG} Error (${attempt}/${MAX_RETRIES}):`, e.message || e);
-                    if (attempt < MAX_RETRIES) {
-                        await new Promise(r => setTimeout(r, 1000 * attempt));
-                    } else {
-                        return { ok: false, error: `다운로드 실패 (${MAX_RETRIES}회 시도): ${e.message || e}` };
-                    }
-                }
-            }
-            return { ok: false, error: '다운로드 실패 (알 수 없는 오류)' };
-        },
-
-        /**
-         * Validate already-downloaded code and install to RisuAI DB.
-         * Handles: header parsing, name/version/api check, settings preservation, DB write.
-         *
-         * @param {string} code - Downloaded plugin code
-         * @param {string} remoteVersion - Expected remote version (for logging)
-         * @param {string} [changes] - Change notes (for notification)
-         * @returns {Promise<{ok: boolean, error?: string}>}
-         */
-        async _validateAndInstallMainPlugin(code, remoteVersion, changes) {
-            const LOG = '[CPM SafeUpdate]';
-            const PLUGIN_NAME = 'Cupcake_Provider_Manager';
-
-            if (!code || code.length < 100) {
-                return { ok: false, error: '다운로드된 코드가 비어있거나 너무 짧습니다' };
-            }
-
-            // ── Step 1: Structural validation — parse plugin headers ──
-            const lines = code.split('\n');
-            let parsedName = '', parsedDisplayName = '', parsedVersion = '', parsedUpdateURL = '', parsedApiVersion = '2.0';
-            /** @type {Record<string, 'int'|'string'>} */
-            const parsedArgs = {};
-            /** @type {Record<string, string|number>} */
-            const defaultRealArg = {};
-            /** @type {Record<string, Record<string, string>>} */
-            const parsedArgMeta = {};
-            /** @type {Array<{link: string, hoverText?: string}>} */
-            const parsedCustomLink = [];
-
-            for (const line of lines) {
-                const nameMatch = line.match(/^\/\/@name\s+(.+)/);
-                if (nameMatch) parsedName = nameMatch[1].trim();
-                const displayMatch = line.match(/^\/\/@display-name\s+(.+)/);
-                if (displayMatch) parsedDisplayName = displayMatch[1].trim();
-                const verMatch = line.match(/^\/\/@version\s+(.+)/);
-                if (verMatch) parsedVersion = verMatch[1].trim();
-                const urlMatch = line.match(/^\/\/@update-url\s+(\S+)/);
-                if (urlMatch) parsedUpdateURL = urlMatch[1];
-                if (/^\/\/@api\s/.test(line)) {
-                    const vers = line.replace(/^\/\/@api\s+/, '').trim().split(' ');
-                    for (const v of vers) { if (['2.0', '2.1', '3.0'].includes(v)) { parsedApiVersion = v; break; } }
-                }
-                if (/^\/\/@(?:arg|risu-arg)\s/.test(line)) {
-                    const parts = line.trim().split(' ');
-                    if (parts.length >= 3) {
-                        const key = parts[1];
-                        const type = parts[2];
-                        if (type === 'int' || type === 'string') {
-                            parsedArgs[key] = type;
-                            defaultRealArg[key] = type === 'int' ? 0 : '';
-                        }
-                        if (parts.length > 3) {
-                            const meta = {};
-                            parts.slice(3).join(' ').replace(/\{\{(.+?)(::?(.+?))?\}\}/g, (_, g1, _g2, g3) => {
-                                meta[g1] = g3 || '1';
-                                return '';
-                            });
-                            if (Object.keys(meta).length > 0) parsedArgMeta[key] = meta;
-                        }
-                    }
-                }
-                if (/^\/\/@link\s/.test(line)) {
-                    const link = line.split(' ')[1];
-                    if (link && link.startsWith('https')) {
-                        const hoverText = line.split(' ').slice(2).join(' ').trim();
-                        parsedCustomLink.push({ link, hoverText: hoverText || undefined });
-                    }
-                }
-            }
-
-            if (!parsedName) {
-                return { ok: false, error: '다운로드된 코드에서 플러그인 이름(@name)을 찾을 수 없습니다' };
-            }
-
-            // ── Step 2: Name identity check ──
-            if (parsedName !== PLUGIN_NAME) {
-                return { ok: false, error: `이름 불일치: "${parsedName}" ≠ "${PLUGIN_NAME}"` };
-            }
-
-            if (!parsedVersion) {
-                return { ok: false, error: '다운로드된 코드에서 버전 정보(@version)를 찾을 수 없습니다' };
-            }
-
-            if (parsedApiVersion !== '3.0') {
-                return { ok: false, error: `API 버전이 3.0이 아닙니다: ${parsedApiVersion}` };
-            }
-
-            console.log(`${LOG} Parsed: name=${parsedName} ver=${parsedVersion} api=${parsedApiVersion} args=${Object.keys(parsedArgs).length}`);
-
-            if (remoteVersion && parsedVersion !== remoteVersion) {
-                return { ok: false, error: `버전 불일치: 기대 ${remoteVersion}, 실제 ${parsedVersion}` };
-            }
-
-            // ── Step 3: Write to RisuAI DB — preserve existing settings ──
-            try {
-                const db = await Risu.getDatabase();
-                if (!db) {
-                    return { ok: false, error: 'RisuAI 데이터베이스 접근 실패 (권한 거부)' };
-                }
-                if (!db.plugins || !Array.isArray(db.plugins)) {
-                    return { ok: false, error: 'RisuAI 플러그인 목록을 찾을 수 없습니다' };
-                }
-
-                const existingIdx = db.plugins.findIndex(p => p.name === PLUGIN_NAME);
-                if (existingIdx === -1) {
-                    return { ok: false, error: `기존 "${PLUGIN_NAME}" 플러그인을 DB에서 찾을 수 없습니다` };
-                }
-
-                const existing = db.plugins[existingIdx];
-                const currentInstalledVersion = existing.versionOfPlugin || CPM_VERSION;
-                const installDirection = this.compareVersions(currentInstalledVersion, parsedVersion);
-                if (installDirection === 0) {
-                    return { ok: false, error: `이미 같은 버전입니다: ${parsedVersion}` };
-                }
-                if (installDirection < 0) {
-                    return { ok: false, error: `다운그레이드 차단: 현재 ${currentInstalledVersion} > 다운로드 ${parsedVersion}` };
-                }
-
-                // ── Size sanity check: catch truncated downloads ──
-                // The main CPM plugin is normally 300KB+. If the new code is drastically
-                // smaller than the current installation, it's likely a truncated download
-                // that happened to include valid headers but not the actual code body.
-                const existingScriptLen = (existing.script || '').length;
-                if (existingScriptLen > 50000 && code.length < existingScriptLen * 0.3) {
-                    return { ok: false, error: `불완전한 다운로드 의심: 새 코드(${(code.length / 1024).toFixed(1)}KB)가 기존(${(existingScriptLen / 1024).toFixed(1)}KB)의 30% 미만입니다` };
-                }
-
-                const oldRealArg = existing.realArg || {};
-
-                // Merge: keep existing values for matching arg types, add defaults for new args
-                const mergedRealArg = {};
-                for (const [key, type] of Object.entries(parsedArgs)) {
-                    if (key in oldRealArg && existing.arguments && existing.arguments[key] === type) {
-                        mergedRealArg[key] = oldRealArg[key];
-                    } else {
-                        mergedRealArg[key] = defaultRealArg[key];
-                    }
-                }
-
-                /** @type {any} */
-                const updatedPlugin = {
-                    name: parsedName,
-                    displayName: parsedDisplayName || parsedName,
-                    script: code,
-                    arguments: parsedArgs,
-                    realArg: mergedRealArg,
-                    argMeta: parsedArgMeta,
-                    version: '3.0',
-                    customLink: parsedCustomLink,
-                    versionOfPlugin: parsedVersion,
-                    updateURL: parsedUpdateURL || existing.updateURL || '',
-                    enabled: existing.enabled !== false, // preserve enabled state
-                };
-
-                // IMPORTANT: replace the plugins array with a fresh reference.
-                // RisuAI's autosave dirty-tracker watches top-level DB fields and can
-                // miss an in-place nested mutation coming from plugin code. If we only
-                // mutate db.plugins[existingIdx] and reuse the same array/object,
-                // the update may remain in-memory until some unrelated user action
-                // dirties the DB. Writing a new plugins array makes the host notice
-                // the change immediately and persist it on the next autosave cycle.
-                const nextPlugins = db.plugins.slice();
-                nextPlugins[existingIdx] = updatedPlugin;
-                await Risu.setDatabaseLite({ plugins: nextPlugins });
-
-                try {
-                    const verifyDb = await Risu.getDatabase();
-                    const verifyPlugin = verifyDb?.plugins?.find?.(p => p.name === PLUGIN_NAME);
-                    console.log(`${LOG} In-memory verify: version=${verifyPlugin?.versionOfPlugin || 'missing'} script=${verifyPlugin?.script ? 'present' : 'missing'}`);
-                } catch (verifyErr) {
-                    console.warn(`${LOG} In-memory verify failed:`, verifyErr.message || verifyErr);
-                }
-
-                try {
-                    await Risu.pluginStorage.setItem('cpm_last_main_update_flush', JSON.stringify({
-                        ts: Date.now(),
-                        from: currentInstalledVersion,
-                        to: parsedVersion,
-                    }));
-                    console.log(`${LOG} Autosave flush marker written to pluginStorage.`);
-                } catch (flushErr) {
-                    console.warn(`${LOG} Autosave flush marker write failed:`, flushErr.message || flushErr);
-                }
-
-                // RisuAI persists DB changes asynchronously via its autosave loop.
-                // If we tell the user to reload immediately, a fast refresh can happen
-                // before the updated plugin script is flushed to storage.
-                console.log(`${LOG} Waiting for RisuAI autosave flush before showing success...`);
-                await this._waitForMainPluginPersistence();
-
-                console.log(`${LOG} ✓ Successfully applied main plugin update: ${currentInstalledVersion} → ${parsedVersion}`);
-                console.log(`${LOG}   Settings preserved: ${Object.keys(mergedRealArg).length} args (${Object.keys(oldRealArg).length} existed, ${Object.keys(parsedArgs).length} in new version)`);
-
-                // Flag: prevent redundant download in the same session.
-                // After install, CPM_VERSION (compile-time) is stale but the DB
-                // already holds the new version.  checkVersionsQuiet compares
-                // CPM_VERSION vs manifest and would trigger another safeMainPluginUpdate
-                // that wastes bandwidth and shows a confusing "same version" toast.
-                try { /** @type {any} */ (window)._cpmMainUpdateCompletedThisBoot = true; } catch (_) { }
-
-                await this._clearPendingMainUpdate();
-
-                // Show success notification
-                await this._showMainAutoUpdateResult(currentInstalledVersion, parsedVersion, changes || '', true);
-
-                return { ok: true };
-            } catch (e) {
-                return { ok: false, error: `DB 저장 실패: ${e.message || e}` };
-            }
-        },
-
-        /**
-         * RisuAI's plugin `setDatabaseLite()` updates in-memory DB immediately,
-         * but persistence to storage happens on the host app's debounced autosave loop.
-         * Give that loop enough time to flush before telling the user to reload.
-         *
-         * @returns {Promise<void>}
-         */
-        async _waitForMainPluginPersistence() {
-            await new Promise(resolve => setTimeout(resolve, 3500));
-        },
-
-        /**
-         * Safely update the main CPM plugin: download with verification → validate → install to DB.
-         * Called automatically when a newer version is detected.
-         *
-         * @param {string} remoteVersion - Expected remote version (for logging)
-         * @param {string} [changes] - Change notes (for notification)
-         * @returns {Promise<{ok: boolean, error?: string}>}
-         */
-        async safeMainPluginUpdate(remoteVersion, changes) {
-            // If the main plugin was already updated this session (e.g. by boot
-            // retry), skip the redundant download.  CPM_VERSION is a compile-time
-            // constant so callers still think an update is needed, but the DB
-            // already has the new code.
-            if (/** @type {any} */ (window)._cpmMainUpdateCompletedThisBoot) {
-                console.log('[CPM SafeUpdate] Main update already completed this session — skipping.');
-                try { await this._clearPendingMainUpdate(); } catch (_) { }
-                return { ok: true };
-            }
-
-            if (this._mainUpdateInFlight) {
-                console.log('[CPM SafeUpdate] Main update already in flight — joining existing run.');
-                return await this._mainUpdateInFlight;
-            }
-
-            this._mainUpdateInFlight = (async () => {
-                try {
-                    await this._rememberPendingMainUpdate(remoteVersion, changes);
-
-                    const dl = await this._downloadMainPluginCode(remoteVersion);
-                    if (!dl.ok) {
-                        console.error(`[CPM SafeUpdate] Download failed: ${dl.error}`);
-                        if (!this._isRetriableMainUpdateError(dl.error)) {
-                            await this._clearPendingMainUpdate();
-                        }
-                        await this._showMainAutoUpdateResult(CPM_VERSION, remoteVersion, changes || '', false, dl.error);
-                        return { ok: false, error: dl.error };
-                    }
-                    const result = await this._validateAndInstallMainPlugin(dl.code, remoteVersion, changes);
-                    if (!result.ok) {
-                        console.error(`[CPM SafeUpdate] Install failed: ${result.error}`);
-                        if (!this._isRetriableMainUpdateError(result.error)) {
-                            await this._clearPendingMainUpdate();
-                        }
-                        // "이미 같은 버전" is a no-op, not a real failure — don't alarm the user.
-                        const isSameVersionNoop = result.error && result.error.includes('이미 같은 버전');
-                        if (!isSameVersionNoop) {
-                            await this._showMainAutoUpdateResult(CPM_VERSION, remoteVersion, changes || '', false, result.error);
-                        }
-                    }
-                    return result;
-                } catch (unexpectedErr) {
-                    console.error(`[CPM SafeUpdate] Unexpected error:`, unexpectedErr);
-                    return { ok: false, error: `예기치 않은 오류: ${unexpectedErr.message || unexpectedErr}` };
-                }
-            })();
-
-            try {
-                return await this._mainUpdateInFlight;
-            } finally {
-                this._mainUpdateInFlight = null;
-            }
-        },
-
-        /**
-         * Show a simple notification toast with the auto-update result.
-         * No button — update happens automatically, user just needs to reload on success.
-         *
+         * Show main plugin auto-update result toast.
          * @param {string} localVersion
          * @param {string} remoteVersion
          * @param {string} changes
@@ -4971,131 +5222,155 @@ var CupcakeProviderManager = (function (exports) {
                 await body.appendChild(toast);
 
                 setTimeout(async () => { try { await toast.setStyle('opacity', '1'); await toast.setStyle('transform', 'translateY(0)'); } catch (_) { } }, 50);
-                // Auto-dismiss after 10s (success) or 15s (failure — user needs time to read error)
                 const dismissDelay = success ? 10000 : 15000;
                 setTimeout(async () => {
                     try { await toast.setStyle('opacity', '0'); await toast.setStyle('transform', 'translateY(12px)');
                         setTimeout(async () => { try { await toast.remove(); } catch (_) { } }, 350);
                     } catch (_) { }
                 }, dismissDelay);
-            } catch (e) { console.debug('[CPM MainToast] Failed to show toast:', e.message || e); }
+            } catch (e) { console.debug('[CPM MainToast] Failed to show toast:', /** @type {Error} */ (e).message || e); }
         },
+    };
 
-        // ── Single-Bundle Update System ──
-        UPDATE_BUNDLE_URL: 'https://cupcake-plugin-manager-test.vercel.app/api/update-bundle',
+    // @ts-check
+    /**
+     * sub-plugin-manager.js — Dynamic sub-plugin lifecycle management.
+     * Handles install, remove, toggle, execute, hot-reload, and auto-update.
+     *
+     * Auto-update logic is defined in auto-updater.js and update-toast.js,
+     * then spread into SubPluginManager to keep this file focused on core CRUD
+     * and hot-reload infrastructure.
+     */
 
-        async checkAllUpdates() {
+    // DI: _exposeScopeToWindow is injected by init.js to avoid circular dependency.
+    let _exposeScopeToWindow$1 = () => {};
+    /** @param {() => void} fn */
+    function setExposeScopeFunction(fn) { _exposeScopeToWindow$1 = fn; }
+
+    const SubPluginManager = {
+        STORAGE_KEY: 'cpm_installed_subplugins',
+        /** @type {any[]} */
+        plugins: [],
+
+        async loadRegistry() {
             try {
-                const cacheBuster = this.UPDATE_BUNDLE_URL + '?_t=' + Date.now() + '&_r=' + Math.random().toString(36).substr(2, 8);
-                console.log(`[CPM Update] Fetching update bundle via risuFetch(plainFetchForce): ${cacheBuster}`);
-
-                const result = await Risu.risuFetch(cacheBuster, { method: 'GET', plainFetchForce: true });
-
-                if (!result.data || (result.status && result.status >= 400)) {
-                    console.error(`[CPM Update] Failed to fetch update bundle: ${result.status}`);
-                    return [];
+                const data = await Risu.pluginStorage.getItem(this.STORAGE_KEY);
+                if (!data) { this.plugins = []; return; }
+                const result = parseAndValidate(data, schemas.subPluginRegistry);
+                if (!result.ok) {
+                    console.warn('[CPM Loader] Registry schema validation failed:', result.error);
+                    this.plugins = result.fallback;
+                } else {
+                    this.plugins = result.data;
                 }
-
-                const raw = (typeof result.data === 'string') ? JSON.parse(result.data) : result.data;
-                const bundleResult = validateSchema(raw, schemas.updateBundle);
-                if (!bundleResult.ok) {
-                    console.error(`[CPM Update] Bundle schema validation failed: ${bundleResult.error}`);
-                    return [];
-                }
-                const bundle = bundleResult.data;
-                const manifest = bundle.versions || {};
-                const codeBundle = bundle.code || {};
-                console.log(`[CPM Update] Bundle loaded: ${Object.keys(manifest).length} versions, ${Object.keys(codeBundle).length} code files`);
-
-                const results = [];
-                for (const p of this.plugins) {
-                    if (!p.updateUrl || !p.name) continue;
-                    const remote = manifest[p.name];
-                    if (!remote || !remote.version) {
-                        console.warn(`[CPM Update] ${p.name} not found in manifest, skipping.`);
-                        continue;
-                    }
-                    const cmp = this.compareVersions(p.version || '0.0.0', remote.version);
-                    console.log(`[CPM Update] ${p.name}: local=${p.version} remote=${remote.version} cmp=${cmp}`);
-                    if (cmp > 0) {
-                        const code = (remote.file && codeBundle[remote.file]) ? codeBundle[remote.file] : null;
-                        if (code) {
-                            console.log(`[CPM Update] Code ready for ${p.name} (${(code.length / 1024).toFixed(1)}KB)`);
-                            // Integrity check: SHA-256 is MANDATORY for bundle updates.
-                            // generate-bundle.cjs always embeds hashes; missing hash = untrusted source.
-                            if (!remote.sha256) {
-                                console.error(`[CPM Update] ⚠️ REJECTED ${p.name}: bundle entry has no sha256 hash — refusing untrusted update`);
-                                continue;
-                            }
-                            const actualHash = await _computeSHA256(code);
-                            if (!actualHash) {
-                                console.error(`[CPM Update] ⚠️ REJECTED ${p.name}: SHA-256 computation failed (Web Crypto unavailable) — cannot verify integrity`);
-                                continue;
-                            }
-                            if (actualHash !== remote.sha256) {
-                                console.error(`[CPM Update] ⚠️ INTEGRITY MISMATCH for ${p.name}: expected ${remote.sha256.substring(0, 12)}…, got ${actualHash.substring(0, 12)}… — skipping`);
-                                continue;
-                            }
-                            console.log(`[CPM Update] ✓ Integrity OK for ${p.name} [sha256:${actualHash.substring(0, 12)}…]`);
-                        }
-                        else console.warn(`[CPM Update] ${p.name} (${remote.file}) code not found in bundle`);
-                        results.push({ plugin: p, remoteVersion: remote.version, localVersion: p.version || '0.0.0', remoteFile: remote.file, code, expectedSHA256: remote.sha256 });
-                    }
-                }
-                return results;
             } catch (e) {
-                console.error(`[CPM Update] Failed to check updates:`, e);
-                return [];
+                console.error('[CPM Loader] Failed to load registry', e);
+                this.plugins = [];
             }
         },
 
-        async applyUpdate(pluginId, prefetchedCode, expectedSHA256) {
-            const p = this.plugins.find(x => x.id === pluginId);
-            if (!p) return false;
-            if (!prefetchedCode) {
-                console.error(`[CPM Update] No pre-fetched code available for ${p.name}. Re-run update check.`);
-                return false;
-            }
-            try {
-                // Integrity verification at apply-time (defense-in-depth)
-                // SHA-256 is mandatory — reject if missing or mismatched.
-                if (!expectedSHA256) {
-                    console.error(`[CPM Update] BLOCKED: No SHA-256 hash provided for ${p.name}. Refusing to apply unverified code.`);
-                    return false;
-                }
-                const actualHash = await _computeSHA256(prefetchedCode);
-                if (!actualHash) {
-                    console.error(`[CPM Update] BLOCKED: SHA-256 computation failed for ${p.name} (Web Crypto unavailable).`);
-                    return false;
-                }
-                if (actualHash !== expectedSHA256) {
-                    console.error(`[CPM Update] BLOCKED: Integrity mismatch for ${p.name}. Expected sha256:${expectedSHA256.substring(0, 12)}…, got ${actualHash.substring(0, 12)}…`);
-                    return false;
-                }
-                console.log(`[CPM Update] ✓ Apply-time integrity OK for ${p.name}`);
-                console.log(`[CPM Update] Applying update for ${p.name} (${(prefetchedCode.length / 1024).toFixed(1)}KB)`);
-                const meta = this.extractMetadata(prefetchedCode);
-                if (meta.name && p.name && meta.name !== p.name) {
-                    console.error(`[CPM Update] BLOCKED: Tried to apply "${meta.name}" code to plugin "${p.name}". Names don't match.`);
-                    return false;
-                }
-                p.code = prefetchedCode;
-                p.name = meta.name || p.name;
-                p.version = meta.version;
-                p.description = meta.description;
-                p.icon = meta.icon;
-                p.updateUrl = meta.updateUrl || p.updateUrl;
+        async saveRegistry() {
+            await Risu.pluginStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.plugins));
+        },
+
+        /** @param {string} code */
+        extractMetadata(code) {
+            const meta = { name: 'Unnamed Sub-Plugin', version: '', description: '', icon: '📦', updateUrl: '' };
+            const nameMatch = code.match(/\/\/\s*@(?:name|display-name)\s+(.+)/i);
+            if (nameMatch) meta.name = nameMatch[1].trim();
+            const verMatch = code.match(/\/\/\s*@version\s+([^\r\n]+)/i);
+            if (verMatch) meta.version = verMatch[1].trim();
+            const descMatch = code.match(/\/\/\s*@description\s+(.+)/i);
+            if (descMatch) meta.description = descMatch[1].trim();
+            const iconMatch = code.match(/\/\/\s*@icon\s+(.+)/i);
+            if (iconMatch) meta.icon = iconMatch[1].trim();
+            const updateMatch = code.match(/\/\/\s*@update-url\s+(.+)/i);
+            if (updateMatch) meta.updateUrl = updateMatch[1].trim();
+            return meta;
+        },
+
+        /** @param {string} code */
+        async install(code) {
+            const meta = this.extractMetadata(code);
+            const existing = this.plugins.find(p => p.name === meta.name);
+            if (existing) {
+                existing.code = code;
+                existing.version = meta.version;
+                existing.description = meta.description;
+                existing.icon = meta.icon;
+                existing.updateUrl = meta.updateUrl;
                 await this.saveRegistry();
-                console.log(`[CPM Update] Successfully applied update for ${p.name} → v${meta.version}`);
-                return true;
-            } catch (e) {
-                console.error(`[CPM Update] Failed to apply update for ${p.name}:`, e);
-                return false;
+                return meta.name;
+            }
+            const id = 'subplugin_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+            this.plugins.push({ id, code, enabled: true, ...meta });
+            await this.saveRegistry();
+            return meta.name;
+        },
+
+        /** @param {string} id */
+        async remove(id) {
+            this.plugins = this.plugins.filter(p => p.id !== id);
+            await this.saveRegistry();
+        },
+
+        /**
+         * @param {string} id
+         * @param {boolean} enabled
+         */
+        async toggle(id, enabled) {
+            const p = this.plugins.find(p => p.id === id);
+            if (p) {
+                p.enabled = enabled;
+                await this.saveRegistry();
             }
         },
+
+        async executeEnabled() {
+            _exposeScopeToWindow$1();
+            /** @type {any} */ (window).CupcakePM_SubPlugins = /** @type {any} */ (window).CupcakePM_SubPlugins || [];
+            for (const p of this.plugins) {
+                if (p.enabled) {
+                    try {
+                        state._currentExecutingPluginId = p.id;
+                        if (!_pluginRegistrations[p.id]) _pluginRegistrations[p.id] = { providerNames: [], tabObjects: [], fetcherEntries: [] };
+                        await _executeViaScriptTag(p.code, p.name);
+                        console.log(`[CPM Loader] Loaded Sub-Plugin: ${p.name}`);
+                    } catch (e) {
+                        console.error(`[CPM Loader] Failed to load ${p.name}`, e);
+                    } finally {
+                        state._currentExecutingPluginId = null;
+                    }
+                }
+            }
+        },
+
+        /**
+         * @param {string} a
+         * @param {string} b
+         */
+        compareVersions(a, b) {
+            const sa = (a || '0.0.0').replace(/[^0-9.]/g, '') || '0.0.0';
+            const sb = (b || '0.0.0').replace(/[^0-9.]/g, '') || '0.0.0';
+            const pa = sa.split('.').map(Number);
+            const pb = sb.split('.').map(Number);
+            for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+                const na = pa[i] || 0, nb = pb[i] || 0;
+                if (nb > na) return 1;
+                if (na > nb) return -1;
+            }
+            return 0;
+        },
+
+        // ── Auto-update system (from auto-updater.js) ──
+        ...autoUpdaterMethods,
+
+        // ── Toast UI (from update-toast.js) ──
+        ...updateToastMethods,
 
         // ── Hot-Reload Infrastructure ──
 
+        /** @param {string} pluginId */
         unloadPlugin(pluginId) {
             const reg = _pluginRegistrations[pluginId];
             if (!reg) return;
@@ -5106,46 +5381,47 @@ var CupcakeProviderManager = (function (exports) {
                     try {
                         const result = hook();
                         if (result && typeof result.then === 'function') {
-                            result.catch(e => console.warn(`[CPM Loader] Async cleanup hook error for ${pluginId}:`, e.message));
+                            result.catch((/** @type {any} */ e) => console.warn(`[CPM Loader] Async cleanup hook error for ${pluginId}:`, e.message));
                         }
-                    } catch (e) { console.warn(`[CPM Loader] Cleanup hook error for ${pluginId}:`, e.message); }
+                    } catch (/** @type {any} */ e) { console.warn(`[CPM Loader] Cleanup hook error for ${pluginId}:`, e.message); }
                 }
                 delete _pluginCleanupHooks[pluginId];
             }
 
             for (const key of Object.keys(window)) {
-                if (key.startsWith('_cpm') && key.endsWith('Cleanup') && typeof window[key] === 'function') {
+                if (key.startsWith('_cpm') && key.endsWith('Cleanup') && typeof /** @type {any} */ (window)[key] === 'function') {
                     const providerNames = reg.providerNames.map(n => n.toLowerCase());
                     const keyLower = key.toLowerCase();
                     const isRelated = providerNames.some(name => keyLower.includes(name.replace(/\s+/g, '').toLowerCase()));
                     if (isRelated) {
                         try {
                             console.log(`[CPM Loader] Calling window.${key}() for plugin ${pluginId}`);
-                            const result = window[key]();
+                            const result = /** @type {any} */ (window)[key]();
                             if (result && typeof result.then === 'function') {
-                                result.catch(e => console.warn(`[CPM Loader] window.${key}() error:`, e.message));
+                                result.catch((/** @type {any} */ e) => console.warn(`[CPM Loader] window.${key}() error:`, e.message));
                             }
-                        } catch (e) { console.warn(`[CPM Loader] window.${key}() error:`, e.message); }
+                        } catch (/** @type {any} */ e) { console.warn(`[CPM Loader] window.${key}() error:`, e.message); }
                     }
                 }
             }
 
             for (const name of reg.providerNames) {
                 delete customFetchers[name];
-                state.ALL_DEFINED_MODELS = state.ALL_DEFINED_MODELS.filter(m => m.provider !== name);
+                state.ALL_DEFINED_MODELS = state.ALL_DEFINED_MODELS.filter((/** @type {any} */ m) => m.provider !== name);
             }
             for (const tab of reg.tabObjects) {
                 const idx = registeredProviderTabs.indexOf(tab);
                 if (idx !== -1) registeredProviderTabs.splice(idx, 1);
             }
             for (const entry of reg.fetcherEntries) {
-                const idx = pendingDynamicFetchers.findIndex(f => f.name === entry.name);
+                const idx = pendingDynamicFetchers.findIndex((/** @type {any} */ f) => f.name === entry.name);
                 if (idx !== -1) pendingDynamicFetchers.splice(idx, 1);
             }
             _pluginRegistrations[pluginId] = { providerNames: [], tabObjects: [], fetcherEntries: [] };
             console.log(`[CPM Loader] Unloaded registrations for plugin ${pluginId}`);
         },
 
+        /** @param {any} plugin */
         async executeOne(plugin) {
             if (!plugin || !plugin.enabled) return;
             _exposeScopeToWindow$1();
@@ -5161,6 +5437,7 @@ var CupcakeProviderManager = (function (exports) {
             }
         },
 
+        /** @param {string} pluginId */
         async hotReload(pluginId) {
             const plugin = this.plugins.find(p => p.id === pluginId);
             if (!plugin) return false;
@@ -5171,7 +5448,9 @@ var CupcakeProviderManager = (function (exports) {
                 await this.executeOne(plugin);
 
                 const newProviderNames = (_pluginRegistrations[pluginId] || {}).providerNames || [];
-                for (const { name, fetchDynamicModels } of [...pendingDynamicFetchers]) {
+                for (const _entry of [...pendingDynamicFetchers]) {
+                    /** @type {any} */
+                    const { name, fetchDynamicModels } = _entry;
                     if (newProviderNames.includes(name)) {
                         try {
                             const enabled = await isDynamicFetchEnabled(name);
@@ -5179,11 +5458,11 @@ var CupcakeProviderManager = (function (exports) {
                             console.log(`[CupcakePM] Hot-reload: Fetching dynamic models for ${name}...`);
                             const dynamicModels = await fetchDynamicModels();
                             if (dynamicModels && Array.isArray(dynamicModels) && dynamicModels.length > 0) {
-                                state.ALL_DEFINED_MODELS = state.ALL_DEFINED_MODELS.filter(m => m.provider !== name);
+                                state.ALL_DEFINED_MODELS = state.ALL_DEFINED_MODELS.filter((/** @type {any} */ m) => m.provider !== name);
                                 for (const m of dynamicModels) state.ALL_DEFINED_MODELS.push({ ...m, provider: name });
-                                console.log(`[CupcakePM] ✓ Hot-reload dynamic models for ${name}: ${dynamicModels.length} models`);
+                                console.log(`[CupcakePM] \u2713 Hot-reload dynamic models for ${name}: ${dynamicModels.length} models`);
                             }
-                        } catch (e) { console.warn(`[CupcakePM] Hot-reload dynamic fetch failed for ${name}:`, e.message || e); }
+                        } catch (/** @type {any} */ e) { console.warn(`[CupcakePM] Hot-reload dynamic fetch failed for ${name}:`, e.message || e); }
                     }
                 }
             }
@@ -5194,16 +5473,18 @@ var CupcakeProviderManager = (function (exports) {
         async hotReloadAll() {
             for (const p of this.plugins) this.unloadPlugin(p.id);
             await this.executeEnabled();
-            for (const { name, fetchDynamicModels } of [...pendingDynamicFetchers]) {
+            for (const _entry of [...pendingDynamicFetchers]) {
+                /** @type {any} */
+                const { name, fetchDynamicModels } = _entry;
                 try {
                     const enabled = await isDynamicFetchEnabled(name);
                     if (!enabled) continue;
                     const dynamicModels = await fetchDynamicModels();
                     if (dynamicModels && Array.isArray(dynamicModels) && dynamicModels.length > 0) {
-                        state.ALL_DEFINED_MODELS = state.ALL_DEFINED_MODELS.filter(m => m.provider !== name);
+                        state.ALL_DEFINED_MODELS = state.ALL_DEFINED_MODELS.filter((/** @type {any} */ m) => m.provider !== name);
                         for (const m of dynamicModels) state.ALL_DEFINED_MODELS.push({ ...m, provider: name });
                     }
-                } catch (e) { console.warn(`[CupcakePM] Hot-reload dynamic fetch failed for ${name}:`, e.message || e); }
+                } catch (/** @type {any} */ e) { console.warn(`[CupcakePM] Hot-reload dynamic fetch failed for ${name}:`, e.message || e); }
             }
             console.log('[CPM Loader] Hot-reload all complete.');
         },
@@ -5236,7 +5517,7 @@ var CupcakeProviderManager = (function (exports) {
                 try {
                     await Risu.pluginStorage.removeItem(key);
                     pluginStorageCleared++;
-                } catch (e) {
+                } catch (/** @type {any} */ e) {
                     console.warn(`[CPM Purge] Failed to remove pluginStorage key '${key}':`, e.message || e);
                 }
             }
@@ -5262,7 +5543,7 @@ var CupcakeProviderManager = (function (exports) {
                 try {
                     Risu.setArgument(key, '');
                     argsCleared++;
-                } catch (e) {
+                } catch (/** @type {any} */ e) {
                     console.warn(`[CPM Purge] Failed to clear arg '${key}':`, e.message || e);
                 }
             }
@@ -5343,8 +5624,10 @@ var CupcakeProviderManager = (function (exports) {
      * and Responses API support.
      */
 
+    /** @param {number} ms */
     const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+    /** @param {any} headers */
     function _parseRetryAfterMs(headers) {
         const raw = headers?.get?.('retry-after');
         if (!raw) return 0;
@@ -5357,10 +5640,20 @@ var CupcakeProviderManager = (function (exports) {
         return Math.max(0, retryAt - Date.now());
     }
 
+    /** @param {number} status */
     function _isRetriableHttpStatus(status) {
         return status === 408 || status === 429 || status >= 500;
     }
 
+    /**
+     * @param {Record<string, any>} config
+     * @param {any[]} messagesRaw
+     * @param {number} temp
+     * @param {number} maxTokens
+     * @param {Record<string, any>} [args]
+     * @param {AbortSignal} [abortSignal]
+     * @param {string} [_reqId]
+     */
     async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {}, abortSignal, _reqId) {
         if (!config.url || !config.url.trim()) {
             return { success: false, content: '[Cupcake PM] Base URL is required. Configure it in PM settings.' };
@@ -5388,7 +5681,7 @@ var CupcakeProviderManager = (function (exports) {
         }
 
         const _rawKeys = (config.key || '').trim();
-        const _allKeys = _rawKeys.split(/\s+/).filter(k => k.length > 0);
+        const _allKeys = _rawKeys.split(/\s+/).filter((/** @type {string} */ k) => k.length > 0);
         const _useKeyRotation = _allKeys.length > 1;
         const _keyPool = [..._allKeys];
 
@@ -5413,7 +5706,7 @@ var CupcakeProviderManager = (function (exports) {
         /** @type {any} */
         const body = { model: config.model, temperature: temp };
 
-        const _needsMCT = (model) => { if (!model) return false; return /(?:^|\/)(?:gpt-(?:4\.5|5)|o[1-9])/i.test(model); };
+        const _needsMCT = (/** @type {string} */ model) => { if (!model) return false; return /(?:^|\/)(?:gpt-(?:4\.5|5)|o[1-9])/i.test(model); };
         if (format === 'openai' && _needsMCT(config.model)) {
             body.max_completion_tokens = maxTokens;
         } else {
@@ -5490,9 +5783,9 @@ var CupcakeProviderManager = (function (exports) {
 
         // ── Final safety: deep-clone + filter ──
         if (body.messages) {
-            try { body.messages = JSON.parse(JSON.stringify(body.messages)); } catch (e) { console.error('[Cupcake PM] Deep-clone of messages failed:', e.message); }
+            try { body.messages = JSON.parse(JSON.stringify(body.messages)); } catch (e) { console.error('[Cupcake PM] Deep-clone of messages failed:', /** @type {Error} */ (e).message); }
             const before = body.messages.length;
-            body.messages = body.messages.filter(m => {
+            body.messages = body.messages.filter((/** @type {any} */ m) => {
                 if (m == null || typeof m !== 'object') return false;
                 if (!hasNonEmptyMessageContent(m.content) && !hasAttachedMultimodals(m)) return false;
                 if (typeof m.role !== 'string' || !m.role) return false;
@@ -5502,9 +5795,9 @@ var CupcakeProviderManager = (function (exports) {
             if (body.messages.length === 0) return { success: false, content: '[Cupcake PM] messages must be non-empty (all messages became empty after sanitization)' };
         }
         if (body.contents) {
-            try { body.contents = JSON.parse(JSON.stringify(body.contents)); } catch (e) { console.error('[Cupcake PM] ⚠️ Deep-clone of contents failed:', e.message); }
+            try { body.contents = JSON.parse(JSON.stringify(body.contents)); } catch (e) { console.error('[Cupcake PM] ⚠️ Deep-clone of contents failed:', /** @type {Error} */ (e).message); }
             const before = body.contents.length;
-            body.contents = body.contents.filter(m => m != null && typeof m === 'object');
+            body.contents = body.contents.filter((/** @type {any} */ m) => m != null && typeof m === 'object');
             if (body.contents.length < before) console.warn(`[Cupcake PM] ⚠️ Removed ${before - body.contents.length} null/invalid entries from contents array`);
         }
 
@@ -5541,9 +5834,46 @@ var CupcakeProviderManager = (function (exports) {
         if (config.customParams && config.customParams.trim() !== '') {
             try {
                 const extra = JSON.parse(config.customParams);
-                if (typeof extra === 'object' && extra !== null) {
+                if (typeof extra === 'object' && extra !== null && !Array.isArray(extra)) {
                     const safeExtra = { ...extra };
-                    delete safeExtra.messages; delete safeExtra.contents; delete safeExtra.stream;
+
+                    // ── Blocklist: structural/security-critical fields that must not be overridden via customParams ──
+                    // These fields control conversation content, streaming behaviour, model identity, or tool definitions.
+                    // Allowing them to be overridden could silently break the request or create security issues.
+                    /** @type {string[]} */
+                    const BLOCKED_FIELDS = [
+                        // conversation content — replacing these would discard the user's actual chat
+                        'messages', 'contents', 'input', 'prompt',
+                        // streaming control — CPM sets this based on caller intent; override would break the SSE parser
+                        'stream', 'stream_options',
+                        // model identity — the model is chosen in the provider tab UI; overriding here is almost always a mistake
+                        'model',
+                        // tool / function injection — could execute arbitrary tool definitions the user didn't intend
+                        'tools', 'functions', 'function_call', 'tool_choice', 'tool_config',
+                        // system-level overrides
+                        'system', 'system_instruction',
+                    ];
+                    /** @type {string[]} */
+                    const stripped = [];
+                    for (const key of BLOCKED_FIELDS) {
+                        if (key in safeExtra) {
+                            stripped.push(key);
+                            delete safeExtra[key];
+                        }
+                    }
+                    if (stripped.length > 0) {
+                        console.warn(`[Cupcake PM] customParams: blocked field(s) stripped: ${stripped.join(', ')}. Use the main UI settings instead.`);
+                    }
+
+                    // ── Type guard: only merge primitive values and plain objects/arrays ──
+                    for (const [key, value] of Object.entries(safeExtra)) {
+                        if (value !== null && typeof value === 'object' && typeof value.then === 'function') {
+                            // Reject thenables (Promise-like objects) — not valid JSON values
+                            delete safeExtra[key];
+                            console.warn(`[Cupcake PM] customParams: rejected non-serializable value for key "${key}"`);
+                        }
+                    }
+
                     Object.assign(body, safeExtra);
                 }
             } catch (e) { console.error('[Cupcake PM] Failed to parse customParams JSON for Custom Model:', e); }
@@ -5574,7 +5904,10 @@ var CupcakeProviderManager = (function (exports) {
             if (body.messages) {
                 // Response API does not accept 'name' field on input items (e.g. example_assistant, example_user).
                 // Sending it causes 400: "Unknown parameter: 'input[N].name'"
-                body.input = body.messages.map(({ name: _name, ...rest }) => rest);
+                body.input = body.messages.map((/** @type {any} */ msg) => {
+                    const { name: _name, ...rest } = msg;
+                    return rest;
+                });
                 delete body.messages;
             }
             if (body.max_completion_tokens) { body.max_output_tokens = body.max_completion_tokens; delete body.max_completion_tokens; }
@@ -5593,15 +5926,15 @@ var CupcakeProviderManager = (function (exports) {
         const _isResponsesEndpoint = _useResponsesAPI || (effectiveUrl && /\/responses(?:\?|$)/.test(effectiveUrl));
 
         // ── Core fetch logic (wrapped for key rotation) ──
-        const _doCustomFetch = async (_apiKey) => {
-            const _parseNonStreamingData = (data) => {
+        const _doCustomFetch = async (/** @type {string} */ _apiKey) => {
+            const _parseNonStreamingData = (/** @type {any} */ data) => {
                 if (format === 'anthropic') return parseClaudeNonStreamingResponse(data, {}, _reqId);
                 if (format === 'google') return parseGeminiNonStreamingResponse(data, config, _reqId);
                 if (_isResponsesEndpoint) return parseResponsesAPINonStreamingResponse(data, _reqId);
                 return parseOpenAINonStreamingResponse(data, _reqId);
             };
 
-            const _executeRequest = async (requestFactory, label, maxAttempts = 3) => {
+            const _executeRequest = async (/** @type {() => Promise<any>} */ requestFactory, /** @type {string} */ label, maxAttempts = 3) => {
                 let attempt = 0;
                 let response;
 
@@ -5624,16 +5957,17 @@ var CupcakeProviderManager = (function (exports) {
                 return response;
             };
 
-            const _toNonStreamingUrl = (urlValue) => {
+            const _toNonStreamingUrl = (/** @type {string} */ urlValue) => {
                 let nextUrl = String(urlValue || effectiveUrl || '');
                 if (format === 'google') {
                     nextUrl = nextUrl.replace(':streamGenerateContent', ':generateContent');
-                    nextUrl = nextUrl.replace(/([?&])alt=sse(&)?/i, (_m, sep, tail) => (tail ? sep : ''));
+                    nextUrl = nextUrl.replace(/([?&])alt=sse(&)?/i, (/** @type {string} */ _m, /** @type {string} */ sep, /** @type {string} */ tail) => (tail ? sep : ''));
                     nextUrl = nextUrl.replace(/\?&/, '?').replace(/[?&]$/, '');
                 }
                 return nextUrl;
             };
 
+            /** @type {Record<string, string>} */
             const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_apiKey}` };
             /** @type {Window & typeof globalThis & { _cpmCopilotMachineId?: string, _cpmCopilotSessionId?: string }} */
             const _win = /** @type {any} */ (window);
@@ -5665,8 +5999,8 @@ var CupcakeProviderManager = (function (exports) {
                 if (format === 'anthropic') headers['anthropic-version'] = '2023-06-01';
 
                 const _visionMsgArr = body.messages || body.input || [];
-                const hasVisionContent = _visionMsgArr.some(m =>
-                    Array.isArray(m?.content) && m.content.some(p => p.type === 'image_url' || p.type === 'image')
+                const hasVisionContent = _visionMsgArr.some((/** @type {any} */ m) =>
+                    Array.isArray(m?.content) && m.content.some((/** @type {any} */ p) => p.type === 'image_url' || p.type === 'image')
                 );
                 if (hasVisionContent) headers['Copilot-Vision-Request'] = 'true';
             }
@@ -5767,7 +6101,7 @@ var CupcakeProviderManager = (function (exports) {
                 } else if (format === 'google') {
                     config._tokenUsageReqId = _reqId;
                     const _onComplete = () => saveThoughtSignatureFromStream(config, _reqId);
-                    return { success: true, content: createSSEStream(res, (line) => parseGeminiSSELine(line, config), abortSignal, _onComplete, _reqId) };
+                    return { success: true, content: createSSEStream(res, (/** @type {string} */ line) => parseGeminiSSELine(line, config), abortSignal, _onComplete, _reqId) };
                 } else if (_isResponsesEndpoint) {
                     return { success: true, content: createResponsesAPISSEStream(res, abortSignal, _reqId) };
                 } else {
@@ -5814,7 +6148,7 @@ var CupcakeProviderManager = (function (exports) {
         // ── Key Rotation dispatch ──
         if (_useKeyRotation) {
             const _rotationPoolName = `_cpm_custom_inline_${config.model || 'unknown'}`;
-            KeyPool._pools[_rotationPoolName] = { lastRaw: _rawKeys, keys: [..._keyPool], _inline: true };
+            /** @type {Record<string, any>} */ (KeyPool._pools)[_rotationPoolName] = { lastRaw: _rawKeys, keys: [..._keyPool], _inline: true };
             return KeyPool.withRotation(_rotationPoolName, _doCustomFetch);
         }
         return _doCustomFetch(_allKeys[0] || '');
@@ -5868,7 +6202,7 @@ var CupcakeProviderManager = (function (exports) {
     /**
      * Dispatch request to the correct provider fetcher.
      * @param {ModelDef} modelDef
-     * @param {Object} args - Request arguments from RisuAI
+     * @param {Record<string, any>} args - Request arguments from RisuAI
      * @param {AbortSignal} [abortSignal]
      * @param {string} [_reqId] - Request ID for logging
      * @returns {Promise<RequestResult>}
@@ -5906,7 +6240,7 @@ var CupcakeProviderManager = (function (exports) {
             if (fetcher) return await fetcher(modelDef, messages, temp, maxTokens, args, abortSignal, _reqId);
 
             if (modelDef.provider.startsWith('Custom')) {
-                const cDef = state.CUSTOM_MODELS_CACHE.find(m => m.uniqueId === modelDef.uniqueId);
+                const cDef = /** @type {Record<string, any>|undefined} */ (state.CUSTOM_MODELS_CACHE.find((/** @type {any} */ m) => m.uniqueId === modelDef.uniqueId));
                 if (!cDef) return { success: false, content: `[Cupcake PM] Custom model config not found.` };
 
                 return await fetchCustom({
@@ -5929,7 +6263,8 @@ var CupcakeProviderManager = (function (exports) {
                 }, messages, temp, maxTokens, args, abortSignal, _reqId);
             }
             return { success: false, content: `[Cupcake PM] Unknown provider selected: ${modelDef.provider}` };
-        } catch (e) {
+        } catch (_e) {
+            const e = /** @type {Error} */ (_e);
             return { success: false, content: `[Cupcake PM Crash] ${e.message}` };
         }
     }
@@ -5939,7 +6274,7 @@ var CupcakeProviderManager = (function (exports) {
     /**
      * Main request router — entry point called by RisuAI for every API request.
      * Handles slot inference, parameter overrides, logging, and streaming.
-     * @param {Object} args - Request arguments from RisuAI
+     * @param {Record<string, any>} args - Request arguments from RisuAI
      * @param {ModelDef} activeModelDef - Currently selected model definition
      * @param {AbortSignal} [abortSignal]
      * @returns {Promise<RequestResult>}
@@ -5998,7 +6333,8 @@ var CupcakeProviderManager = (function (exports) {
         let result;
         try {
             result = await fetchByProviderId(targetDef, args, abortSignal, _reqId);
-        } catch (e) {
+        } catch (_e) {
+            const e = /** @type {Error} */ (_e);
             updateApiRequest(_reqId, { duration: Date.now() - _startTime, status: 'crash', response: `[CRASH] ${e.message}` });
             console.error(`[CupcakePM] 💥 Request crashed (${_displayName}):`, e);
             try { Risu.log(`💥 CRASH (${_displayName}): ${e.message}`); } catch {}
@@ -6019,7 +6355,7 @@ var CupcakeProviderManager = (function (exports) {
 
         const _nonStreamTokenUsage = _takeTokenUsage(_reqId, false);
         const _showTokens = await safeGetBoolArg('cpm_show_token_usage', false);
-        const _logResponse = (contentStr, prefix = '📥 Response') => {
+        const _logResponse = (/** @type {any} */ contentStr, prefix = '📥 Response') => {
             const safeContent = typeof contentStr === 'string' ? contentStr : (contentStr == null ? '' : String(contentStr));
             updateApiRequest(_reqId, { response: safeContent.substring(0, 4000) });
             console.log(`[CupcakePM] ${prefix} (${_displayName}):`, safeContent.substring(0, 2000));
@@ -6033,6 +6369,7 @@ var CupcakeProviderManager = (function (exports) {
             if (streamEnabled) {
                 const bridgeCapable = await checkStreamCapability();
                 if (bridgeCapable) {
+                    /** @type {any[]} */
                     const _chunks = [];
                     const _streamDecoder = new TextDecoder();
                     const _streamStartTime = _startTime;
@@ -6077,6 +6414,7 @@ var CupcakeProviderManager = (function (exports) {
         return result;
     }
 
+    // @ts-check
     /**
      * cupcake-api.js — window.CupcakePM global API surface.
      * Public API that sub-plugins use to register providers and access CPM internals.
@@ -6094,7 +6432,23 @@ var CupcakeProviderManager = (function (exports) {
         cupcakeWindow.CupcakePM = {
             customFetchers,
             registeredProviderTabs,
+            /** @param {{ name: string, models: any[], fetcher: any, settingsTab: any, fetchDynamicModels: any }} _opts */
             registerProvider({ name, models, fetcher, settingsTab, fetchDynamicModels }) {
+                // ── Duplicate guard: remove previous registration for same provider name ──
+                // customFetchers[name] is object-keyed so natural overwrite is fine.
+                // Models, tabs, and dynamic fetchers are arrays — deduplicate.
+                state.ALL_DEFINED_MODELS = state.ALL_DEFINED_MODELS.filter(
+                    (/** @type {any} */ m) => m.provider !== name
+                );
+                const existingTabIdx = registeredProviderTabs.findIndex(
+                    (/** @type {any} */ t) => t && t.providerName === name
+                );
+                if (existingTabIdx !== -1) registeredProviderTabs.splice(existingTabIdx, 1);
+                const existingFetcherIdx = pendingDynamicFetchers.findIndex(
+                    (/** @type {any} */ f) => f.name === name
+                );
+                if (existingFetcherIdx !== -1) pendingDynamicFetchers.splice(existingFetcherIdx, 1);
+
                 if (state._currentExecutingPluginId) {
                     if (!_pluginRegistrations[state._currentExecutingPluginId]) {
                         _pluginRegistrations[state._currentExecutingPluginId] = { providerNames: [], tabObjects: [], fetcherEntries: [] };
@@ -6146,23 +6500,23 @@ var CupcakeProviderManager = (function (exports) {
             },
             safeGetArg,
             safeGetBoolArg,
-            setArg: (k, v) => Risu.setArgument(k, String(v)),
+            setArg: (/** @type {string} */ k, /** @type {any} */ v) => Risu.setArgument(k, String(v)),
             // Key Rotation API
-            pickKey: (argName) => KeyPool.pick(argName),
-            drainKey: (argName, failedKey) => KeyPool.drain(argName, failedKey),
-            keyPoolRemaining: (argName) => KeyPool.remaining(argName),
-            resetKeyPool: (argName) => KeyPool.reset(argName),
-            withKeyRotation: (argName, fetchFn, opts) => KeyPool.withRotation(argName, fetchFn, opts),
+            pickKey: (/** @type {string} */ argName) => KeyPool.pick(argName),
+            drainKey: (/** @type {string} */ argName, /** @type {string} */ failedKey) => KeyPool.drain(argName, failedKey),
+            keyPoolRemaining: (/** @type {string} */ argName) => KeyPool.remaining(argName),
+            resetKeyPool: (/** @type {string} */ argName) => KeyPool.reset(argName),
+            withKeyRotation: (/** @type {string} */ argName, /** @type {(key: string) => Promise<any>} */ fetchFn, /** @type {any} */ opts) => KeyPool.withRotation(argName, fetchFn, opts),
             // JSON Credential Rotation API
-            pickJsonKey: (argName) => KeyPool.pickJson(argName),
-            withJsonKeyRotation: (argName, fetchFn, opts) => KeyPool.withJsonRotation(argName, fetchFn, opts),
+            pickJsonKey: (/** @type {string} */ argName) => KeyPool.pickJson(argName),
+            withJsonKeyRotation: (/** @type {string} */ argName, /** @type {(key: string) => Promise<any>} */ fetchFn, /** @type {any} */ opts) => KeyPool.withJsonRotation(argName, fetchFn, opts),
             get vertexTokenCache() { return state.vertexTokenCache; },
             set vertexTokenCache(v) { state.vertexTokenCache = v; },
             AwsV4Signer,
             checkStreamCapability,
-            hotReload: (pluginId) => SubPluginManager.hotReload(pluginId),
+            hotReload: (/** @type {string} */ pluginId) => SubPluginManager.hotReload(pluginId),
             hotReloadAll: () => SubPluginManager.hotReloadAll(),
-            registerCleanup(cleanupFn) {
+            registerCleanup(/** @type {Function} */ cleanupFn) {
                 if (typeof cleanupFn !== 'function') return;
                 const pluginId = state._currentExecutingPluginId;
                 if (!pluginId) {
@@ -6173,16 +6527,17 @@ var CupcakeProviderManager = (function (exports) {
                 _pluginCleanupHooks[pluginId].push(cleanupFn);
                 console.log(`[CupcakePM] Cleanup hook registered for plugin ${pluginId}`);
             },
-            addCustomModel(modelDef, tag = '') {
+            addCustomModel(/** @type {Record<string, any>} */ modelDef, tag = '') {
                 try {
                     let existingIdx = -1;
-                    if (tag) existingIdx = state.CUSTOM_MODELS_CACHE.findIndex(m => m._tag === tag);
+                    if (tag) existingIdx = state.CUSTOM_MODELS_CACHE.findIndex(m => /** @type {Record<string, any>} */ (m)._tag === tag);
                     if (existingIdx !== -1) {
                         state.CUSTOM_MODELS_CACHE[existingIdx] = { ...state.CUSTOM_MODELS_CACHE[existingIdx], ...modelDef, _tag: tag };
                         Risu.setArgument('cpm_custom_models', JSON.stringify(state.CUSTOM_MODELS_CACHE));
-                        return { success: true, created: false, uniqueId: state.CUSTOM_MODELS_CACHE[existingIdx].uniqueId };
+                        return { success: true, created: false, uniqueId: /** @type {Record<string, any>} */ (state.CUSTOM_MODELS_CACHE[existingIdx]).uniqueId };
                     } else {
                         const uniqueId = 'custom_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+                        /** @type {Record<string, any>} */
                         const entry = { ...modelDef, uniqueId, _tag: tag || undefined };
                         state.CUSTOM_MODELS_CACHE.push(entry);
                         state.ALL_DEFINED_MODELS.push({ uniqueId, id: entry.model, name: entry.name || uniqueId, provider: 'Custom' });
@@ -6190,16 +6545,17 @@ var CupcakeProviderManager = (function (exports) {
                         return { success: true, created: true, uniqueId };
                     }
                 } catch (e) {
-                    return { success: false, created: false, uniqueId: '', error: e.message };
+                    return { success: false, created: false, uniqueId: '', error: /** @type {Error} */ (e).message };
                 }
             },
-            smartFetch: async (url, options = {}) => smartNativeFetch(url, options),
-            smartNativeFetch: async (url, options = {}) => smartNativeFetch(url, options),
+            smartFetch: async (/** @type {string} */ url, /** @type {Record<string, any>} */ options = {}) => smartNativeFetch(url, options),
+            smartNativeFetch: async (/** @type {string} */ url, /** @type {Record<string, any>} */ options = {}) => smartNativeFetch(url, options),
             ensureCopilotApiToken: () => ensureCopilotApiToken(),
             _normalizeTokenUsage,
         };
     }
 
+    // @ts-check
     /**
      * settings-ui-custom-models.js — Custom Models Manager UI.
      * Extracted from settings-ui.js for modularity.
@@ -6208,38 +6564,51 @@ var CupcakeProviderManager = (function (exports) {
 
     /** @typedef {HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement} FormField */
 
+    /** @param {string} id */
     function getElement$1(id) {
         const el = document.getElementById(id);
         if (!el) throw new Error(`[CPM] Missing element: ${id}`);
         return el;
     }
 
+    /** @param {string} id */
     function getField(id) {
         return /** @type {FormField} */ (getElement$1(id));
     }
 
+    /** @param {string} id */
     function getCheckbox(id) {
         return /** @type {HTMLInputElement} */ (getElement$1(id));
     }
 
+    /** @param {string} id */
     function getContainer(id) {
         return /** @type {HTMLElement} */ (getElement$1(id));
     }
 
+    /** @param {string} id */
     function getButton(id) {
         return /** @type {HTMLButtonElement} */ (getElement$1(id));
     }
 
+    /** @param {EventTarget|null} eventTarget */
     function getFileInputFiles(eventTarget) {
         return Array.from((/** @type {HTMLInputElement} */ (eventTarget)).files || []);
     }
 
+    /** @param {EventTarget|null} eventTarget */
     function getDatasetIndex(eventTarget) {
         const idx = (/** @type {HTMLElement} */ (eventTarget)).dataset.idx;
         return typeof idx === 'string' ? parseInt(idx, 10) : -1;
     }
 
     // ── Helper: Custom model editor HTML ──
+    /**
+     * @param {Array<{value: string, text: string}>} thinkingList
+     * @param {Array<{value: string, text: string}>} reasoningList
+     * @param {Array<{value: string, text: string}>} verbosityList
+     * @param {Array<{value: string, text: string}>} effortList
+     */
     function renderCustomModelEditor(thinkingList, reasoningList, verbosityList, effortList) {
         return `
         <div id="cpm-cm-editor" class="hidden mt-6 bg-gray-900 border border-gray-700 rounded-lg p-6 relative">
@@ -6289,6 +6658,7 @@ var CupcakeProviderManager = (function (exports) {
     }
 
     // ── Populate editor from model data ──
+    /** @param {Record<string, any>} m */
     function populateEditor(m) {
         getField('cpm-cm-id').value = m.uniqueId;
         getField('cpm-cm-name').value = m.name || '';
@@ -6334,6 +6704,7 @@ var CupcakeProviderManager = (function (exports) {
     }
 
     // ── Read all editor values into a model object ──
+    /** @param {string} uid */
     function readEditorValues(uid) {
         return {
             uniqueId: uid,
@@ -6365,6 +6736,10 @@ var CupcakeProviderManager = (function (exports) {
     }
 
     // ── Custom Models Manager logic ──
+    /**
+     * @param {any} _setVal
+     * @param {any} _openCpmSettings
+     */
     function initCustomModelsManager(_setVal, _openCpmSettings) {
         const cmList = getContainer('cpm-cm-list');
         const cmEditor = getContainer('cpm-cm-editor');
@@ -6377,10 +6752,10 @@ var CupcakeProviderManager = (function (exports) {
                 cmList.innerHTML = '<div class="text-center text-gray-500 py-4 border border-dashed border-gray-700 rounded">No custom models defined.</div>';
                 return;
             }
-            cmList.innerHTML = state.CUSTOM_MODELS_CACHE.map((m, i) => `
+            cmList.innerHTML = state.CUSTOM_MODELS_CACHE.map((/** @type {Record<string, any>} */ m, i) => `
             <div class="bg-gray-800 border border-gray-700 rounded p-4 flex justify-between items-center group hover:border-gray-500 transition-colors">
                 <div>
-                    <div class="font-bold text-white text-lg">${escHtml(m.name) || 'Unnamed Model'}${((m.key || '').trim().split(/\s+/).filter(k => k.length > 0).length > 1) ? ' <span class="text-xs text-blue-400 font-normal ml-2">🔄 키회전</span>' : ''}</div>
+                    <div class="font-bold text-white text-lg">${escHtml(m.name) || 'Unnamed Model'}${((m.key || '').trim().split(/\s+/).filter((/** @type {string} */ k) => k.length > 0).length > 1) ? ' <span class="text-xs text-blue-400 font-normal ml-2">🔄 키회전</span>' : ''}</div>
                     <div class="text-xs text-gray-400 font-mono mt-1">${escHtml(m.model) || 'No model ID'} | ${escHtml(m.url) || 'No URL'}</div>
                 </div>
                 <div class="flex space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -6394,9 +6769,9 @@ var CupcakeProviderManager = (function (exports) {
             // Export
             cmList.querySelectorAll('.cpm-cm-export-btn').forEach(btn => btn.addEventListener('click', (e) => {
                 const idx = getDatasetIndex(e.target);
-                const m = state.CUSTOM_MODELS_CACHE[idx];
+                const m = /** @type {Record<string, any>} */ (state.CUSTOM_MODELS_CACHE[idx]);
                 if (!m) return;
-                const exportModel = { ...m }; delete exportModel.key; exportModel._cpmModelExport = true;
+                const exportModel = /** @type {Record<string, any>} */ ({ ...m }); delete exportModel.key; exportModel._cpmModelExport = true;
                 const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(exportModel, null, 2));
                 const a = document.createElement('a'); a.href = dataStr;
                 a.download = `${(m.name || 'custom_model').replace(/[^a-zA-Z0-9가-힣_-]/g, '_')}.cpm-model.json`;
@@ -6466,7 +6841,7 @@ var CupcakeProviderManager = (function (exports) {
         getButton('cpm-cm-save').addEventListener('click', () => {
             const uid = getField('cpm-cm-id').value;
             const newModel = readEditorValues(uid);
-            const existingIdx = state.CUSTOM_MODELS_CACHE.findIndex(x => x.uniqueId === uid);
+            const existingIdx = state.CUSTOM_MODELS_CACHE.findIndex((/** @type {Record<string, any>} */ x) => x.uniqueId === uid);
             if (existingIdx !== -1) state.CUSTOM_MODELS_CACHE[existingIdx] = { ...state.CUSTOM_MODELS_CACHE[existingIdx], ...newModel };
             else state.CUSTOM_MODELS_CACHE.push(newModel);
             Risu.setArgument('cpm_custom_models', JSON.stringify(state.CUSTOM_MODELS_CACHE));
@@ -6478,6 +6853,7 @@ var CupcakeProviderManager = (function (exports) {
         refreshCmList();
     }
 
+    // @ts-check
     /**
      * settings-ui-plugins.js — Sub-Plugins tab UI.
      * Extracted from settings-ui.js for modularity.
@@ -6486,26 +6862,30 @@ var CupcakeProviderManager = (function (exports) {
 
     /** @typedef {Window & typeof globalThis & { CupcakePM_SubPlugins?: Array<any> }} CupcakePluginWindow */
 
+    /** @param {string} id @returns {HTMLElement} */
     function getElement(id) {
         const el = document.getElementById(id);
         if (!el) throw new Error(`[CPM] Missing element: ${id}`);
         return el;
     }
 
+    /** @param {any} el @returns {HTMLButtonElement} */
     function asButton(el) {
         return /** @type {HTMLButtonElement} */ (el);
     }
 
+    /** @param {any} el @returns {HTMLInputElement} */
     function asInput(el) {
         return /** @type {HTMLInputElement} */ (el);
     }
 
+    /** @param {any} el @returns {HTMLElement} */
     function asContainer(el) {
         return /** @type {HTMLElement} */ (el);
     }
 
     // ── Helper: Sub-Plugins tab renderer ──
-    function buildPluginsTabRenderer(setVal) {
+    function buildPluginsTabRenderer(/** @type {any} */ setVal) {
         const renderPluginsTab = () => {
             const listContainer = document.getElementById('cpm-plugins-list');
             if (!listContainer) return;
@@ -6608,10 +6988,10 @@ var CupcakeProviderManager = (function (exports) {
             });
             listContainer.querySelectorAll('.cpm-plugin-delete').forEach(btn => {
                 btn.addEventListener('click', async (e) => {
-                    const id = asButton(e.target).getAttribute('data-id');
+                    const id = asButton(e.target).getAttribute('data-id') || '';
                     if (confirm('정말로 이 플러그인을 삭제하시겠습니까?')) {
-                        SubPluginManager.unloadPlugin(id);
-                        await SubPluginManager.remove(id);
+                        SubPluginManager.unloadPlugin(/** @type {string} */ (id));
+                        await SubPluginManager.remove(/** @type {string} */ (id));
                         renderPluginsTab();
                     }
                 });
@@ -6659,7 +7039,7 @@ var CupcakeProviderManager = (function (exports) {
                         renderPluginsTab();
                     } catch (err) {
                         console.error('[CPM Purge] Error:', err);
-                        alert('❌ 삭제 중 오류가 발생했습니다: ' + (err.message || err));
+                        alert('❌ 삭제 중 오류가 발생했습니다: ' + (/** @type {Error} */ (err).message || err));
                         purgeButton.disabled = false;
                         purgeButton.textContent = '🗑️ CPM 저장 데이터 모두 지우기';
                     }
@@ -6683,7 +7063,7 @@ var CupcakeProviderManager = (function (exports) {
         return renderPluginsTab;
     }
 
-    function initUpdateCheckButton(_renderPluginsTab, deps = {}) {
+    function initUpdateCheckButton(/** @type {any} */ _renderPluginsTab, /** @type {Record<string, any>} */ deps = {}) {
         const subPluginManager = deps.subPluginManager || SubPluginManager;
         const updateBtn = /** @type {HTMLButtonElement | null} */ (document.getElementById('cpm-check-updates-btn'));
         if (!updateBtn || updateBtn.dataset.cpmBound === 'true') return;
@@ -6731,6 +7111,7 @@ var CupcakeProviderManager = (function (exports) {
         });
     }
 
+    // @ts-check
     /**
      * settings-ui-panels.js — API View panel + Export/Import.
      * Extracted from settings-ui.js for modularity.
@@ -6738,11 +7119,11 @@ var CupcakeProviderManager = (function (exports) {
 
     // ── API View Panel ──
     function initApiViewPanel() {
-        const _renderApiViewEntry = (r) => {
+        const _renderApiViewEntry = (/** @type {any} */ r) => {
             if (!r) return '<div class="text-gray-500 text-center py-8">선택한 요청 데이터가 없습니다.</div>';
-            const redactKey = (v) => { if (!v || typeof v !== 'string') return v; if (v.length <= 8) return '***'; return v.slice(0, 4) + '...' + v.slice(-4); };
-            const redactHeaders = (headers) => { const h = { ...headers }; for (const k of Object.keys(h)) { if (/auth|key|token|secret|bearer/i.test(k)) h[k] = redactKey(h[k]); } return h; };
-            const formatJson = (obj) => { try { return JSON.stringify(obj, null, 2); } catch { return String(obj); } };
+            const redactKey = (/** @type {any} */ v) => { if (!v || typeof v !== 'string') return v; if (v.length <= 8) return '***'; return v.slice(0, 4) + '...' + v.slice(-4); };
+            const redactHeaders = (/** @type {any} */ headers) => { const h = { ...headers }; for (const k of Object.keys(h)) { if (/auth|key|token|secret|bearer/i.test(k)) h[k] = redactKey(h[k]); } return h; };
+            const formatJson = (/** @type {any} */ obj) => { try { return JSON.stringify(obj, null, 2); } catch { return String(obj); } };
             const statusColor = r.status >= 200 && r.status < 300 ? 'text-green-400' : (typeof r.status === 'number' ? 'text-red-400' : 'text-yellow-400');
             const hasHttpDetails = !!r.url;
             return `<div class="space-y-3">
@@ -6779,14 +7160,14 @@ var CupcakeProviderManager = (function (exports) {
             contentEl.innerHTML = _renderApiViewEntry(getApiRequestById(selector.value));
         };
 
-        document.getElementById('cpm-api-view-btn').addEventListener('click', () => {
+        document.getElementById('cpm-api-view-btn')?.addEventListener('click', () => {
             /** @type {HTMLDivElement | null} */
             const panel = /** @type {HTMLDivElement | null} */ (document.getElementById('cpm-api-view-panel'));
             if (!panel) return;
             if (!panel.classList.contains('hidden')) { panel.classList.add('hidden'); return; }
             _refreshApiViewPanel(); panel.classList.remove('hidden');
         });
-        document.getElementById('cpm-api-view-selector').addEventListener('change', (e) => {
+        document.getElementById('cpm-api-view-selector')?.addEventListener('change', (e) => {
             /** @type {HTMLSelectElement | null} */
             const selector = /** @type {HTMLSelectElement | null} */ (e.target);
             /** @type {HTMLDivElement | null} */
@@ -6794,7 +7175,7 @@ var CupcakeProviderManager = (function (exports) {
             if (!selector || !contentEl) return;
             contentEl.innerHTML = _renderApiViewEntry(getApiRequestById(selector.value));
         });
-        document.getElementById('cpm-api-view-close').addEventListener('click', () => {
+        document.getElementById('cpm-api-view-close')?.addEventListener('click', () => {
             /** @type {HTMLDivElement | null} */
             const panel = /** @type {HTMLDivElement | null} */ (document.getElementById('cpm-api-view-panel'));
             if (panel) panel.classList.add('hidden');
@@ -6802,9 +7183,9 @@ var CupcakeProviderManager = (function (exports) {
     }
 
     // ── Export/Import ──
-    function initExportImport(setVal, openCpmSettings) {
-        document.getElementById('cpm-export-btn').addEventListener('click', async () => {
-            const exportData = {};
+    function initExportImport(/** @type {any} */ setVal, /** @type {any} */ openCpmSettings) {
+        document.getElementById('cpm-export-btn')?.addEventListener('click', async () => {
+            const exportData = /** @type {Record<string, any>} */ ({});
             for (const key of getManagedSettingKeys()) {
                 const val = await safeGetArg(key);
                 if (val !== undefined && val !== '') exportData[key] = val;
@@ -6814,7 +7195,7 @@ var CupcakeProviderManager = (function (exports) {
             document.body.appendChild(a); a.click(); a.remove();
         });
 
-        document.getElementById('cpm-import-btn').addEventListener('click', () => {
+        document.getElementById('cpm-import-btn')?.addEventListener('click', () => {
             const input = document.createElement('input'); input.type = 'file'; input.accept = '.json';
             input.onchange = e => {
                 /** @type {HTMLInputElement | null} */
@@ -6837,7 +7218,7 @@ var CupcakeProviderManager = (function (exports) {
                         }
                         alert('설정을 성공적으로 불러왔습니다!');
                         openCpmSettings();
-                    } catch (err) { alert('설정 파일 읽기 오류: ' + err.message); }
+                    } catch (err) { alert('설정 파일 읽기 오류: ' + /** @type {Error} */ (err).message); }
                 };
                 reader.readAsText(file);
             };
@@ -6845,6 +7226,13 @@ var CupcakeProviderManager = (function (exports) {
         });
     }
 
+    // @generated — Do not edit manually.
+    // Built by scripts/build-tailwind.cjs from styles/tailwind-input.css
+    // Size: 36.7 KB (minified)
+    const TAILWIND_CSS = `/*! tailwindcss v4.2.1 | MIT License | https://tailwindcss.com */
+@layer properties{@supports (((-webkit-hyphens:none)) and (not (margin-trim:inline))) or ((-moz-orient:inline) and (not (color:rgb(from red r g b)))){*,:before,:after,::backdrop{--tw-translate-x:0;--tw-translate-y:0;--tw-translate-z:0;--tw-rotate-x:initial;--tw-rotate-y:initial;--tw-rotate-z:initial;--tw-skew-x:initial;--tw-skew-y:initial;--tw-space-y-reverse:0;--tw-space-x-reverse:0;--tw-border-style:solid;--tw-gradient-position:initial;--tw-gradient-from:#0000;--tw-gradient-via:#0000;--tw-gradient-to:#0000;--tw-gradient-stops:initial;--tw-gradient-via-stops:initial;--tw-gradient-from-position:0%;--tw-gradient-via-position:50%;--tw-gradient-to-position:100%;--tw-leading:initial;--tw-font-weight:initial;--tw-tracking:initial;--tw-shadow:0 0 #0000;--tw-shadow-color:initial;--tw-shadow-alpha:100%;--tw-inset-shadow:0 0 #0000;--tw-inset-shadow-color:initial;--tw-inset-shadow-alpha:100%;--tw-ring-color:initial;--tw-ring-shadow:0 0 #0000;--tw-inset-ring-color:initial;--tw-inset-ring-shadow:0 0 #0000;--tw-ring-inset:initial;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-offset-shadow:0 0 #0000;--tw-blur:initial;--tw-brightness:initial;--tw-contrast:initial;--tw-grayscale:initial;--tw-hue-rotate:initial;--tw-invert:initial;--tw-opacity:initial;--tw-saturate:initial;--tw-sepia:initial;--tw-drop-shadow:initial;--tw-drop-shadow-color:initial;--tw-drop-shadow-alpha:100%;--tw-drop-shadow-size:initial;--tw-backdrop-blur:initial;--tw-backdrop-brightness:initial;--tw-backdrop-contrast:initial;--tw-backdrop-grayscale:initial;--tw-backdrop-hue-rotate:initial;--tw-backdrop-invert:initial;--tw-backdrop-opacity:initial;--tw-backdrop-saturate:initial;--tw-backdrop-sepia:initial;--tw-ease:initial}}}@layer theme{:root,:host{--font-sans:ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";--font-mono:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;--color-red-300:oklch(80.8% .114 19.571);--color-red-400:oklch(70.4% .191 22.216);--color-red-500:oklch(63.7% .237 25.331);--color-red-600:oklch(57.7% .245 27.325);--color-red-700:oklch(50.5% .213 27.518);--color-red-800:oklch(44.4% .177 26.899);--color-red-900:oklch(39.6% .141 25.723);--color-red-950:oklch(25.8% .092 26.042);--color-orange-400:oklch(75% .183 55.934);--color-orange-500:oklch(70.5% .213 47.604);--color-orange-600:oklch(64.6% .222 41.116);--color-amber-200:oklch(92.4% .12 95.746);--color-amber-300:oklch(87.9% .169 91.605);--color-amber-400:oklch(82.8% .189 84.429);--color-amber-600:oklch(66.6% .179 58.318);--color-amber-900:oklch(41.4% .112 45.904);--color-yellow-200:oklch(94.5% .129 101.54);--color-yellow-300:oklch(90.5% .182 98.111);--color-yellow-400:oklch(85.2% .199 91.936);--color-yellow-500:oklch(79.5% .184 86.047);--color-yellow-600:oklch(68.1% .162 75.834);--color-yellow-700:oklch(55.4% .135 66.442);--color-yellow-800:oklch(47.6% .114 61.907);--color-yellow-900:oklch(42.1% .095 57.708);--color-yellow-950:oklch(28.6% .066 53.813);--color-green-300:oklch(87.1% .15 154.449);--color-green-400:oklch(79.2% .209 151.711);--color-green-500:oklch(72.3% .219 149.579);--color-green-600:oklch(62.7% .194 149.214);--color-green-700:oklch(52.7% .154 150.069);--color-green-800:oklch(44.8% .119 151.328);--color-green-900:oklch(39.3% .095 152.535);--color-green-950:oklch(26.6% .065 152.934);--color-emerald-300:oklch(84.5% .143 164.978);--color-emerald-400:oklch(76.5% .177 163.223);--color-emerald-700:oklch(50.8% .118 165.612);--color-emerald-900:oklch(37.8% .077 168.94);--color-teal-400:oklch(77.7% .152 181.912);--color-cyan-300:oklch(86.5% .127 207.078);--color-cyan-400:oklch(78.9% .154 211.53);--color-cyan-500:oklch(71.5% .143 215.221);--color-cyan-600:oklch(60.9% .126 221.723);--color-blue-300:oklch(80.9% .105 251.813);--color-blue-400:oklch(70.7% .165 254.624);--color-blue-500:oklch(62.3% .214 259.815);--color-blue-600:oklch(54.6% .245 262.881);--color-blue-900:oklch(37.9% .146 265.522);--color-indigo-300:oklch(78.5% .115 274.713);--color-indigo-400:oklch(67.3% .182 276.935);--color-indigo-500:oklch(58.5% .233 277.117);--color-indigo-600:oklch(51.1% .262 276.966);--color-indigo-700:oklch(45.7% .24 277.023);--color-indigo-900:oklch(35.9% .144 278.697);--color-purple-300:oklch(82.7% .119 306.383);--color-purple-400:oklch(71.4% .203 305.504);--color-purple-500:oklch(62.7% .265 303.9);--color-purple-600:oklch(55.8% .288 302.321);--color-purple-700:oklch(49.6% .265 301.924);--color-purple-900:oklch(38.1% .176 304.987);--color-pink-300:oklch(82.3% .12 346.018);--color-pink-500:oklch(65.6% .241 354.308);--color-gray-200:oklch(92.8% .006 264.531);--color-gray-300:oklch(87.2% .01 258.338);--color-gray-400:oklch(70.7% .022 261.325);--color-gray-500:oklch(55.1% .027 264.364);--color-gray-600:oklch(44.6% .03 256.802);--color-gray-700:oklch(37.3% .034 259.733);--color-gray-800:oklch(27.8% .033 256.848);--color-gray-900:oklch(21% .034 264.665);--color-white:#fff;--spacing:.25rem;--container-xs:20rem;--container-md:28rem;--text-xs:.75rem;--text-xs--line-height:calc(1 / .75);--text-sm:.875rem;--text-sm--line-height:calc(1.25 / .875);--text-lg:1.125rem;--text-lg--line-height:calc(1.75 / 1.125);--text-xl:1.25rem;--text-xl--line-height:calc(1.75 / 1.25);--text-2xl:1.5rem;--text-2xl--line-height:calc(2 / 1.5);--text-3xl:1.875rem;--text-3xl--line-height:calc(2.25 / 1.875);--text-4xl:2.25rem;--text-4xl--line-height:calc(2.5 / 2.25);--font-weight-normal:400;--font-weight-medium:500;--font-weight-semibold:600;--font-weight-bold:700;--font-weight-extrabold:800;--tracking-wider:.05em;--tracking-widest:.1em;--leading-relaxed:1.625;--radius-md:.375rem;--radius-lg:.5rem;--radius-xl:.75rem;--ease-out:cubic-bezier(0, 0, .2, 1);--default-transition-duration:.15s;--default-transition-timing-function:cubic-bezier(.4, 0, .2, 1);--default-font-family:var(--font-sans);--default-mono-font-family:var(--font-mono)}}@layer base{*,:after,:before,::backdrop{box-sizing:border-box;border:0 solid;margin:0;padding:0}::file-selector-button{box-sizing:border-box;border:0 solid;margin:0;padding:0}html,:host{-webkit-text-size-adjust:100%;tab-size:4;line-height:1.5;font-family:var(--default-font-family,ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji");font-feature-settings:var(--default-font-feature-settings,normal);font-variation-settings:var(--default-font-variation-settings,normal);-webkit-tap-highlight-color:transparent}hr{height:0;color:inherit;border-top-width:1px}abbr:where([title]){-webkit-text-decoration:underline dotted;text-decoration:underline dotted}h1,h2,h3,h4,h5,h6{font-size:inherit;font-weight:inherit}a{color:inherit;-webkit-text-decoration:inherit;-webkit-text-decoration:inherit;-webkit-text-decoration:inherit;text-decoration:inherit}b,strong{font-weight:bolder}code,kbd,samp,pre{font-family:var(--default-mono-font-family,ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace);font-feature-settings:var(--default-mono-font-feature-settings,normal);font-variation-settings:var(--default-mono-font-variation-settings,normal);font-size:1em}small{font-size:80%}sub,sup{vertical-align:baseline;font-size:75%;line-height:0;position:relative}sub{bottom:-.25em}sup{top:-.5em}table{text-indent:0;border-color:inherit;border-collapse:collapse}:-moz-focusring{outline:auto}progress{vertical-align:baseline}summary{display:list-item}ol,ul,menu{list-style:none}img,svg,video,canvas,audio,iframe,embed,object{vertical-align:middle;display:block}img,video{max-width:100%;height:auto}button,input,select,optgroup,textarea{font:inherit;font-feature-settings:inherit;font-variation-settings:inherit;letter-spacing:inherit;color:inherit;opacity:1;background-color:#0000;border-radius:0}::file-selector-button{font:inherit;font-feature-settings:inherit;font-variation-settings:inherit;letter-spacing:inherit;color:inherit;opacity:1;background-color:#0000;border-radius:0}:where(select:is([multiple],[size])) optgroup{font-weight:bolder}:where(select:is([multiple],[size])) optgroup option{padding-inline-start:20px}::file-selector-button{margin-inline-end:4px}::placeholder{opacity:1}@supports (not ((-webkit-appearance:-apple-pay-button))) or (contain-intrinsic-size:1px){::placeholder{color:currentColor}@supports (color:color-mix(in lab, red, red)){::placeholder{color:color-mix(in oklab, currentcolor 50%, transparent)}}}textarea{resize:vertical}::-webkit-search-decoration{-webkit-appearance:none}::-webkit-date-and-time-value{min-height:1lh;text-align:inherit}::-webkit-datetime-edit{display:inline-flex}::-webkit-datetime-edit-fields-wrapper{padding:0}::-webkit-datetime-edit{padding-block:0}::-webkit-datetime-edit-year-field{padding-block:0}::-webkit-datetime-edit-month-field{padding-block:0}::-webkit-datetime-edit-day-field{padding-block:0}::-webkit-datetime-edit-hour-field{padding-block:0}::-webkit-datetime-edit-minute-field{padding-block:0}::-webkit-datetime-edit-second-field{padding-block:0}::-webkit-datetime-edit-millisecond-field{padding-block:0}::-webkit-datetime-edit-meridiem-field{padding-block:0}::-webkit-calendar-picker-indicator{line-height:1}:-moz-ui-invalid{box-shadow:none}button,input:where([type=button],[type=reset],[type=submit]){appearance:button}::file-selector-button{appearance:button}::-webkit-inner-spin-button{height:auto}::-webkit-outer-spin-button{height:auto}[hidden]:where(:not([hidden=until-found])){display:none!important}}@layer components;@layer utilities{.invisible{visibility:hidden}.visible{visibility:visible}.sr-only{clip-path:inset(50%);white-space:nowrap;border-width:0;width:1px;height:1px;margin:-1px;padding:0;position:absolute;overflow:hidden}.absolute{position:absolute}.fixed{position:fixed}.relative{position:relative}.static{position:static}.inset-0{inset:calc(var(--spacing) * 0)}.start{inset-inline-start:var(--spacing)}.end{inset-inline-end:var(--spacing)}.top-0{top:calc(var(--spacing) * 0)}.top-1{top:calc(var(--spacing) * 1)}.top-1\\/2{top:50%}.top-full{top:100%}.right-2{right:calc(var(--spacing) * 2)}.left-0{left:calc(var(--spacing) * 0)}.left-1{left:calc(var(--spacing) * 1)}.z-10{z-index:10}.z-50{z-index:50}.z-\\[100\\]{z-index:100}.container{width:100%}@media (min-width:40rem){.container{max-width:40rem}}@media (min-width:48rem){.container{max-width:48rem}}@media (min-width:64rem){.container{max-width:64rem}}@media (min-width:80rem){.container{max-width:80rem}}@media (min-width:96rem){.container{max-width:96rem}}.my-4{margin-block:calc(var(--spacing) * 4)}.mt-1{margin-top:calc(var(--spacing) * 1)}.mt-2{margin-top:calc(var(--spacing) * 2)}.mt-3{margin-top:calc(var(--spacing) * 3)}.mt-4{margin-top:calc(var(--spacing) * 4)}.mt-5{margin-top:calc(var(--spacing) * 5)}.mt-6{margin-top:calc(var(--spacing) * 6)}.mt-8{margin-top:calc(var(--spacing) * 8)}.mt-10{margin-top:calc(var(--spacing) * 10)}.mr-1{margin-right:calc(var(--spacing) * 1)}.mr-2{margin-right:calc(var(--spacing) * 2)}.mr-3{margin-right:calc(var(--spacing) * 3)}.mb-1{margin-bottom:calc(var(--spacing) * 1)}.mb-2{margin-bottom:calc(var(--spacing) * 2)}.mb-3{margin-bottom:calc(var(--spacing) * 3)}.mb-4{margin-bottom:calc(var(--spacing) * 4)}.mb-6{margin-bottom:calc(var(--spacing) * 6)}.ml-2{margin-left:calc(var(--spacing) * 2)}.ml-auto{margin-left:auto}.block{display:block}.contents{display:contents}.flex{display:flex}.grid{display:grid}.hidden{display:none}.inline{display:inline}.h-1\\.5{height:calc(var(--spacing) * 1.5)}.h-2{height:calc(var(--spacing) * 2)}.h-3{height:calc(var(--spacing) * 3)}.h-4{height:calc(var(--spacing) * 4)}.h-5{height:calc(var(--spacing) * 5)}.h-6{height:calc(var(--spacing) * 6)}.h-14{height:calc(var(--spacing) * 14)}.h-24{height:calc(var(--spacing) * 24)}.h-auto{height:auto}.h-full{height:100%}.max-h-24{max-height:calc(var(--spacing) * 24)}.max-h-40{max-height:calc(var(--spacing) * 40)}.max-h-48{max-height:calc(var(--spacing) * 48)}.max-h-60{max-height:calc(var(--spacing) * 60)}.max-h-72{max-height:calc(var(--spacing) * 72)}.max-h-96{max-height:calc(var(--spacing) * 96)}.max-h-\\[70vh\\]{max-height:70vh}.w-4{width:calc(var(--spacing) * 4)}.w-5{width:calc(var(--spacing) * 5)}.w-6{width:calc(var(--spacing) * 6)}.w-10{width:calc(var(--spacing) * 10)}.w-full{width:100%}.max-w-md{max-width:var(--container-md)}.max-w-xs{max-width:var(--container-xs)}.min-w-0{min-width:calc(var(--spacing) * 0)}.flex-1{flex:1}.flex-shrink{flex-shrink:1}.shrink-0{flex-shrink:0}.-translate-y-1\\/2{--tw-translate-y:calc(calc(1 / 2 * 100%) * -1);translate:var(--tw-translate-x) var(--tw-translate-y)}.transform{transform:var(--tw-rotate-x,) var(--tw-rotate-y,) var(--tw-rotate-z,) var(--tw-skew-x,) var(--tw-skew-y,)}.cursor-pointer{cursor:pointer}.resize{resize:both}.resize-y{resize:vertical}.list-inside{list-style-position:inside}.list-disc{list-style-type:disc}.grid-cols-1{grid-template-columns:repeat(1,minmax(0,1fr))}.grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.flex-col{flex-direction:column}.flex-col-reverse{flex-direction:column-reverse}.flex-wrap{flex-wrap:wrap}.items-baseline{align-items:baseline}.items-center{align-items:center}.items-end{align-items:flex-end}.items-start{align-items:flex-start}.justify-between{justify-content:space-between}.justify-center{justify-content:center}.justify-end{justify-content:flex-end}.gap-1{gap:calc(var(--spacing) * 1)}.gap-2{gap:calc(var(--spacing) * 2)}.gap-3{gap:calc(var(--spacing) * 3)}.gap-4{gap:calc(var(--spacing) * 4)}:where(.space-y-0\\.5>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(calc(var(--spacing) * .5) * var(--tw-space-y-reverse));margin-block-end:calc(calc(var(--spacing) * .5) * calc(1 - var(--tw-space-y-reverse)))}:where(.space-y-1>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(calc(var(--spacing) * 1) * var(--tw-space-y-reverse));margin-block-end:calc(calc(var(--spacing) * 1) * calc(1 - var(--tw-space-y-reverse)))}:where(.space-y-2>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(calc(var(--spacing) * 2) * var(--tw-space-y-reverse));margin-block-end:calc(calc(var(--spacing) * 2) * calc(1 - var(--tw-space-y-reverse)))}:where(.space-y-3>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(calc(var(--spacing) * 3) * var(--tw-space-y-reverse));margin-block-end:calc(calc(var(--spacing) * 3) * calc(1 - var(--tw-space-y-reverse)))}:where(.space-y-4>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(calc(var(--spacing) * 4) * var(--tw-space-y-reverse));margin-block-end:calc(calc(var(--spacing) * 4) * calc(1 - var(--tw-space-y-reverse)))}.gap-x-4{column-gap:calc(var(--spacing) * 4)}:where(.space-x-2>:not(:last-child)){--tw-space-x-reverse:0;margin-inline-start:calc(calc(var(--spacing) * 2) * var(--tw-space-x-reverse));margin-inline-end:calc(calc(var(--spacing) * 2) * calc(1 - var(--tw-space-x-reverse)))}:where(.space-x-3>:not(:last-child)){--tw-space-x-reverse:0;margin-inline-start:calc(calc(var(--spacing) * 3) * var(--tw-space-x-reverse));margin-inline-end:calc(calc(var(--spacing) * 3) * calc(1 - var(--tw-space-x-reverse)))}.gap-y-1{row-gap:calc(var(--spacing) * 1)}.truncate{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.overflow-auto{overflow:auto}.overflow-hidden{overflow:hidden}.overflow-y-auto{overflow-y:auto}.rounded{border-radius:.25rem}.rounded-full{border-radius:3.40282e38px}.rounded-lg{border-radius:var(--radius-lg)}.rounded-md{border-radius:var(--radius-md)}.rounded-xl{border-radius:var(--radius-xl)}.border{border-style:var(--tw-border-style);border-width:1px}.border-2{border-style:var(--tw-border-style);border-width:2px}.border-t{border-top-style:var(--tw-border-style);border-top-width:1px}.border-b{border-bottom-style:var(--tw-border-style);border-bottom-width:1px}.border-l-2{border-left-style:var(--tw-border-style);border-left-width:2px}.border-l-4{border-left-style:var(--tw-border-style);border-left-width:4px}.border-dashed{--tw-border-style:dashed;border-style:dashed}.border-amber-600\\/50{border-color:#dd740080}@supports (color:color-mix(in lab, red, red)){.border-amber-600\\/50{border-color:color-mix(in oklab, var(--color-amber-600) 50%, transparent)}}.border-blue-500{border-color:var(--color-blue-500)}.border-cyan-500{border-color:var(--color-cyan-500)}.border-emerald-700{border-color:var(--color-emerald-700)}.border-emerald-900\\/50{border-color:#004e3b80}@supports (color:color-mix(in lab, red, red)){.border-emerald-900\\/50{border-color:color-mix(in oklab, var(--color-emerald-900) 50%, transparent)}}.border-gray-600{border-color:var(--color-gray-600)}.border-gray-700{border-color:var(--color-gray-700)}.border-gray-700\\/50{border-color:#36415380}@supports (color:color-mix(in lab, red, red)){.border-gray-700\\/50{border-color:color-mix(in oklab, var(--color-gray-700) 50%, transparent)}}.border-gray-800{border-color:var(--color-gray-800)}.border-green-500{border-color:var(--color-green-500)}.border-green-600{border-color:var(--color-green-600)}.border-green-800{border-color:var(--color-green-800)}.border-indigo-700{border-color:var(--color-indigo-700)}.border-pink-500{border-color:var(--color-pink-500)}.border-purple-700\\/50{border-color:#8200da80}@supports (color:color-mix(in lab, red, red)){.border-purple-700\\/50{border-color:color-mix(in oklab, var(--color-purple-700) 50%, transparent)}}.border-purple-900\\/50{border-color:#59168b80}@supports (color:color-mix(in lab, red, red)){.border-purple-900\\/50{border-color:color-mix(in oklab, var(--color-purple-900) 50%, transparent)}}.border-red-500{border-color:var(--color-red-500)}.border-red-700\\/50{border-color:#bf000f80}@supports (color:color-mix(in lab, red, red)){.border-red-700\\/50{border-color:color-mix(in oklab, var(--color-red-700) 50%, transparent)}}.border-red-800{border-color:var(--color-red-800)}.border-yellow-500{border-color:var(--color-yellow-500)}.border-yellow-600{border-color:var(--color-yellow-600)}.border-yellow-600\\/50{border-color:#cd890080}@supports (color:color-mix(in lab, red, red)){.border-yellow-600\\/50{border-color:color-mix(in oklab, var(--color-yellow-600) 50%, transparent)}}.border-yellow-700\\/50{border-color:#a3610080}@supports (color:color-mix(in lab, red, red)){.border-yellow-700\\/50{border-color:color-mix(in oklab, var(--color-yellow-700) 50%, transparent)}}.border-yellow-800{border-color:var(--color-yellow-800)}.bg-\\[\\#121214\\]{background-color:#121214}.bg-amber-900\\/30{background-color:#7b33064d}@supports (color:color-mix(in lab, red, red)){.bg-amber-900\\/30{background-color:color-mix(in oklab, var(--color-amber-900) 30%, transparent)}}.bg-blue-600{background-color:var(--color-blue-600)}.bg-blue-600\\/90{background-color:#155dfce6}@supports (color:color-mix(in lab, red, red)){.bg-blue-600\\/90{background-color:color-mix(in oklab, var(--color-blue-600) 90%, transparent)}}.bg-blue-900\\/10{background-color:#1c398e1a}@supports (color:color-mix(in lab, red, red)){.bg-blue-900\\/10{background-color:color-mix(in oklab, var(--color-blue-900) 10%, transparent)}}.bg-cyan-600{background-color:var(--color-cyan-600)}.bg-gray-600{background-color:var(--color-gray-600)}.bg-gray-700{background-color:var(--color-gray-700)}.bg-gray-800{background-color:var(--color-gray-800)}.bg-gray-800\\/70{background-color:#1e2939b3}@supports (color:color-mix(in lab, red, red)){.bg-gray-800\\/70{background-color:color-mix(in oklab, var(--color-gray-800) 70%, transparent)}}.bg-gray-900{background-color:var(--color-gray-900)}.bg-green-600{background-color:var(--color-green-600)}.bg-green-700{background-color:var(--color-green-700)}.bg-green-900\\/30{background-color:#0d542b4d}@supports (color:color-mix(in lab, red, red)){.bg-green-900\\/30{background-color:color-mix(in oklab, var(--color-green-900) 30%, transparent)}}.bg-green-900\\/50{background-color:#0d542b80}@supports (color:color-mix(in lab, red, red)){.bg-green-900\\/50{background-color:color-mix(in oklab, var(--color-green-900) 50%, transparent)}}.bg-green-950{background-color:var(--color-green-950)}.bg-indigo-600{background-color:var(--color-indigo-600)}.bg-indigo-900\\/30{background-color:#312c854d}@supports (color:color-mix(in lab, red, red)){.bg-indigo-900\\/30{background-color:color-mix(in oklab, var(--color-indigo-900) 30%, transparent)}}.bg-indigo-900\\/40{background-color:#312c8566}@supports (color:color-mix(in lab, red, red)){.bg-indigo-900\\/40{background-color:color-mix(in oklab, var(--color-indigo-900) 40%, transparent)}}.bg-orange-600{background-color:var(--color-orange-600)}.bg-purple-600{background-color:var(--color-purple-600)}.bg-purple-700{background-color:var(--color-purple-700)}.bg-red-600\\/90{background-color:#e40014e6}@supports (color:color-mix(in lab, red, red)){.bg-red-600\\/90{background-color:color-mix(in oklab, var(--color-red-600) 90%, transparent)}}.bg-red-700{background-color:var(--color-red-700)}.bg-red-900\\/20{background-color:#82181a33}@supports (color:color-mix(in lab, red, red)){.bg-red-900\\/20{background-color:color-mix(in oklab, var(--color-red-900) 20%, transparent)}}.bg-red-900\\/30{background-color:#82181a4d}@supports (color:color-mix(in lab, red, red)){.bg-red-900\\/30{background-color:color-mix(in oklab, var(--color-red-900) 30%, transparent)}}.bg-red-900\\/50{background-color:#82181a80}@supports (color:color-mix(in lab, red, red)){.bg-red-900\\/50{background-color:color-mix(in oklab, var(--color-red-900) 50%, transparent)}}.bg-red-950{background-color:var(--color-red-950)}.bg-white{background-color:var(--color-white)}.bg-yellow-600{background-color:var(--color-yellow-600)}.bg-yellow-600\\/30{background-color:#cd89004d}@supports (color:color-mix(in lab, red, red)){.bg-yellow-600\\/30{background-color:color-mix(in oklab, var(--color-yellow-600) 30%, transparent)}}.bg-yellow-900\\/10{background-color:#733e0a1a}@supports (color:color-mix(in lab, red, red)){.bg-yellow-900\\/10{background-color:color-mix(in oklab, var(--color-yellow-900) 10%, transparent)}}.bg-yellow-900\\/20{background-color:#733e0a33}@supports (color:color-mix(in lab, red, red)){.bg-yellow-900\\/20{background-color:color-mix(in oklab, var(--color-yellow-900) 20%, transparent)}}.bg-yellow-950{background-color:var(--color-yellow-950)}.bg-gradient-to-r{--tw-gradient-position:to right in oklab;background-image:linear-gradient(var(--tw-gradient-stops))}.from-blue-400{--tw-gradient-from:var(--color-blue-400);--tw-gradient-stops:var(--tw-gradient-via-stops,var(--tw-gradient-position), var(--tw-gradient-from) var(--tw-gradient-from-position), var(--tw-gradient-to) var(--tw-gradient-to-position))}.to-purple-500{--tw-gradient-to:var(--color-purple-500);--tw-gradient-stops:var(--tw-gradient-via-stops,var(--tw-gradient-position), var(--tw-gradient-from) var(--tw-gradient-from-position), var(--tw-gradient-to) var(--tw-gradient-to-position))}.bg-clip-text{-webkit-background-clip:text;background-clip:text}.p-2{padding:calc(var(--spacing) * 2)}.p-3{padding:calc(var(--spacing) * 3)}.p-4{padding:calc(var(--spacing) * 4)}.p-5{padding:calc(var(--spacing) * 5)}.p-6{padding:calc(var(--spacing) * 6)}.px-1{padding-inline:calc(var(--spacing) * 1)}.px-2{padding-inline:calc(var(--spacing) * 2)}.px-3{padding-inline:calc(var(--spacing) * 3)}.px-4{padding-inline:calc(var(--spacing) * 4)}.px-5{padding-inline:calc(var(--spacing) * 5)}.px-6{padding-inline:calc(var(--spacing) * 6)}.py-0\\.5{padding-block:calc(var(--spacing) * .5)}.py-1{padding-block:calc(var(--spacing) * 1)}.py-1\\.5{padding-block:calc(var(--spacing) * 1.5)}.py-2{padding-block:calc(var(--spacing) * 2)}.py-4{padding-block:calc(var(--spacing) * 4)}.py-6{padding-block:calc(var(--spacing) * 6)}.py-8{padding-block:calc(var(--spacing) * 8)}.pt-1{padding-top:calc(var(--spacing) * 1)}.pt-2{padding-top:calc(var(--spacing) * 2)}.pt-3{padding-top:calc(var(--spacing) * 3)}.pt-4{padding-top:calc(var(--spacing) * 4)}.pt-6{padding-top:calc(var(--spacing) * 6)}.pr-2{padding-right:calc(var(--spacing) * 2)}.pr-4{padding-right:calc(var(--spacing) * 4)}.pr-10{padding-right:calc(var(--spacing) * 10)}.pb-2{padding-bottom:calc(var(--spacing) * 2)}.pb-3{padding-bottom:calc(var(--spacing) * 3)}.pb-4{padding-bottom:calc(var(--spacing) * 4)}.pl-2{padding-left:calc(var(--spacing) * 2)}.pl-3{padding-left:calc(var(--spacing) * 3)}.pl-4{padding-left:calc(var(--spacing) * 4)}.text-center{text-align:center}.text-left{text-align:left}.font-mono{font-family:var(--font-mono)}.text-2xl{font-size:var(--text-2xl);line-height:var(--tw-leading,var(--text-2xl--line-height))}.text-3xl{font-size:var(--text-3xl);line-height:var(--tw-leading,var(--text-3xl--line-height))}.text-4xl{font-size:var(--text-4xl);line-height:var(--tw-leading,var(--text-4xl--line-height))}.text-lg{font-size:var(--text-lg);line-height:var(--tw-leading,var(--text-lg--line-height))}.text-sm{font-size:var(--text-sm);line-height:var(--tw-leading,var(--text-sm--line-height))}.text-xl{font-size:var(--text-xl);line-height:var(--tw-leading,var(--text-xl--line-height))}.text-xs{font-size:var(--text-xs);line-height:var(--tw-leading,var(--text-xs--line-height))}.text-\\[10px\\]{font-size:10px}.text-\\[11px\\]{font-size:11px}.leading-relaxed{--tw-leading:var(--leading-relaxed);line-height:var(--leading-relaxed)}.font-bold{--tw-font-weight:var(--font-weight-bold);font-weight:var(--font-weight-bold)}.font-extrabold{--tw-font-weight:var(--font-weight-extrabold);font-weight:var(--font-weight-extrabold)}.font-medium{--tw-font-weight:var(--font-weight-medium);font-weight:var(--font-weight-medium)}.font-normal{--tw-font-weight:var(--font-weight-normal);font-weight:var(--font-weight-normal)}.font-semibold{--tw-font-weight:var(--font-weight-semibold);font-weight:var(--font-weight-semibold)}.tracking-wider{--tw-tracking:var(--tracking-wider);letter-spacing:var(--tracking-wider)}.tracking-widest{--tw-tracking:var(--tracking-widest);letter-spacing:var(--tracking-widest)}.break-words{overflow-wrap:break-word}.break-all{word-break:break-all}.whitespace-pre-wrap{white-space:pre-wrap}.text-amber-200\\/80{color:#fee685cc}@supports (color:color-mix(in lab, red, red)){.text-amber-200\\/80{color:color-mix(in oklab, var(--color-amber-200) 80%, transparent)}}.text-amber-300{color:var(--color-amber-300)}.text-amber-400{color:var(--color-amber-400)}.text-blue-300{color:var(--color-blue-300)}.text-blue-400{color:var(--color-blue-400)}.text-blue-500{color:var(--color-blue-500)}.text-cyan-300{color:var(--color-cyan-300)}.text-cyan-400{color:var(--color-cyan-400)}.text-emerald-300{color:var(--color-emerald-300)}.text-emerald-400{color:var(--color-emerald-400)}.text-gray-200{color:var(--color-gray-200)}.text-gray-300{color:var(--color-gray-300)}.text-gray-400{color:var(--color-gray-400)}.text-gray-500{color:var(--color-gray-500)}.text-gray-600{color:var(--color-gray-600)}.text-green-300{color:var(--color-green-300)}.text-green-400{color:var(--color-green-400)}.text-indigo-300{color:var(--color-indigo-300)}.text-indigo-400{color:var(--color-indigo-400)}.text-orange-400{color:var(--color-orange-400)}.text-pink-300{color:var(--color-pink-300)}.text-purple-300{color:var(--color-purple-300)}.text-purple-400{color:var(--color-purple-400)}.text-red-300{color:var(--color-red-300)}.text-red-400{color:var(--color-red-400)}.text-red-500{color:var(--color-red-500)}.text-teal-400{color:var(--color-teal-400)}.text-transparent{color:#0000}.text-white{color:var(--color-white)}.text-yellow-200{color:var(--color-yellow-200)}.text-yellow-300{color:var(--color-yellow-300)}.text-yellow-400{color:var(--color-yellow-400)}.text-yellow-500{color:var(--color-yellow-500)}.capitalize{text-transform:capitalize}.lowercase{text-transform:lowercase}.uppercase{text-transform:uppercase}.underline{text-decoration-line:underline}.opacity-0{opacity:0}.shadow{--tw-shadow:0 1px 3px 0 var(--tw-shadow-color,#0000001a), 0 1px 2px -1px var(--tw-shadow-color,#0000001a);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-\\[0_0_10px_rgba\\(239\\,68\\,68\\,0\\.5\\)\\]{--tw-shadow:0 0 10px var(--tw-shadow-color,#ef444480);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-lg{--tw-shadow:0 10px 15px -3px var(--tw-shadow-color,#0000001a), 0 4px 6px -4px var(--tw-shadow-color,#0000001a);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-xl{--tw-shadow:0 20px 25px -5px var(--tw-shadow-color,#0000001a), 0 8px 10px -6px var(--tw-shadow-color,#0000001a);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-red-900\\/50{--tw-shadow-color:#82181a80}@supports (color:color-mix(in lab, red, red)){.shadow-red-900\\/50{--tw-shadow-color:color-mix(in oklab, color-mix(in oklab, var(--color-red-900) 50%, transparent) var(--tw-shadow-alpha), transparent)}}.filter{filter:var(--tw-blur,) var(--tw-brightness,) var(--tw-contrast,) var(--tw-grayscale,) var(--tw-hue-rotate,) var(--tw-invert,) var(--tw-saturate,) var(--tw-sepia,) var(--tw-drop-shadow,)}.backdrop-filter{-webkit-backdrop-filter:var(--tw-backdrop-blur,) var(--tw-backdrop-brightness,) var(--tw-backdrop-contrast,) var(--tw-backdrop-grayscale,) var(--tw-backdrop-hue-rotate,) var(--tw-backdrop-invert,) var(--tw-backdrop-opacity,) var(--tw-backdrop-saturate,) var(--tw-backdrop-sepia,);backdrop-filter:var(--tw-backdrop-blur,) var(--tw-backdrop-brightness,) var(--tw-backdrop-contrast,) var(--tw-backdrop-grayscale,) var(--tw-backdrop-hue-rotate,) var(--tw-backdrop-invert,) var(--tw-backdrop-opacity,) var(--tw-backdrop-saturate,) var(--tw-backdrop-sepia,)}.transition{transition-property:color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to,opacity,box-shadow,transform,translate,scale,rotate,filter,-webkit-backdrop-filter,backdrop-filter,display,content-visibility,overlay,pointer-events;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration))}.transition-colors{transition-property:color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration))}.transition-opacity{transition-property:opacity;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration))}.ease-out{--tw-ease:var(--ease-out);transition-timing-function:var(--ease-out)}.select-all{-webkit-user-select:all;user-select:all}.select-none{-webkit-user-select:none;user-select:none}@media (hover:hover){.group-hover\\:opacity-100:is(:where(.group):hover *){opacity:1}}.last\\:border-0:last-child{border-style:var(--tw-border-style);border-width:0}@media (hover:hover){.hover\\:border-blue-500:hover{border-color:var(--color-blue-500)}.hover\\:border-gray-500:hover{border-color:var(--color-gray-500)}.hover\\:bg-blue-500:hover{background-color:var(--color-blue-500)}.hover\\:bg-blue-600:hover{background-color:var(--color-blue-600)}.hover\\:bg-gray-500:hover{background-color:var(--color-gray-500)}.hover\\:bg-gray-600:hover{background-color:var(--color-gray-600)}.hover\\:bg-gray-700:hover{background-color:var(--color-gray-700)}.hover\\:bg-gray-800:hover{background-color:var(--color-gray-800)}.hover\\:bg-green-500:hover{background-color:var(--color-green-500)}.hover\\:bg-green-600:hover{background-color:var(--color-green-600)}.hover\\:bg-indigo-500:hover{background-color:var(--color-indigo-500)}.hover\\:bg-orange-500:hover{background-color:var(--color-orange-500)}.hover\\:bg-orange-600:hover{background-color:var(--color-orange-600)}.hover\\:bg-purple-600:hover{background-color:var(--color-purple-600)}.hover\\:bg-red-500:hover{background-color:var(--color-red-500)}.hover\\:bg-red-600:hover{background-color:var(--color-red-600)}.hover\\:bg-yellow-500:hover{background-color:var(--color-yellow-500)}.hover\\:bg-yellow-600:hover{background-color:var(--color-yellow-600)}.hover\\:text-red-400:hover{color:var(--color-red-400)}.hover\\:text-white:hover{color:var(--color-white)}}.focus\\:border-blue-500:focus{border-color:var(--color-blue-500)}.focus\\:border-green-400:focus{border-color:var(--color-green-400)}.focus\\:border-yellow-400:focus{border-color:var(--color-yellow-400)}.focus\\:ring-blue-500:focus{--tw-ring-color:var(--color-blue-500)}.focus\\:outline-none:focus{--tw-outline-style:none;outline-style:none}@media (min-width:40rem){.sm\\:grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}}@media (min-width:48rem){.md\\:static{position:static}.md\\:col-span-2{grid-column:span 2/span 2}.md\\:flex{display:flex}.md\\:hidden{display:none}.md\\:h-full{height:100%}.md\\:max-h-none{max-height:none}.md\\:w-64{width:calc(var(--spacing) * 64)}.md\\:w-auto{width:auto}.md\\:cursor-default{cursor:default}.md\\:grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.md\\:grid-cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}.md\\:flex-row{flex-direction:row}.md\\:border-r{border-right-style:var(--tw-border-style);border-right-width:1px}.md\\:border-b-0{border-bottom-style:var(--tw-border-style);border-bottom-width:0}.md\\:border-none{--tw-border-style:none;border-style:none}.md\\:p-10{padding:calc(var(--spacing) * 10)}.md\\:shadow-none{--tw-shadow:0 0 #0000;box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}}}@property --tw-translate-x{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-y{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-z{syntax:"*";inherits:false;initial-value:0}@property --tw-rotate-x{syntax:"*";inherits:false}@property --tw-rotate-y{syntax:"*";inherits:false}@property --tw-rotate-z{syntax:"*";inherits:false}@property --tw-skew-x{syntax:"*";inherits:false}@property --tw-skew-y{syntax:"*";inherits:false}@property --tw-space-y-reverse{syntax:"*";inherits:false;initial-value:0}@property --tw-space-x-reverse{syntax:"*";inherits:false;initial-value:0}@property --tw-border-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-gradient-position{syntax:"*";inherits:false}@property --tw-gradient-from{syntax:"<color>";inherits:false;initial-value:#0000}@property --tw-gradient-via{syntax:"<color>";inherits:false;initial-value:#0000}@property --tw-gradient-to{syntax:"<color>";inherits:false;initial-value:#0000}@property --tw-gradient-stops{syntax:"*";inherits:false}@property --tw-gradient-via-stops{syntax:"*";inherits:false}@property --tw-gradient-from-position{syntax:"<length-percentage>";inherits:false;initial-value:0%}@property --tw-gradient-via-position{syntax:"<length-percentage>";inherits:false;initial-value:50%}@property --tw-gradient-to-position{syntax:"<length-percentage>";inherits:false;initial-value:100%}@property --tw-leading{syntax:"*";inherits:false}@property --tw-font-weight{syntax:"*";inherits:false}@property --tw-tracking{syntax:"*";inherits:false}@property --tw-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-shadow-color{syntax:"*";inherits:false}@property --tw-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-inset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-shadow-color{syntax:"*";inherits:false}@property --tw-inset-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-ring-color{syntax:"*";inherits:false}@property --tw-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-ring-color{syntax:"*";inherits:false}@property --tw-inset-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-ring-inset{syntax:"*";inherits:false}@property --tw-ring-offset-width{syntax:"<length>";inherits:false;initial-value:0}@property --tw-ring-offset-color{syntax:"*";inherits:false;initial-value:#fff}@property --tw-ring-offset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-blur{syntax:"*";inherits:false}@property --tw-brightness{syntax:"*";inherits:false}@property --tw-contrast{syntax:"*";inherits:false}@property --tw-grayscale{syntax:"*";inherits:false}@property --tw-hue-rotate{syntax:"*";inherits:false}@property --tw-invert{syntax:"*";inherits:false}@property --tw-opacity{syntax:"*";inherits:false}@property --tw-saturate{syntax:"*";inherits:false}@property --tw-sepia{syntax:"*";inherits:false}@property --tw-drop-shadow{syntax:"*";inherits:false}@property --tw-drop-shadow-color{syntax:"*";inherits:false}@property --tw-drop-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-drop-shadow-size{syntax:"*";inherits:false}@property --tw-backdrop-blur{syntax:"*";inherits:false}@property --tw-backdrop-brightness{syntax:"*";inherits:false}@property --tw-backdrop-contrast{syntax:"*";inherits:false}@property --tw-backdrop-grayscale{syntax:"*";inherits:false}@property --tw-backdrop-hue-rotate{syntax:"*";inherits:false}@property --tw-backdrop-invert{syntax:"*";inherits:false}@property --tw-backdrop-opacity{syntax:"*";inherits:false}@property --tw-backdrop-saturate{syntax:"*";inherits:false}@property --tw-backdrop-sepia{syntax:"*";inherits:false}@property --tw-ease{syntax:"*";inherits:false}`;
+
+    // @ts-check
     /**
      * settings-ui.js — Cupcake PM settings panel (core orchestrator).
      * Renders the full-screen settings interface with Tailwind CSS.
@@ -6855,48 +7243,23 @@ var CupcakeProviderManager = (function (exports) {
      *   settings-ui-panels.js        — API View panel + Export/Import
      */
 
-    /** @type {Promise<HTMLScriptElement | null> | null} */
-    let _tailwindLoadPromise = null;
+    /**
+     * Injects the pre-built Tailwind CSS into the document as a <style> tag.
+     * Replaces the previous CDN-based approach for offline reliability.
+     * @returns {Promise<HTMLStyleElement | null>}
+     */
+    function ensureTailwindLoaded() {
+        const existing = /** @type {HTMLStyleElement | null} */ (document.getElementById('cpm-tailwind'));
+        if (existing) return Promise.resolve(existing);
 
-    function ensureTailwindLoaded(timeoutMs = 5000) {
-        const existing = /** @type {HTMLScriptElement | null} */ (document.getElementById('cpm-tailwind'));
-        if (existing) {
-            return _tailwindLoadPromise || Promise.resolve(existing);
-        }
-
-        _tailwindLoadPromise = new Promise((resolve) => {
-            const tw = document.createElement('script');
-            let settled = false;
-            let timeoutId = 0;
-
-            const finish = (status) => {
-                if (settled) return;
-                settled = true;
-                if (timeoutId) clearTimeout(timeoutId);
-                tw.dataset.cpmLoaded = status;
-                tw.onload = null;
-                tw.onerror = null;
-                if (status !== 'loaded') {
-                    console.warn(`[CPM UI] Tailwind CDN load ${status}; continuing with base styles only.`);
-                }
-                _tailwindLoadPromise = Promise.resolve(tw);
-                resolve(tw);
-            };
-
-            tw.id = 'cpm-tailwind';
-            tw.src = 'https://cdn.tailwindcss.com';
-            tw.async = true;
-            tw.dataset.cpmLoaded = 'pending';
-            tw.onload = () => finish('loaded');
-            tw.onerror = () => finish('failed');
-            document.head.appendChild(tw);
-            timeoutId = window.setTimeout(() => finish('timed out'), timeoutMs);
-        });
-
-        return _tailwindLoadPromise;
+        const style = document.createElement('style');
+        style.id = 'cpm-tailwind';
+        style.textContent = TAILWIND_CSS;
+        document.head.appendChild(style);
+        return Promise.resolve(style);
     }
 
-    function shouldPersistControl(el) {
+    function shouldPersistControl(/** @type {any} */ el) {
         const id = el?.id || '';
         if (!id) return false;
         if (id.startsWith('cpm-cm-')) return false;
@@ -6905,39 +7268,41 @@ var CupcakeProviderManager = (function (exports) {
         return true;
     }
 
-    function bindSettingsPersistenceHandlers(root, setVal) {
+    function bindSettingsPersistenceHandlers(/** @type {any} */ root, /** @type {any} */ setVal) {
         if (!root || typeof root.querySelectorAll !== 'function' || typeof setVal !== 'function') return;
 
-        root.querySelectorAll('input[type="text"], input[type="password"], input[type="number"], select, textarea').forEach(el => {
+        root.querySelectorAll('input[type="text"], input[type="password"], input[type="number"], select, textarea').forEach((/** @type {any} */ el) => {
             if (!shouldPersistControl(el)) return;
-            el.addEventListener('change', (e) => setVal(e.target.id, e.target.value));
+            el.addEventListener('change', (/** @type {any} */ e) => setVal(e.target.id, e.target.value));
         });
 
-        root.querySelectorAll('input[type="checkbox"]').forEach(el => {
+        root.querySelectorAll('input[type="checkbox"]').forEach((/** @type {any} */ el) => {
             if (!shouldPersistControl(el)) return;
-            el.addEventListener('change', (e) => setVal(e.target.id, e.target.checked));
+            el.addEventListener('change', (/** @type {any} */ e) => setVal(e.target.id, e.target.checked));
         });
     }
 
     async function openCpmSettings() {
         Risu.showContainer('fullscreen');
 
-        // Tailwind CSS
-        await ensureTailwindLoaded();
+        // Tailwind CSS (build-time inlined)
+        ensureTailwindLoaded();
 
         document.body.innerHTML = '';
         document.body.style.cssText = 'margin:0; background:#1e1e24; color:#d1d5db; font-family:-apple-system, sans-serif; height:100vh; overflow:hidden;';
 
-        const getVal = async (k) => await safeGetArg(k);
-        const getBoolVal = async (k) => await safeGetBoolArg(k);
-        const setVal = (k, v) => {
+        const _spmAny = /** @type {any} */ (SubPluginManager);
+
+        const getVal = async (/** @type {string} */ k) => await safeGetArg(k);
+        const getBoolVal = async (/** @type {string} */ k) => await safeGetBoolArg(k);
+        const setVal = (/** @type {string} */ k, /** @type {any} */ v) => {
             Risu.setArgument(k, String(v));
             SettingsBackup.updateKey(k, String(v));
         };
 
-        const escAttr = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const escAttr = (/** @type {any} */ s) => String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-        const renderInput = async (id, label, type = 'text', opts = []) => {
+        const renderInput = async (/** @type {string} */ id, /** @type {string} */ label, type = 'text', /** @type {any[]} */ opts = []) => {
             let html = `<div class="mb-4">`;
             if (type === 'checkbox') {
                 const val = await getBoolVal(id);
@@ -7001,7 +7366,7 @@ var CupcakeProviderManager = (function (exports) {
                 <span class="bg-blue-600 text-xs px-2 py-0.5 rounded-full" id="cpm-cm-count">0</span>
             </button>
             <div class="px-4 text-[11px] font-bold text-gray-500 uppercase tracking-wider mt-5 mb-2">Extensions</div>
-            <button class="w-full text-left px-5 py-2 text-sm hover:bg-gray-800 transition-colors focus:outline-none tab-btn text-yellow-300 font-bold bg-yellow-900/10" data-target="tab-plugins">🧩 Sub-Plugins${SubPluginManager._pendingUpdateNames.length > 0 ? ` <span style="background:#4f46e5;color:#e0e7ff;font-size:10px;padding:1px 6px;border-radius:9px;margin-left:4px;font-weight:bold;">${SubPluginManager._pendingUpdateNames.length}</span>` : ''}</button>
+            <button class="w-full text-left px-5 py-2 text-sm hover:bg-gray-800 transition-colors focus:outline-none tab-btn text-yellow-300 font-bold bg-yellow-900/10" data-target="tab-plugins">🧩 Sub-Plugins${_spmAny._pendingUpdateNames.length > 0 ? ` <span style="background:#4f46e5;color:#e0e7ff;font-size:10px;padding:1px 6px;border-radius:9px;margin-left:4px;font-weight:bold;">${_spmAny._pendingUpdateNames.length}</span>` : ''}</button>
             </div>
             <div class="p-4 border-t border-gray-800 space-y-2 shrink-0 bg-gray-900 z-10 relative" id="cpm-tab-footer">
                 <button id="cpm-export-btn" class="w-full bg-blue-600/90 hover:bg-blue-500 text-white font-semibold py-2 px-4 rounded transition-colors text-sm">⬇️ 설정 내보내기</button>
@@ -7015,14 +7380,14 @@ var CupcakeProviderManager = (function (exports) {
         content.className = 'flex-1 bg-[#121214] overflow-y-auto p-5 md:p-10';
 
         const providersList = [{ value: '', text: '🚫 미지정 (Main UI의 모델이 처리)' }];
-        for (const m of state.ALL_DEFINED_MODELS) providersList.push({ value: m.uniqueId, text: `[${m.provider}] ${m.name}` });
+        for (const m of /** @type {any[]} */ (state.ALL_DEFINED_MODELS)) providersList.push({ value: m.uniqueId, text: `[${m.provider}] ${m.name}` });
 
         const reasoningList = [{ value: 'none', text: 'None (없음)' }, { value: 'off', text: 'Off (끄기)' }, { value: 'low', text: 'Low (낮음)' }, { value: 'medium', text: 'Medium (중간)' }, { value: 'high', text: 'High (높음)' }, { value: 'xhigh', text: 'XHigh (매우 높음)' }];
         const verbosityList = [{ value: 'none', text: 'None (기본값)' }, { value: 'low', text: 'Low (낮음)' }, { value: 'medium', text: 'Medium (중간)' }, { value: 'high', text: 'High (높음)' }];
         const thinkingList = [{ value: 'off', text: 'Off (끄기)' }, { value: 'none', text: 'None (없음)' }, { value: 'MINIMAL', text: 'Minimal (최소)' }, { value: 'LOW', text: 'Low (낮음)' }, { value: 'MEDIUM', text: 'Medium (중간)' }, { value: 'HIGH', text: 'High (높음)' }];
         const effortList = [{ value: 'none', text: '사용 안함 (Off)' }, { value: 'unspecified', text: '미지정 (Unspecified)' }, { value: 'low', text: 'Low (낮음)' }, { value: 'medium', text: 'Medium (중간)' }, { value: 'high', text: 'High (높음)' }, { value: 'max', text: 'Max (최대)' }];
 
-        const renderAuxParams = async (slot) => `
+        const renderAuxParams = async (/** @type {string} */ slot) => `
         <div class="mt-8 pt-6 border-t border-gray-800 space-y-2">
             <h4 class="text-xl font-bold text-gray-300 mb-2">Generation Parameters (생성 설정)</h4>
             <p class="text-xs text-blue-400 font-semibold mb-4 border-l-2 border-blue-500 pl-2">
@@ -7158,8 +7523,8 @@ var CupcakeProviderManager = (function (exports) {
                 <h3 class="text-3xl font-bold text-gray-400">Sub-Plugins Manager</h3>
                 <button id="cpm-check-updates-btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2 px-4 rounded transition-colors text-sm shadow">🔄 서브 플러그인 업데이트 확인</button>
             </div>
-            ${SubPluginManager._pendingUpdateNames.length > 0
-                ? `<div class="bg-indigo-900/40 border border-indigo-700 rounded-lg p-3 mb-4 flex items-center gap-2"><span class="text-indigo-300 text-sm font-semibold">🔔 ${SubPluginManager._pendingUpdateNames.length}개의 서브 플러그인 업데이트가 감지되었습니다.</span></div>`
+            ${_spmAny._pendingUpdateNames.length > 0
+                ? `<div class="bg-indigo-900/40 border border-indigo-700 rounded-lg p-3 mb-4 flex items-center gap-2"><span class="text-indigo-300 text-sm font-semibold">🔔 ${_spmAny._pendingUpdateNames.length}개의 서브 플러그인 업데이트가 감지되었습니다.</span></div>`
                 : ''}
             <p class="text-yellow-300 font-semibold mb-4 border-l-4 border-yellow-500 pl-4 py-1">Cupcake PM에 연동된 외부 확장 기능(Sub-Plugins)들을 통합 관리합니다.</p>
             <div id="cpm-update-status" class="hidden mb-4"></div>
@@ -7180,14 +7545,14 @@ var CupcakeProviderManager = (function (exports) {
         if (registeredProviderTabs.length > 0 && providerTabsSection) {
             let sidebarBtnsHtml = `<div class="px-4 text-[11px] font-bold text-gray-500 uppercase tracking-wider mt-5 mb-2">Providers</div>`;
             let contentHtml = '';
-            for (const tab of registeredProviderTabs) {
+            for (const tab of /** @type {any[]} */ (registeredProviderTabs)) {
                 sidebarBtnsHtml += `<button class="w-full text-left px-5 py-2 text-sm hover:bg-gray-800 transition-colors focus:outline-none tab-btn" data-target="${tab.id}">${tab.icon} ${tab.label}</button>`;
                 try {
                     const tabContent = await tab.renderContent(renderInput, { reasoningList, verbosityList, thinkingList });
                     contentHtml += `<div id="${tab.id}" class="cpm-tab-content hidden">${tabContent}</div>`;
                 } catch (err) {
                     console.error(`[CupcakePM] Failed to render settings tab: ${tab.id}`, err);
-                    contentHtml += `<div id="${tab.id}" class="cpm-tab-content hidden"><p class="text-red-400">Error rendering tab: ${err.message}</p></div>`;
+                    contentHtml += `<div id="${tab.id}" class="cpm-tab-content hidden"><p class="text-red-400">Error rendering tab: ${/** @type {Error} */ (err).message}</p></div>`;
                 }
             }
             providerTabsSection.innerHTML = sidebarBtnsHtml;
@@ -7202,6 +7567,7 @@ var CupcakeProviderManager = (function (exports) {
         const mobileIcon = document.getElementById('cpm-mobile-icon');
         if (mobileMenuBtn) {
             mobileMenuBtn.addEventListener('click', () => {
+                if (!mobileDropdown || !mobileIcon) return;
                 const isHidden = mobileDropdown.classList.contains('hidden');
                 if (isHidden) { mobileDropdown.classList.remove('hidden'); mobileDropdown.classList.add('flex'); mobileIcon.innerText = '▲'; }
                 else { mobileDropdown.classList.add('hidden'); mobileDropdown.classList.remove('flex'); mobileIcon.innerText = '▼'; }
@@ -7235,7 +7601,7 @@ var CupcakeProviderManager = (function (exports) {
             document.getElementById(targetId)?.classList.remove('hidden');
             if (targetId === 'tab-plugins') renderPluginsTab();
             if (window.innerWidth < 768 && mobileDropdown && !mobileDropdown.classList.contains('hidden')) {
-                mobileDropdown.classList.add('hidden'); mobileDropdown.classList.remove('flex'); mobileIcon.innerText = '▼';
+                mobileDropdown.classList.add('hidden'); mobileDropdown.classList.remove('flex'); if (mobileIcon) mobileIcon.innerText = '▼';
             }
         }));
         if (tabs[0] instanceof HTMLElement) tabs[0].click();
@@ -7250,7 +7616,7 @@ var CupcakeProviderManager = (function (exports) {
                     ? '<span class="text-emerald-400">✓ Bridge 지원됨</span> — ReadableStream 전송 가능.'
                     : '<span class="text-yellow-400">✗ Bridge 미지원</span> — 자동으로 문자열 수집 모드로 폴백됩니다.';
                 statusEl.classList.replace('border-gray-600', capable ? 'border-emerald-700' : 'border-yellow-800');
-            } catch (e) { statusEl.innerHTML = `<span class="text-red-400">Bridge 확인 실패:</span> ${escHtml(e.message)}`; }
+            } catch (e) { statusEl.innerHTML = `<span class="text-red-400">Bridge 확인 실패:</span> ${escHtml(/** @type {Error} */ (e).message)}`; }
         })();
 
         // ── Custom Models Manager ──
@@ -7266,12 +7632,13 @@ var CupcakeProviderManager = (function (exports) {
         initExportImport(setVal, openCpmSettings);
 
         // ── Close button ──
-        document.getElementById('cpm-close-btn').addEventListener('click', () => {
+        document.getElementById('cpm-close-btn')?.addEventListener('click', () => {
             document.body.innerHTML = '';
             Risu.hideContainer();
         });
     }
 
+    // @ts-check
     /**
      * init.js — Boot sequence for Cupcake Provider Manager.
      *
@@ -7303,7 +7670,7 @@ var CupcakeProviderManager = (function (exports) {
             _normalizeTokenUsage, _showTokenUsageToast: showTokenUsageToast, _needsCopilotResponsesAPI: needsCopilotResponsesAPI,
         };
         for (const [k, v] of Object.entries(fns)) {
-            window[k] = v;
+            /** @type {any} */ (window)[k] = v;
         }
 
         const objs = {
@@ -7312,18 +7679,18 @@ var CupcakeProviderManager = (function (exports) {
             CPM_SLOT_LIST, AwsV4Signer, ThoughtSignatureCache, _tokenUsageStore,
         };
         for (const [k, v] of Object.entries(objs)) {
-            window[k] = v;
+            /** @type {any} */ (window)[k] = v;
         }
 
         // Mutable state — define getters/setters that proxy to the state object
         const lets = {
-            ALL_DEFINED_MODELS: [() => state.ALL_DEFINED_MODELS, v => { state.ALL_DEFINED_MODELS = v; }],
-            CUSTOM_MODELS_CACHE: [() => state.CUSTOM_MODELS_CACHE, v => { state.CUSTOM_MODELS_CACHE = v; }],
-            _currentExecutingPluginId: [() => state._currentExecutingPluginId, v => { state._currentExecutingPluginId = v; }],
-            vertexTokenCache: [() => state.vertexTokenCache, v => { state.vertexTokenCache = v; }],
+            ALL_DEFINED_MODELS: [() => state.ALL_DEFINED_MODELS, (/** @type {any} */ v) => { state.ALL_DEFINED_MODELS = v; }],
+            CUSTOM_MODELS_CACHE: [() => state.CUSTOM_MODELS_CACHE, (/** @type {any} */ v) => { state.CUSTOM_MODELS_CACHE = v; }],
+            _currentExecutingPluginId: [() => state._currentExecutingPluginId, (/** @type {any} */ v) => { state._currentExecutingPluginId = v; }],
+            vertexTokenCache: [() => state.vertexTokenCache, (/** @type {any} */ v) => { state.vertexTokenCache = v; }],
         };
         for (const [k, [g, s]] of Object.entries(lets)) {
-            Object.defineProperty(window, k, { get: g, set: s, configurable: true });
+            Object.defineProperty(window, k, { get: /** @type {any} */ (g), set: /** @type {any} */ (s), configurable: true });
         }
 
         cpmWindow.CPM_VERSION = CPM_VERSION;
@@ -7434,14 +7801,14 @@ var CupcakeProviderManager = (function (exports) {
 
             // ── Phase: Dynamic Model Fetching ──
             _phaseStart('dynamic-models');
-            for (const { name, fetchDynamicModels } of pendingDynamicFetchers) {
+            for (const { name, fetchDynamicModels } of /** @type {any[]} */ (pendingDynamicFetchers)) {
                 try {
                     const enabled = await isDynamicFetchEnabled(name);
                     if (!enabled) { console.log(`[CupcakePM] Dynamic fetch disabled for ${name}, using fallback.`); continue; }
                     console.log(`[CupcakePM] Fetching dynamic models for ${name}...`);
                     const dynamicModels = await fetchDynamicModels();
                     if (dynamicModels && Array.isArray(dynamicModels) && dynamicModels.length > 0) {
-                        state.ALL_DEFINED_MODELS = state.ALL_DEFINED_MODELS.filter(m => m.provider !== name);
+                        state.ALL_DEFINED_MODELS = state.ALL_DEFINED_MODELS.filter((/** @type {any} */ m) => m.provider !== name);
                         for (const m of dynamicModels) {
                             state.ALL_DEFINED_MODELS.push({ ...m, provider: name });
                         }
@@ -7450,7 +7817,7 @@ var CupcakeProviderManager = (function (exports) {
                         console.log(`[CupcakePM] No dynamic models for ${name}, using fallback.`);
                     }
                 } catch (e) {
-                    console.warn(`[CupcakePM] Dynamic fetch failed for ${name}:`, e.message || e);
+                    console.warn(`[CupcakePM] Dynamic fetch failed for ${name}:`, /** @type {Error} */ (e).message || e);
                 }
             }
             _phaseDone('dynamic-models');
@@ -7504,7 +7871,7 @@ var CupcakeProviderManager = (function (exports) {
                 }
 
                 // Register custom models into ALL_DEFINED_MODELS
-                state.CUSTOM_MODELS_CACHE.forEach(m => {
+                state.CUSTOM_MODELS_CACHE.forEach((/** @type {any} */ m) => {
                     state.ALL_DEFINED_MODELS.push({
                         uniqueId: m.uniqueId,
                         id: m.model,
@@ -7514,7 +7881,7 @@ var CupcakeProviderManager = (function (exports) {
                 });
 
                 // Sort alphabetically by provider, then by name
-                state.ALL_DEFINED_MODELS.sort((a, b) => {
+                state.ALL_DEFINED_MODELS.sort((/** @type {any} */ a, /** @type {any} */ b) => {
                     const providerCompare = a.provider.localeCompare(b.provider);
                     if (providerCompare !== 0) return providerCompare;
                     return a.name.localeCompare(b.name);
@@ -7526,7 +7893,7 @@ var CupcakeProviderManager = (function (exports) {
             _phaseStart('model-registration');
             let _modelRegCount = 0;
             try {
-                for (const modelDef of state.ALL_DEFINED_MODELS) {
+                for (const modelDef of /** @type {any[]} */ (state.ALL_DEFINED_MODELS)) {
                     const pLabel = modelDef.provider;
                     const mLabel = modelDef.name;
 
@@ -7550,11 +7917,11 @@ var CupcakeProviderManager = (function (exports) {
                         modelFlags.push(14);   // DeveloperRole
                     }
 
-                    await Risu.addProvider(`🧁 [${pLabel}] ${mLabel}`, async (args, abortSignal) => {
+                    await Risu.addProvider(`🧁 [${pLabel}] ${mLabel}`, async (/** @type {any} */ args, /** @type {any} */ abortSignal) => {
                         try {
                             return await handleRequest(args, modelDef, abortSignal);
                         } catch (err) {
-                            return { success: false, content: `[Cupcake SDK Fallback Crash] ${err.message}` };
+                            return { success: false, content: `[Cupcake SDK Fallback Crash] ${/** @type {Error} */ (err).message}` };
                         }
                     }, {
                         model: { flags: modelFlags },
@@ -7574,16 +7941,16 @@ var CupcakeProviderManager = (function (exports) {
             setTimeout(async () => {
                 let retryHandled = false;
                 try {
-                    retryHandled = (typeof SubPluginManager.retryPendingMainPluginUpdateOnBoot === 'function')
-                        ? !!(await SubPluginManager.retryPendingMainPluginUpdateOnBoot())
+                    retryHandled = (typeof /** @type {any} */ (SubPluginManager).retryPendingMainPluginUpdateOnBoot === 'function')
+                        ? !!(await /** @type {any} */ (SubPluginManager).retryPendingMainPluginUpdateOnBoot())
                         : false;
                 } catch (_) { }
                 // Sub-plugin version checks always run (checkVersionsQuiet has its own
                 // 10-min cooldown).  Only the main-plugin JS-fallback is skipped when
                 // the boot retry already handled the main update.
-                try { await SubPluginManager.checkVersionsQuiet(); } catch (_) { }
+                try { await /** @type {any} */ (SubPluginManager).checkVersionsQuiet(); } catch (_) { }
                 if (!retryHandled) {
-                    try { await SubPluginManager.checkMainPluginVersionQuiet(); } catch (_) { }
+                    try { await /** @type {any} */ (SubPluginManager).checkMainPluginVersionQuiet(); } catch (_) { }
                 }
             }, 5000);
 
@@ -7598,7 +7965,7 @@ var CupcakeProviderManager = (function (exports) {
                     if (!rootDoc) {
                         console.log('[CPM] Hotkey registration skipped: main DOM permission not granted.');
                     } else {
-                        await rootDoc.addEventListener('keydown', (e) => {
+                        await rootDoc.addEventListener('keydown', (/** @type {any} */ e) => {
                             if (e.ctrlKey && e.shiftKey && e.altKey && (e.key === 'p' || e.key === 'P')) {
                                 openCpmSettings();
                             }
@@ -7606,6 +7973,7 @@ var CupcakeProviderManager = (function (exports) {
 
                         // 4-finger touch gesture for mobile
                         let activePointersCount = 0;
+                        /** @type {ReturnType<typeof setTimeout> | null} */
                         let activePointersTimer = null;
 
                         const addPointer = () => {
@@ -7645,6 +8013,7 @@ var CupcakeProviderManager = (function (exports) {
             } catch (_) { /* pluginStorage may not be available */ }
 
         } catch (e) {
+            const _errAny = /** @type {any} */ (e);
             console.error(`[CPM] Unexpected init fail at phase '${_bootPhase}':`, e);
             console.error(`[CPM] Completed phases before crash:`, _completedPhases);
 
@@ -7661,7 +8030,7 @@ var CupcakeProviderManager = (function (exports) {
                             <p style="color:#ccc;margin:20px 0;">The plugin failed to initialize properly.</p>
                             <p style="color:#aaa;">Failed at phase: <code>${_bootPhase}</code></p>
                             <p style="color:#aaa;">Completed: ${_completedPhases.join(', ') || 'none'}</p>
-                            <pre style="background:#0d1117;color:#ff7b72;padding:16px;border-radius:8px;overflow:auto;max-height:300px;font-size:13px;">${String(e && e.stack ? e.stack : e).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>
+                            <pre style="background:#0d1117;color:#ff7b72;padding:16px;border-radius:8px;overflow:auto;max-height:300px;font-size:13px;">${String(_errAny && _errAny.stack ? _errAny.stack : _errAny).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>
                             <p style="color:#aaa;margin-top:20px;">Try: reload (Ctrl+Shift+R) or re-import the plugin.</p>
                             <button onclick="document.body.innerHTML='';Risu.hideContainer();"
                                 style="margin-top:20px;padding:10px 24px;background:#e74c3c;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;">Close</button>
@@ -7676,15 +8045,20 @@ var CupcakeProviderManager = (function (exports) {
     })();
 
     exports.AwsV4Signer = AwsV4Signer;
+    exports.CPM_BASE_URL = CPM_BASE_URL;
     exports.CPM_SLOT_LIST = CPM_SLOT_LIST;
     exports.CPM_VERSION = CPM_VERSION;
     exports.GEMINI_BLOCK_REASONS = GEMINI_BLOCK_REASONS;
     exports.KeyPool = KeyPool;
+    exports.MAIN_UPDATE_URL = MAIN_UPDATE_URL;
     exports.Risu = Risu;
     exports.SLOT_HEURISTICS = SLOT_HEURISTICS;
     exports.SettingsBackup = SettingsBackup;
     exports.SubPluginManager = SubPluginManager;
     exports.ThoughtSignatureCache = ThoughtSignatureCache;
+    exports.UPDATE_BUNDLE_URL = UPDATE_BUNDLE_URL;
+    exports.VERSIONS_URL = VERSIONS_URL;
+    exports._computeSHA256 = _computeSHA256;
     exports._executeViaScriptTag = _executeViaScriptTag;
     exports._extractNonce = _extractNonce;
     exports._normalizeTokenUsage = _normalizeTokenUsage;
@@ -7695,6 +8069,7 @@ var CupcakeProviderManager = (function (exports) {
     exports._takeTokenUsage = _takeTokenUsage;
     exports._tokenUsageKey = _tokenUsageKey;
     exports._tokenUsageStore = _tokenUsageStore;
+    exports.autoUpdaterMethods = autoUpdaterMethods;
     exports.buf2hex = buf2hex;
     exports.buildGeminiThinkingConfig = buildGeminiThinkingConfig;
     exports.checkStreamCapability = checkStreamCapability;
@@ -7766,6 +8141,7 @@ var CupcakeProviderManager = (function (exports) {
     exports.stripThoughtDisplayContent = stripThoughtDisplayContent;
     exports.supportsOpenAIReasoningEffort = supportsOpenAIReasoningEffort;
     exports.updateApiRequest = updateApiRequest;
+    exports.updateToastMethods = updateToastMethods;
     exports.validateGeminiParams = validateGeminiParams;
 
     return exports;
