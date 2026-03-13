@@ -396,15 +396,35 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
             return nextUrl;
         };
 
+        const _initialApiKey = String(_apiKey || '').trim();
         /** @type {Record<string, string>} */
-        const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_apiKey}` };
+        const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_initialApiKey}` };
         /** @type {Window & typeof globalThis & { _cpmCopilotMachineId?: string, _cpmCopilotSessionId?: string }} */
         const _win = /** @type {any} */ (window);
 
         // Direct Anthropic API: x-api-key header
         if (format === 'anthropic' && effectiveUrl && effectiveUrl.includes('api.anthropic.com')) {
             delete headers['Authorization'];
-            headers['x-api-key'] = _apiKey;
+            headers['x-api-key'] = _initialApiKey;
+        }
+
+        // Copilot via CORS proxy still needs the raw GitHub OAuth token so the worker can
+        // exchange it for a Copilot API token server-side.
+        if (_isProxied && _isCopilotDomain) {
+            let proxiedCopilotToken = _initialApiKey;
+            if (!proxiedCopilotToken) {
+                const _githubToken = await safeGetArg('tools_githubCopilotToken');
+                proxiedCopilotToken = String(_githubToken || '').replace(/[^\x20-\x7E]/g, '').trim();
+            }
+
+            if (!proxiedCopilotToken) {
+                return {
+                    success: false,
+                    content: '[Cupcake PM] CORS Proxy 사용 시 GitHub Copilot OAuth 토큰이 필요합니다. Copilot Manager 토큰 또는 커스텀 모델 API Key에 OAuth 토큰을 넣어 주세요.'
+                };
+            }
+
+            headers['Authorization'] = `Bearer ${proxiedCopilotToken}`;
         }
 
         // Copilot headers — skip when using CORS proxy (proxy handles token exchange + headers)
