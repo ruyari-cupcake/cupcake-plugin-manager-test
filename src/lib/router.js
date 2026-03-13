@@ -100,7 +100,7 @@ export async function fetchByProviderId(modelDef, args, abortSignal, _reqId) {
             if (!cDef) return { success: false, content: `[Cupcake PM] Custom model config not found.` };
 
             return await fetchCustom({
-                url: cDef.url, key: cDef.key, model: cDef.model,
+                url: cDef.url, key: cDef.key, model: cDef.model, proxyUrl: cDef.proxyUrl || '',
                 format: cDef.format || 'openai',
                 sysfirst: !!cDef.sysfirst, altrole: !!cDef.altrole,
                 mustuser: !!cDef.mustuser, maxout: !!cDef.maxout, mergesys: !!cDef.mergesys,

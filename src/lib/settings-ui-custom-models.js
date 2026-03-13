@@ -66,6 +66,7 @@ export function renderCustomModelEditor(thinkingList, reasoningList, verbosityLi
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">Model Name</label><input type="text" id="cpm-cm-model" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"></div>
                 <div class="md:col-span-2"><label class="block text-sm font-medium text-gray-400 mb-1">Base URL</label><input type="text" id="cpm-cm-url" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"></div>
                 <div class="md:col-span-2"><label class="block text-sm font-medium text-gray-400 mb-1">API Key (여러 개 → 공백/줄바꿈 구분 → 자동 키회전)</label><textarea id="cpm-cm-key" rows="2" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white font-mono text-sm" spellcheck="false" placeholder="sk-xxxx"></textarea></div>
+                <div class="md:col-span-2"><label class="block text-sm font-medium text-gray-400 mb-1">CORS Proxy URL <span class="text-xs text-yellow-400">(선택사항 — Copilot 노드리스 CORS 우회용)</span></label><input type="text" id="cpm-cm-proxy-url" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white font-mono text-sm" placeholder="https://my-proxy.workers.dev (비워두면 직접 요청)"></div>
                 <div class="md:col-span-2 mt-4 border-t border-gray-800 pt-4"><h5 class="text-sm font-bold text-gray-300 mb-3">Model Parameters</h5></div>
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">API Format</label><select id="cpm-cm-format" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"><option value="openai">OpenAI</option><option value="anthropic">Anthropic Claude</option><option value="google">Google Gemini</option></select></div>
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">Tokenizer</label><select id="cpm-cm-tok" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"><option value="o200k_base">o200k_base</option><option value="llama3">llama3</option><option value="claude">Claude</option><option value="gemma">Gemma</option></select></div>
@@ -111,6 +112,7 @@ export function populateEditor(m) {
     getField('cpm-cm-model').value = m.model || '';
     getField('cpm-cm-url').value = m.url || '';
     getField('cpm-cm-key').value = m.key || '';
+    getField('cpm-cm-proxy-url').value = m.proxyUrl || '';
     getField('cpm-cm-format').value = m.format || 'openai';
     getField('cpm-cm-tok').value = m.tok || 'o200k_base';
     getField('cpm-cm-responses-mode').value = m.responsesMode || 'auto';
@@ -134,7 +136,7 @@ export function populateEditor(m) {
 
 // ── Clear all editor fields ──
 export function clearEditor() {
-    ['name', 'model', 'url', 'key'].forEach(f => { getField(`cpm-cm-${f}`).value = ''; });
+    ['name', 'model', 'url', 'key', 'proxy-url'].forEach(f => { getField(`cpm-cm-${f}`).value = ''; });
     getField('cpm-cm-format').value = 'openai';
     getField('cpm-cm-tok').value = 'o200k_base';
     getField('cpm-cm-responses-mode').value = 'auto';
@@ -158,6 +160,7 @@ export function readEditorValues(uid) {
         model: getField('cpm-cm-model').value,
         url: getField('cpm-cm-url').value,
         key: getField('cpm-cm-key').value,
+        proxyUrl: getField('cpm-cm-proxy-url').value.trim(),
         format: getField('cpm-cm-format').value,
         tok: getField('cpm-cm-tok').value,
         responsesMode: getField('cpm-cm-responses-mode').value || 'auto',

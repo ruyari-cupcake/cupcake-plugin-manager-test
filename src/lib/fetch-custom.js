@@ -339,6 +339,21 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
     }
     const _isResponsesEndpoint = _useResponsesAPI || (effectiveUrl && /\/responses(?:\?|$)/.test(effectiveUrl));
 
+    // ── CORS Proxy: proxyUrl이 설정되어 있으면 도메인을 프록시로 교체 ──
+    // Responses API URL 재작성 후에 적용해야 올바른 경로를 프록시로 보냄
+    const _proxyUrl = (config.proxyUrl || '').replace(/\/+$/, '');
+    const _isProxied = !!_proxyUrl;
+    if (_proxyUrl && effectiveUrl) {
+        try {
+            const _origUrl = new URL(effectiveUrl);
+            const _proxyBase = new URL(_proxyUrl);
+            effectiveUrl = _proxyBase.origin + _origUrl.pathname + _origUrl.search;
+            console.log(`[Cupcake PM] CORS Proxy active → ${effectiveUrl}`);
+        } catch (_e) {
+            console.warn(`[Cupcake PM] Invalid proxyUrl: ${_proxyUrl}`, _e);
+        }
+    }
+
     // ── Core fetch logic (wrapped for key rotation) ──
     const _doCustomFetch = async (/** @type {string} */ _apiKey) => {
         const _parseNonStreamingData = (/** @type {any} */ data) => {
@@ -392,8 +407,8 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
             headers['x-api-key'] = _apiKey;
         }
 
-        // Copilot headers
-        if (effectiveUrl && effectiveUrl.includes('githubcopilot.com')) {
+        // Copilot headers — skip when using CORS proxy (proxy handles token exchange + headers)
+        if (!_isProxied && effectiveUrl && effectiveUrl.includes('githubcopilot.com')) {
             const copilotNodelessMode = normalizeCopilotNodelessMode(await safeGetArg('cpm_copilot_nodeless_mode'));
             const useLegacyHeaders = shouldUseLegacyCopilotRequestHeaders(copilotNodelessMode);
             let copilotApiToken = config.copilotToken || '';
@@ -431,8 +446,11 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
 
         // Anthropic beta headers (non-Copilot)
         if (format === 'anthropic') {
-            const _isCopilotAnthropic = !!(effectiveUrl && effectiveUrl.includes('githubcopilot.com'));
-            if (!_isCopilotAnthropic) {
+            const _isCopilotAnthropic = _isCopilotDomain || _isProxied;
+            if (_isCopilotAnthropic && _isProxied) {
+                // Copilot via CORS proxy — only anthropic-version needed (proxy handles the rest)
+                headers['anthropic-version'] = '2023-06-01';
+            } else if (!_isCopilotAnthropic) {
                 const _anthropicBetas = [];
                 const _effectiveMaxTokens = body.max_tokens || maxTokens || 0;
                 if (_effectiveMaxTokens > 8192) _anthropicBetas.push('output-128k-2025-02-19');

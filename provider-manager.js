@@ -1,7 +1,7 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.20.4
+//@version 1.20.5
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================
@@ -167,7 +167,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.20.4';
+    const CPM_VERSION = '1.20.5';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -6126,6 +6126,21 @@ var CupcakeProviderManager = (function (exports) {
         }
         const _isResponsesEndpoint = _useResponsesAPI || (effectiveUrl && /\/responses(?:\?|$)/.test(effectiveUrl));
 
+        // ── CORS Proxy: proxyUrl이 설정되어 있으면 도메인을 프록시로 교체 ──
+        // Responses API URL 재작성 후에 적용해야 올바른 경로를 프록시로 보냄
+        const _proxyUrl = (config.proxyUrl || '').replace(/\/+$/, '');
+        const _isProxied = !!_proxyUrl;
+        if (_proxyUrl && effectiveUrl) {
+            try {
+                const _origUrl = new URL(effectiveUrl);
+                const _proxyBase = new URL(_proxyUrl);
+                effectiveUrl = _proxyBase.origin + _origUrl.pathname + _origUrl.search;
+                console.log(`[Cupcake PM] CORS Proxy active → ${effectiveUrl}`);
+            } catch (_e) {
+                console.warn(`[Cupcake PM] Invalid proxyUrl: ${_proxyUrl}`, _e);
+            }
+        }
+
         // ── Core fetch logic (wrapped for key rotation) ──
         const _doCustomFetch = async (/** @type {string} */ _apiKey) => {
             const _parseNonStreamingData = (/** @type {any} */ data) => {
@@ -6179,8 +6194,8 @@ var CupcakeProviderManager = (function (exports) {
                 headers['x-api-key'] = _apiKey;
             }
 
-            // Copilot headers
-            if (effectiveUrl && effectiveUrl.includes('githubcopilot.com')) {
+            // Copilot headers — skip when using CORS proxy (proxy handles token exchange + headers)
+            if (!_isProxied && effectiveUrl && effectiveUrl.includes('githubcopilot.com')) {
                 const copilotNodelessMode = normalizeCopilotNodelessMode(await safeGetArg('cpm_copilot_nodeless_mode'));
                 const useLegacyHeaders = shouldUseLegacyCopilotRequestHeaders(copilotNodelessMode);
                 let copilotApiToken = config.copilotToken || '';
@@ -6218,8 +6233,11 @@ var CupcakeProviderManager = (function (exports) {
 
             // Anthropic beta headers (non-Copilot)
             if (format === 'anthropic') {
-                const _isCopilotAnthropic = !!(effectiveUrl && effectiveUrl.includes('githubcopilot.com'));
-                if (!_isCopilotAnthropic) {
+                const _isCopilotAnthropic = _isCopilotDomain || _isProxied;
+                if (_isCopilotAnthropic && _isProxied) {
+                    // Copilot via CORS proxy — only anthropic-version needed (proxy handles the rest)
+                    headers['anthropic-version'] = '2023-06-01';
+                } else if (!_isCopilotAnthropic) {
                     const _anthropicBetas = [];
                     const _effectiveMaxTokens = body.max_tokens || maxTokens || 0;
                     if (_effectiveMaxTokens > 8192) _anthropicBetas.push('output-128k-2025-02-19');
@@ -6462,7 +6480,7 @@ var CupcakeProviderManager = (function (exports) {
                 if (!cDef) return { success: false, content: `[Cupcake PM] Custom model config not found.` };
 
                 return await fetchCustom({
-                    url: cDef.url, key: cDef.key, model: cDef.model,
+                    url: cDef.url, key: cDef.key, model: cDef.model, proxyUrl: cDef.proxyUrl || '',
                     format: cDef.format || 'openai',
                     sysfirst: !!cDef.sysfirst, altrole: !!cDef.altrole,
                     mustuser: !!cDef.mustuser, maxout: !!cDef.maxout, mergesys: !!cDef.mergesys,
@@ -6838,6 +6856,7 @@ var CupcakeProviderManager = (function (exports) {
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">Model Name</label><input type="text" id="cpm-cm-model" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"></div>
                 <div class="md:col-span-2"><label class="block text-sm font-medium text-gray-400 mb-1">Base URL</label><input type="text" id="cpm-cm-url" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"></div>
                 <div class="md:col-span-2"><label class="block text-sm font-medium text-gray-400 mb-1">API Key (여러 개 → 공백/줄바꿈 구분 → 자동 키회전)</label><textarea id="cpm-cm-key" rows="2" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white font-mono text-sm" spellcheck="false" placeholder="sk-xxxx"></textarea></div>
+                <div class="md:col-span-2"><label class="block text-sm font-medium text-gray-400 mb-1">CORS Proxy URL <span class="text-xs text-yellow-400">(선택사항 — Copilot 노드리스 CORS 우회용)</span></label><input type="text" id="cpm-cm-proxy-url" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white font-mono text-sm" placeholder="https://my-proxy.workers.dev (비워두면 직접 요청)"></div>
                 <div class="md:col-span-2 mt-4 border-t border-gray-800 pt-4"><h5 class="text-sm font-bold text-gray-300 mb-3">Model Parameters</h5></div>
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">API Format</label><select id="cpm-cm-format" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"><option value="openai">OpenAI</option><option value="anthropic">Anthropic Claude</option><option value="google">Google Gemini</option></select></div>
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">Tokenizer</label><select id="cpm-cm-tok" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"><option value="o200k_base">o200k_base</option><option value="llama3">llama3</option><option value="claude">Claude</option><option value="gemma">Gemma</option></select></div>
@@ -6883,6 +6902,7 @@ var CupcakeProviderManager = (function (exports) {
         getField('cpm-cm-model').value = m.model || '';
         getField('cpm-cm-url').value = m.url || '';
         getField('cpm-cm-key').value = m.key || '';
+        getField('cpm-cm-proxy-url').value = m.proxyUrl || '';
         getField('cpm-cm-format').value = m.format || 'openai';
         getField('cpm-cm-tok').value = m.tok || 'o200k_base';
         getField('cpm-cm-responses-mode').value = m.responsesMode || 'auto';
@@ -6906,7 +6926,7 @@ var CupcakeProviderManager = (function (exports) {
 
     // ── Clear all editor fields ──
     function clearEditor() {
-        ['name', 'model', 'url', 'key'].forEach(f => { getField(`cpm-cm-${f}`).value = ''; });
+        ['name', 'model', 'url', 'key', 'proxy-url'].forEach(f => { getField(`cpm-cm-${f}`).value = ''; });
         getField('cpm-cm-format').value = 'openai';
         getField('cpm-cm-tok').value = 'o200k_base';
         getField('cpm-cm-responses-mode').value = 'auto';
@@ -6930,6 +6950,7 @@ var CupcakeProviderManager = (function (exports) {
             model: getField('cpm-cm-model').value,
             url: getField('cpm-cm-url').value,
             key: getField('cpm-cm-key').value,
+            proxyUrl: getField('cpm-cm-proxy-url').value.trim(),
             format: getField('cpm-cm-format').value,
             tok: getField('cpm-cm-tok').value,
             responsesMode: getField('cpm-cm-responses-mode').value || 'auto',
