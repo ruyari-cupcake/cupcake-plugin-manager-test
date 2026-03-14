@@ -112,13 +112,26 @@ export function buildPluginsTabRenderer(/** @type {any} */ setVal) {
             pFileInput.addEventListener('change', async (e) => {
                 const file = asInput(e.target).files?.[0];
                 if (!file) return;
+                if (file.size > SubPluginManager.MAX_INSTALL_BYTES) {
+                    alert(
+                        `⚠️ 설치 실패: 파일 용량이 너무 큽니다. ` +
+                        `최대 ${(SubPluginManager.MAX_INSTALL_BYTES / 1024).toFixed(0)}KB까지만 설치할 수 있습니다.`
+                    );
+                    renderPluginsTab();
+                    return;
+                }
                 const reader = new FileReader();
                 reader.onload = async (ev) => {
                     const code = /** @type {string} */ ((/** @type {FileReader} */ (ev.target)).result);
-                    const name = await SubPluginManager.install(code);
-                    const installed = SubPluginManager.plugins.find(p => p.name === name);
-                    if (installed) await SubPluginManager.hotReload(installed.id);
-                    alert(`서브 플러그인 '${name}' 설치 완료!`);
+                    try {
+                        const name = await SubPluginManager.install(code);
+                        const installed = SubPluginManager.plugins.find(p => p.name === name);
+                        if (installed) await SubPluginManager.hotReload(installed.id);
+                        alert(`서브 플러그인 '${name}' 설치 완료!`);
+                    } catch (installErr) {
+                        const message = installErr instanceof Error ? installErr.message : String(installErr || '알 수 없는 오류');
+                        alert(`⚠️ 설치 실패: ${message}`);
+                    }
                     renderPluginsTab();
                 };
                 reader.readAsText(file);

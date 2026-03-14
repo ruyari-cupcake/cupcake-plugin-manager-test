@@ -56,22 +56,88 @@ export const SubPluginManager = {
     /** @param {string} code */
     extractMetadata(code) {
         const meta = { name: 'Unnamed Sub-Plugin', version: '', description: '', icon: '📦', updateUrl: '' };
-        const nameMatch = code.match(/\/\/\s*@(?:name|display-name)\s+(.+)/i);
-        if (nameMatch) meta.name = nameMatch[1].trim();
-        const verMatch = code.match(/\/\/\s*@version\s+([^\r\n]+)/i);
-        if (verMatch) meta.version = verMatch[1].trim();
-        const descMatch = code.match(/\/\/\s*@description\s+(.+)/i);
-        if (descMatch) meta.description = descMatch[1].trim();
-        const iconMatch = code.match(/\/\/\s*@icon\s+(.+)/i);
-        if (iconMatch) meta.icon = iconMatch[1].trim();
-        const updateMatch = code.match(/\/\/\s*@update-url\s+(.+)/i);
-        if (updateMatch) meta.updateUrl = updateMatch[1].trim();
+        const lines = code.split(/\r?\n/);
+        let parsedName = '';
+        let parsedDisplayName = '';
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            if (!trimmed.startsWith('//')) break;
+
+            const nameMatch = trimmed.match(/^\/\/\s*@name\s+(.+)$/i);
+            if (nameMatch && !parsedName) {
+                parsedName = nameMatch[1].trim();
+                continue;
+            }
+
+            const displayNameMatch = trimmed.match(/^\/\/\s*@display-name\s+(.+)$/i);
+            if (displayNameMatch && !parsedDisplayName) {
+                parsedDisplayName = displayNameMatch[1].trim();
+                continue;
+            }
+
+            const verMatch = trimmed.match(/^\/\/\s*@version\s+(.+)$/i);
+            if (verMatch && !meta.version) {
+                meta.version = verMatch[1].trim();
+                continue;
+            }
+
+            const descMatch = trimmed.match(/^\/\/\s*@description\s+(.+)$/i);
+            if (descMatch && !meta.description) {
+                meta.description = descMatch[1].trim();
+                continue;
+            }
+
+            const iconMatch = trimmed.match(/^\/\/\s*@icon\s+(.+)$/i);
+            if (iconMatch && meta.icon === '📦') {
+                meta.icon = iconMatch[1].trim();
+                continue;
+            }
+
+            const updateMatch = trimmed.match(/^\/\/\s*@update-url\s+(.+)$/i);
+            if (updateMatch && !meta.updateUrl) {
+                meta.updateUrl = updateMatch[1].trim();
+            }
+        }
+
+        meta.name = parsedName || parsedDisplayName || meta.name;
         return meta;
+    },
+
+    /** Names that must never be installed as a sub-plugin (main plugin identifiers). */
+    BLOCKED_NAMES: ['Cupcake_Provider_Manager', 'Cupcake Provider Manager'],
+    MAX_INSTALL_BYTES: 300 * 1024,
+
+    /** @param {string} code */
+    getCodeSizeBytes(code) {
+        try {
+            if (typeof TextEncoder !== 'undefined') {
+                return new TextEncoder().encode(code || '').length;
+            }
+        } catch (_) {}
+        return String(code || '').length;
     },
 
     /** @param {string} code */
     async install(code) {
         const meta = this.extractMetadata(code);
+        const codeSizeBytes = this.getCodeSizeBytes(code);
+
+        if (codeSizeBytes > this.MAX_INSTALL_BYTES) {
+            throw new Error(
+                `서브 플러그인 용량이 너무 큽니다. ` +
+                `최대 ${(this.MAX_INSTALL_BYTES / 1024).toFixed(0)}KB까지만 설치할 수 있습니다.`
+            );
+        }
+
+        // Block installing the main provider-manager plugin as a sub-plugin
+        if (this.BLOCKED_NAMES.some(n => n.toLowerCase() === meta.name.toLowerCase())) {
+            throw new Error(
+                `'${meta.name}'은(는) 메인 프로바이더 매니저 플러그인입니다. ` +
+                `서브 플러그인으로 설치할 수 없습니다.`
+            );
+        }
+
         const existing = this.plugins.find(p => p.name === meta.name);
         if (existing) {
             existing.code = code;

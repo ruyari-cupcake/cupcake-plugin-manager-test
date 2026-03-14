@@ -1,7 +1,7 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.20.8
+//@version 1.20.9
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================
@@ -180,7 +180,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.20.8';
+    const CPM_VERSION = '1.20.9';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -4424,6 +4424,31 @@ var CupcakeProviderManager = (function (exports) {
         }
     }
 
+    /**
+     * Race a promise against a timeout and clear the timer once settled.
+     * Prevents dangling timer handles during tests and retries.
+     * @template T
+     * @param {Promise<T>} promise
+     * @param {number} ms
+     * @param {string} message
+     * @returns {Promise<T>}
+     */
+    function _withTimeout(promise, ms, message) {
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error(message)), ms);
+            Promise.resolve(promise).then(
+                value => {
+                    clearTimeout(timer);
+                    resolve(value);
+                },
+                error => {
+                    clearTimeout(timer);
+                    reject(error);
+                }
+            );
+        });
+    }
+
     // ────────────────────────────────────────────────────────────────
     // Auto-updater method collection
     // ────────────────────────────────────────────────────────────────
@@ -4885,10 +4910,11 @@ var CupcakeProviderManager = (function (exports) {
             let _fallbackExpectedSha256 = null;
             try {
                 const vUrl = this.VERSIONS_URL + '?_t=' + Date.now();
-                const vRes = await Promise.race([
+                const vRes = await _withTimeout(
                     Risu.risuFetch(vUrl, { method: 'GET', plainFetchForce: true }),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('versions manifest timed out (10s)')), 10000)),
-                ]);
+                    10000,
+                    'versions manifest timed out (10s)'
+                );
                 if (vRes?.data) {
                     const vData = typeof vRes.data === 'string' ? JSON.parse(vRes.data) : vRes.data;
                     _fallbackExpectedSha256 = vData?.['Cupcake Provider Manager']?.sha256 || null;
@@ -4907,16 +4933,18 @@ var CupcakeProviderManager = (function (exports) {
 
                     let response;
                     try {
-                        response = await Promise.race([
+                        response = await _withTimeout(
                             Risu.nativeFetch(cacheBuster, { method: 'GET' }),
-                            new Promise((_, reject) => setTimeout(() => reject(new Error('nativeFetch timed out (20s)')), 20000)),
-                        ]);
+                            20000,
+                            'nativeFetch timed out (20s)'
+                        );
                     } catch (nativeErr) {
                         console.warn(`${LOG} nativeFetch failed, falling back to risuFetch:`, /** @type {any} */ (nativeErr).message || nativeErr);
-                        const risuResult = await Promise.race([
+                        const risuResult = await _withTimeout(
                             Risu.risuFetch(cacheBuster, { method: 'GET', plainFetchForce: true }),
-                            new Promise((_, reject) => setTimeout(() => reject(new Error('risuFetch fallback timed out (20s)')), 20000)),
-                        ]);
+                            20000,
+                            'risuFetch fallback timed out (20s)'
+                        );
                         if (!risuResult.data || (risuResult.status && risuResult.status >= 400)) {
                             throw new Error(`risuFetch failed with status ${risuResult.status}`);
                         }
@@ -4938,10 +4966,11 @@ var CupcakeProviderManager = (function (exports) {
                         throw new Error(`HTTP ${response.status}`);
                     }
 
-                    const text = await Promise.race([
+                    const text = await _withTimeout(
                         response.text(),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('response body read timed out (20s)')), 20000)),
-                    ]);
+                        20000,
+                        'response body read timed out (20s)'
+                    );
 
                     const contentLength = parseInt(response.headers?.get?.('content-length') || '0', 10);
                     if (contentLength > 0) {
@@ -5536,22 +5565,88 @@ var CupcakeProviderManager = (function (exports) {
         /** @param {string} code */
         extractMetadata(code) {
             const meta = { name: 'Unnamed Sub-Plugin', version: '', description: '', icon: '📦', updateUrl: '' };
-            const nameMatch = code.match(/\/\/\s*@(?:name|display-name)\s+(.+)/i);
-            if (nameMatch) meta.name = nameMatch[1].trim();
-            const verMatch = code.match(/\/\/\s*@version\s+([^\r\n]+)/i);
-            if (verMatch) meta.version = verMatch[1].trim();
-            const descMatch = code.match(/\/\/\s*@description\s+(.+)/i);
-            if (descMatch) meta.description = descMatch[1].trim();
-            const iconMatch = code.match(/\/\/\s*@icon\s+(.+)/i);
-            if (iconMatch) meta.icon = iconMatch[1].trim();
-            const updateMatch = code.match(/\/\/\s*@update-url\s+(.+)/i);
-            if (updateMatch) meta.updateUrl = updateMatch[1].trim();
+            const lines = code.split(/\r?\n/);
+            let parsedName = '';
+            let parsedDisplayName = '';
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
+                if (!trimmed.startsWith('//')) break;
+
+                const nameMatch = trimmed.match(/^\/\/\s*@name\s+(.+)$/i);
+                if (nameMatch && !parsedName) {
+                    parsedName = nameMatch[1].trim();
+                    continue;
+                }
+
+                const displayNameMatch = trimmed.match(/^\/\/\s*@display-name\s+(.+)$/i);
+                if (displayNameMatch && !parsedDisplayName) {
+                    parsedDisplayName = displayNameMatch[1].trim();
+                    continue;
+                }
+
+                const verMatch = trimmed.match(/^\/\/\s*@version\s+(.+)$/i);
+                if (verMatch && !meta.version) {
+                    meta.version = verMatch[1].trim();
+                    continue;
+                }
+
+                const descMatch = trimmed.match(/^\/\/\s*@description\s+(.+)$/i);
+                if (descMatch && !meta.description) {
+                    meta.description = descMatch[1].trim();
+                    continue;
+                }
+
+                const iconMatch = trimmed.match(/^\/\/\s*@icon\s+(.+)$/i);
+                if (iconMatch && meta.icon === '📦') {
+                    meta.icon = iconMatch[1].trim();
+                    continue;
+                }
+
+                const updateMatch = trimmed.match(/^\/\/\s*@update-url\s+(.+)$/i);
+                if (updateMatch && !meta.updateUrl) {
+                    meta.updateUrl = updateMatch[1].trim();
+                }
+            }
+
+            meta.name = parsedName || parsedDisplayName || meta.name;
             return meta;
+        },
+
+        /** Names that must never be installed as a sub-plugin (main plugin identifiers). */
+        BLOCKED_NAMES: ['Cupcake_Provider_Manager', 'Cupcake Provider Manager'],
+        MAX_INSTALL_BYTES: 300 * 1024,
+
+        /** @param {string} code */
+        getCodeSizeBytes(code) {
+            try {
+                if (typeof TextEncoder !== 'undefined') {
+                    return new TextEncoder().encode(code || '').length;
+                }
+            } catch (_) {}
+            return String(code || '').length;
         },
 
         /** @param {string} code */
         async install(code) {
             const meta = this.extractMetadata(code);
+            const codeSizeBytes = this.getCodeSizeBytes(code);
+
+            if (codeSizeBytes > this.MAX_INSTALL_BYTES) {
+                throw new Error(
+                    `서브 플러그인 용량이 너무 큽니다. ` +
+                    `최대 ${(this.MAX_INSTALL_BYTES / 1024).toFixed(0)}KB까지만 설치할 수 있습니다.`
+                );
+            }
+
+            // Block installing the main provider-manager plugin as a sub-plugin
+            if (this.BLOCKED_NAMES.some(n => n.toLowerCase() === meta.name.toLowerCase())) {
+                throw new Error(
+                    `'${meta.name}'은(는) 메인 프로바이더 매니저 플러그인입니다. ` +
+                    `서브 플러그인으로 설치할 수 없습니다.`
+                );
+            }
+
             const existing = this.plugins.find(p => p.name === meta.name);
             if (existing) {
                 existing.code = code;
@@ -7377,13 +7472,26 @@ var CupcakeProviderManager = (function (exports) {
                 pFileInput.addEventListener('change', async (e) => {
                     const file = asInput(e.target).files?.[0];
                     if (!file) return;
+                    if (file.size > SubPluginManager.MAX_INSTALL_BYTES) {
+                        alert(
+                            `⚠️ 설치 실패: 파일 용량이 너무 큽니다. ` +
+                            `최대 ${(SubPluginManager.MAX_INSTALL_BYTES / 1024).toFixed(0)}KB까지만 설치할 수 있습니다.`
+                        );
+                        renderPluginsTab();
+                        return;
+                    }
                     const reader = new FileReader();
                     reader.onload = async (ev) => {
                         const code = /** @type {string} */ ((/** @type {FileReader} */ (ev.target)).result);
-                        const name = await SubPluginManager.install(code);
-                        const installed = SubPluginManager.plugins.find(p => p.name === name);
-                        if (installed) await SubPluginManager.hotReload(installed.id);
-                        alert(`서브 플러그인 '${name}' 설치 완료!`);
+                        try {
+                            const name = await SubPluginManager.install(code);
+                            const installed = SubPluginManager.plugins.find(p => p.name === name);
+                            if (installed) await SubPluginManager.hotReload(installed.id);
+                            alert(`서브 플러그인 '${name}' 설치 완료!`);
+                        } catch (installErr) {
+                            const message = installErr instanceof Error ? installErr.message : String(installErr || '알 수 없는 오류');
+                            alert(`⚠️ 설치 실패: ${message}`);
+                        }
                         renderPluginsTab();
                     };
                     reader.readAsText(file);

@@ -45,6 +45,31 @@ export async function _computeSHA256(text) {
     }
 }
 
+/**
+ * Race a promise against a timeout and clear the timer once settled.
+ * Prevents dangling timer handles during tests and retries.
+ * @template T
+ * @param {Promise<T>} promise
+ * @param {number} ms
+ * @param {string} message
+ * @returns {Promise<T>}
+ */
+function _withTimeout(promise, ms, message) {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(message)), ms);
+        Promise.resolve(promise).then(
+            value => {
+                clearTimeout(timer);
+                resolve(value);
+            },
+            error => {
+                clearTimeout(timer);
+                reject(error);
+            }
+        );
+    });
+}
+
 // ────────────────────────────────────────────────────────────────
 // Auto-updater method collection
 // ────────────────────────────────────────────────────────────────
@@ -506,10 +531,11 @@ export const autoUpdaterMethods = {
         let _fallbackExpectedSha256 = null;
         try {
             const vUrl = this.VERSIONS_URL + '?_t=' + Date.now();
-            const vRes = await Promise.race([
+            const vRes = await _withTimeout(
                 Risu.risuFetch(vUrl, { method: 'GET', plainFetchForce: true }),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('versions manifest timed out (10s)')), 10000)),
-            ]);
+                10000,
+                'versions manifest timed out (10s)'
+            );
             if (vRes?.data) {
                 const vData = typeof vRes.data === 'string' ? JSON.parse(vRes.data) : vRes.data;
                 _fallbackExpectedSha256 = vData?.['Cupcake Provider Manager']?.sha256 || null;
@@ -528,16 +554,18 @@ export const autoUpdaterMethods = {
 
                 let response;
                 try {
-                    response = await Promise.race([
+                    response = await _withTimeout(
                         Risu.nativeFetch(cacheBuster, { method: 'GET' }),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('nativeFetch timed out (20s)')), 20000)),
-                    ]);
+                        20000,
+                        'nativeFetch timed out (20s)'
+                    );
                 } catch (nativeErr) {
                     console.warn(`${LOG} nativeFetch failed, falling back to risuFetch:`, /** @type {any} */ (nativeErr).message || nativeErr);
-                    const risuResult = await Promise.race([
+                    const risuResult = await _withTimeout(
                         Risu.risuFetch(cacheBuster, { method: 'GET', plainFetchForce: true }),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('risuFetch fallback timed out (20s)')), 20000)),
-                    ]);
+                        20000,
+                        'risuFetch fallback timed out (20s)'
+                    );
                     if (!risuResult.data || (risuResult.status && risuResult.status >= 400)) {
                         throw new Error(`risuFetch failed with status ${risuResult.status}`);
                     }
@@ -559,10 +587,11 @@ export const autoUpdaterMethods = {
                     throw new Error(`HTTP ${response.status}`);
                 }
 
-                const text = await Promise.race([
+                const text = await _withTimeout(
                     response.text(),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('response body read timed out (20s)')), 20000)),
-                ]);
+                    20000,
+                    'response body read timed out (20s)'
+                );
 
                 const contentLength = parseInt(response.headers?.get?.('content-length') || '0', 10);
                 if (contentLength > 0) {

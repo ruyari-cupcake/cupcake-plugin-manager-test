@@ -84,6 +84,13 @@ describe('SubPluginManager — install lifecycle', () => {
         expect(SubPluginManager.plugins[0].id).toBe('sp_1'); // id preserved
     });
 
+    it('install() rejects oversized sub-plugin code above 300KB', async () => {
+        const hugeCode = `// @name Huge\n${'a'.repeat(SubPluginManager.MAX_INSTALL_BYTES + 1)}`;
+
+        await expect(SubPluginManager.install(hugeCode)).rejects.toThrow(/최대 300KB/);
+        expect(SubPluginManager.plugins).toHaveLength(0);
+    });
+
     it('remove() deletes a plugin and persists', async () => {
         SubPluginManager.plugins = [
             { id: 'sp_1', name: 'A', code: 'a', enabled: true },

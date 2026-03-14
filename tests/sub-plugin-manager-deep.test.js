@@ -133,6 +133,11 @@ console.log('hello');
             const meta = SubPluginManager.extractMetadata('// @display-name My Plugin');
             expect(meta.name).toBe('My Plugin');
         });
+
+        it('ignores metadata-like comments outside the leading header block', () => {
+            const meta = SubPluginManager.extractMetadata('console.log("boot");\n// @name Cupcake_Provider_Manager');
+            expect(meta.name).toBe('Unnamed Sub-Plugin');
+        });
     });
 
     // ── compareVersions ──
@@ -180,6 +185,34 @@ console.log('hello');
             await SubPluginManager.install('// @name TestPlugin\n// @version 2.0.0');
             expect(SubPluginManager.plugins).toHaveLength(1);
             expect(SubPluginManager.plugins[0].version).toBe('2.0.0');
+        });
+        it('prevents duplicate install entries by updating same-name plugin in place', async () => {
+            await SubPluginManager.install('// @name DuplicateCheck\n// @version 1.0.0\nconsole.log("v1")');
+            const originalId = SubPluginManager.plugins[0].id;
+
+            await SubPluginManager.install('// @name DuplicateCheck\n// @version 1.1.0\nconsole.log("v2")');
+
+            expect(SubPluginManager.plugins).toHaveLength(1);
+            expect(SubPluginManager.plugins[0].id).toBe(originalId);
+            expect(SubPluginManager.plugins[0].version).toBe('1.1.0');
+        });
+        it('blocks installing oversized code above 300KB', async () => {
+            await expect(
+                SubPluginManager.install(`// @name Huge\n${'a'.repeat(SubPluginManager.MAX_INSTALL_BYTES + 1)}`)
+            ).rejects.toThrow(/최대 300KB/);
+            expect(SubPluginManager.plugins).toHaveLength(0);
+        });
+        it('blocks installing the main plugin as a sub-plugin by @name', async () => {
+            await expect(
+                SubPluginManager.install('// @name Cupcake_Provider_Manager\n// @version 1.20.8')
+            ).rejects.toThrow(/메인 프로바이더 매니저 플러그인/);
+            expect(SubPluginManager.plugins).toHaveLength(0);
+        });
+        it('blocks installing the main plugin as a sub-plugin by @display-name', async () => {
+            await expect(
+                SubPluginManager.install('// @display-name Cupcake Provider Manager\n// @version 1.20.8')
+            ).rejects.toThrow(/메인 프로바이더 매니저 플러그인/);
+            expect(SubPluginManager.plugins).toHaveLength(0);
         });
     });
 

@@ -37,6 +37,12 @@ describe('SubPluginManager', () => {
         expect(meta.version).toBe('');
     });
 
+    it('extractMetadata ignores metadata-like comments after code starts', () => {
+        const code = 'console.log("start");\n// @name Cupcake_Provider_Manager\n// @display-name Cupcake Provider Manager';
+        const meta = SubPluginManager.extractMetadata(code);
+        expect(meta.name).toBe('Unnamed Sub-Plugin');
+    });
+
     it('compareVersions returns correct ordering', () => {
         // Convention: returns 1 when b > a, -1 when a > b, 0 when equal
         expect(SubPluginManager.compareVersions('1.0.0', '1.0.1')).toBe(1);
