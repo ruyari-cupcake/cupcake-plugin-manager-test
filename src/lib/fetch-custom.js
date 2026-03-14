@@ -378,8 +378,10 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
 
                 response?.body?.cancel?.();
                 attempt++;
-                const retryDelay = _parseRetryAfterMs(response?.headers) || (700 * attempt);
-                console.warn(`[Cupcake PM] ${label} retry ${attempt}/${maxAttempts - 1} after HTTP ${status}`);
+                const retryAfterMs = _parseRetryAfterMs(response?.headers);
+                const exponentialDelay = Math.min(1000 * Math.pow(2, attempt - 1), 16000);
+                const retryDelay = retryAfterMs || exponentialDelay;
+                console.warn(`[Cupcake PM] ${label} retry ${attempt}/${maxAttempts - 1} after HTTP ${status} (delay: ${retryDelay}ms)`);
                 await sleep(retryDelay);
             }
 

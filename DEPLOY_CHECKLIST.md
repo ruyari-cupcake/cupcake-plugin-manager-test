@@ -23,7 +23,7 @@
 | 소스 | `src/`, `scripts/`, `api/` |
 | 테스트 / 품질 | `tests/`, `.github/`, `.husky/`, `coverage/` 제외 설정 파일들 |
 | 빌드 / 타입체크 설정 | `package.json`, `package-lock.json`, `rollup.config.mjs`, `eslint.config.js`, `vitest.config.js`, `jsconfig.json`, `tsconfig.typecheck.json`, `.lintstagedrc.json` |
-| 문서 | `README.md`, `PLUGIN_GUIDE.md`, `DEPLOY_CHECKLIST.md` |
+| 문서 | `README.md`, `PLUGIN_GUIDE.md`, `DEPLOY.md`, `DEPLOY_CHECKLIST.md`, `DATA_OWNERSHIP_POLICY.md` |
 | 배포 산출물 메타 | `versions.json`, `update-bundle.json`, `release-hashes.json`, `vercel.json` |
 | 최종 산출물 | `provider-manager.js`, `cpm-*.js` |
 
@@ -46,6 +46,7 @@
 | `versions.json` | 원격 버전 메타데이터 |
 | `update-bundle.json` | 업데이트 번들 |
 | `vercel.json` | 배포 환경 설정 |
+| `api/main-plugin.js` | 메인 플러그인 다운로드 API |
 | `api/versions.js` | 버전 조회 API |
 | `api/update-bundle.js` | 번들 제공 API |
 
@@ -94,9 +95,33 @@ npm run verify:release-sync
 
 # 4) release 회귀 테스트
 npm run test:release-sync
+
+# 5) 커버리지 확인 (fetch/update/url 변경 시 필수 권장)
+npm run test:coverage
 ```
 
 추가로, Husky `pre-push` 훅도 같은 검증을 자동 실행한다.
+
+추가 확인 포인트:
+
+- `fetch-custom.js`, `smart-fetch.js`, `auto-updater.js`, `cpm-url.config.js`, `rollup.config.mjs`를 수정했다면 브랜치 커버리지 `90%` 이상 유지 여부를 확인한다.
+- URL 전환 로직을 수정했다면 `npm run build`와 `npm run build:production`을 각각 실행해 `dist/provider-manager.js`의 `@update-url`이 올바른 환경을 가리키는지 확인한다.
+
+### Readiness audit 수정 항목 점검
+
+아래 항목은 프로덕션 readiness audit에서 직접 지적되었던 부분들이다. 관련 파일을 만졌다면 같이 확인한다.
+
+- QW-1 (`package.json` engines): Node 20 미만 환경이 섞이지 않았는지 확인
+- QW-2 (`src/lib/fetch-custom.js`): 재시도/백오프 분기 변경 시 `npm test` + `npm run test:coverage`
+- HD-1 (`src/cpm-url.config.js`, `rollup.config.mjs`, `scripts/release.cjs`): test / production 빌드를 둘 다 1회 검증
+- HD-2 (`tests/*coverage*.test.js`, `tests/*branch-coverage*.test.js`): 전체 브랜치 커버리지 `90%` 이상 유지 확인
+
+권장 확인 순서:
+
+1. `npm test`
+2. `npm run test:coverage`
+3. `npm run verify:release-sync`
+4. `node scripts/release.cjs`
 
 ---
 

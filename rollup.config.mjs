@@ -8,21 +8,33 @@
  * The RisuAI plugin header (src/plugin-header.js) is prepended as a banner.
  *
  * The `@update-url` inside the banner is rewritten at build time from
- * `src/cpm-url.config.js` — the single source of truth for the deployment URL.
+ * the CPM_ENV environment variable (or defaults to test).
+ *
+ * Build usage:
+ *   CPM_ENV=production npm run build   (production URL)
+ *   npm run build                      (test URL — default)
+ *   npm run build:production           (shorthand)
  */
 import resolve from '@rollup/plugin-node-resolve';
 import { readFileSync, writeFileSync } from 'node:fs';
 
-// ── Read the single-source-of-truth URL ──
+// ── Resolve deployment URL from CPM_ENV ──
+const CPM_ENV = process.env.CPM_ENV || 'test';
+const _URL_MAP = {
+  production: 'https://cupcake-plugin-manager.vercel.app',
+  test: 'https://cupcake-plugin-manager-test.vercel.app',
+};
+const CPM_BASE_URL = _URL_MAP[CPM_ENV] || _URL_MAP.test;
+console.log(`[rollup] CPM_ENV=${CPM_ENV} → ${CPM_BASE_URL}`);
+
+// ── Validate against cpm-url.config.js (consistency check) ──
 const urlConfigSrc = readFileSync(
   new URL('./src/cpm-url.config.js', import.meta.url),
   'utf-8',
 );
-const urlMatch = urlConfigSrc.match(/CPM_BASE_URL\s*=\s*['"]([^'"]+)['"]/);
-if (!urlMatch) {
-  throw new Error('[rollup] Failed to extract CPM_BASE_URL from src/cpm-url.config.js');
+if (!urlConfigSrc.includes(CPM_BASE_URL)) {
+  console.warn(`[rollup] ⚠️  CPM_BASE_URL "${CPM_BASE_URL}" not found in src/cpm-url.config.js — ensure URL map is in sync`);
 }
-const CPM_BASE_URL = urlMatch[1];
 
 // ── Read plugin header and inject the URL ──
 let pluginHeader = readFileSync(
@@ -51,6 +63,22 @@ export default {
   },
   plugins: [
     resolve(),
+    // ── Build-time CPM_ENV pinning (HD-1) ──
+    // The iframe runtime has no reliable process.env, so pin the resolved
+    // environment directly inside src/cpm-url.config.js during bundling.
+    // This avoids the previous broad string-replacement approach, which could
+    // also rewrite comments and the fallback URL map in the final bundle.
+    {
+      name: 'pin-cpm-env',
+      transform(code, id) {
+        const normalizedId = id.replace(/\\/g, '/');
+        if (!normalizedId.endsWith('/src/cpm-url.config.js')) return null;
+        return code.replace(
+          'const _env = _resolveEnv();',
+          `const _env = '${CPM_ENV}';`,
+        );
+      },
+    },
     {
       name: 'normalize-dist-eol',
       writeBundle(options) {

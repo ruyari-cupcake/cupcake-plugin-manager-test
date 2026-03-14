@@ -30,6 +30,7 @@ const { execSync } = require('child_process');
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes('--dry-run');
 const SKIP_TEST = args.includes('--skip-test');
+const BUILD_ENV = process.env.CPM_ENV === 'production' ? 'production' : 'test';
 
 const ROOT = path.resolve(__dirname, '..');
 const p = (...segs) => path.join(ROOT, ...segs);
@@ -61,9 +62,22 @@ function extractVersionFromHeader(filePath) {
 // ════════════════════════════════════════════════════════════════
 const urlConfigPath = p('src', 'cpm-url.config.js');
 const urlConfigSrc = fs.readFileSync(urlConfigPath, 'utf-8');
-const urlMatch = urlConfigSrc.match(/CPM_BASE_URL\s*=\s*['"]([^'"]+)['"]/);
-if (!urlMatch) fail('Cannot parse CPM_BASE_URL from src/cpm-url.config.js');
-const configBaseUrl = urlMatch[1];
+// Support both old static format:  CPM_BASE_URL = 'https://...'
+// and new dynamic format:           _URLS = { production: 'https://...', test: 'https://...' }
+/** @type {{ production?: string, test?: string }} */
+const urlMap = {};
+const staticMatch = urlConfigSrc.match(/CPM_BASE_URL\s*=\s*['"]([^'"]+)['"]/);
+if (staticMatch) {
+    urlMap.production = staticMatch[1];
+    urlMap.test = staticMatch[1];
+} else {
+    const productionMatch = urlConfigSrc.match(/production\s*:\s*['"]([^'"]+)['"]/);
+    const testMatch = urlConfigSrc.match(/test\s*:\s*['"]([^'"]+)['"]/);
+    if (productionMatch) urlMap.production = productionMatch[1];
+    if (testMatch) urlMap.test = testMatch[1];
+}
+const configBaseUrl = urlMap[BUILD_ENV];
+if (!configBaseUrl) fail(`Cannot parse ${BUILD_ENV} CPM_BASE_URL from src/cpm-url.config.js`);
 
 const headerPath = p('src', 'plugin-header.js');
 const headerSrc = fs.readFileSync(headerPath, 'utf-8');
@@ -74,7 +88,7 @@ const expectedUpdateUrl = `${configBaseUrl}/api/main-plugin`;
 if (headerUpdateUrl !== expectedUpdateUrl) {
     log('url', `⚠️  plugin-header.js @update-url will be overwritten by rollup build (${headerUpdateUrl} → ${expectedUpdateUrl})`);
 }
-log('url', `✓ CPM_BASE_URL = ${configBaseUrl} (source: src/cpm-url.config.js)`);
+log('url', `✓ CPM_ENV=${BUILD_ENV} → CPM_BASE_URL = ${configBaseUrl} (source: src/cpm-url.config.js)`);
 
 // ════════════════════════════════════════════════════════════════
 // Step 1: Build Tailwind CSS + Rollup bundle
@@ -190,25 +204,7 @@ if (DRY_RUN) {
 }
 
 // ════════════════════════════════════════════════════════════════
-// Step 5: Run full test suite
-// ════════════════════════════════════════════════════════════════
-if (SKIP_TEST) {
-    log('test', 'Skipped (--skip-test flag)');
-} else {
-    log('test', 'Running vitest...');
-    try {
-        const testOutput = execSync('npx vitest run', { cwd: ROOT, stdio: 'pipe' }).toString();
-        const passMatch = testOutput.match(/(\d+)\s+passed/);
-        log('test', `✓ Tests passed${passMatch ? ` (${passMatch[1]} tests)` : ''}`);
-    } catch (e) {
-        const stderr = e.stderr?.toString() || '';
-        const stdout = e.stdout?.toString() || '';
-        fail(`Tests failed:\n${stdout}\n${stderr}`);
-    }
-}
-
-// ════════════════════════════════════════════════════════════════
-// Step 6: Produce release-hashes.json (links private → public)
+// Step 5: Produce release-hashes.json (links private → public)
 // ════════════════════════════════════════════════════════════════
 const releaseInfo = {
     timestamp: new Date().toISOString(),
@@ -223,6 +219,26 @@ if (DRY_RUN) {
 } else {
     fs.writeFileSync(releaseHashPath, JSON.stringify(releaseInfo, null, 2), 'utf-8');
     log('hashes', `✓ release-hashes.json written — keep this in your private repo for audit trail`);
+}
+
+// ════════════════════════════════════════════════════════════════
+// Step 6: Run full test suite
+// ════════════════════════════════════════════════════════════════
+if (SKIP_TEST) {
+    log('test', 'Skipped (--skip-test flag)');
+} else if (DRY_RUN) {
+    log('test', 'Skipped in --dry-run mode (artifacts are intentionally not synced, so release-sync tests would be misleading)');
+} else {
+    log('test', 'Running vitest...');
+    try {
+        const testOutput = execSync('npx vitest run', { cwd: ROOT, stdio: 'pipe' }).toString();
+        const passMatch = testOutput.match(/(\d+)\s+passed/);
+        log('test', `✓ Tests passed${passMatch ? ` (${passMatch[1]} tests)` : ''}`);
+    } catch (e) {
+        const stderr = e.stderr?.toString() || '';
+        const stdout = e.stdout?.toString() || '';
+        fail(`Tests failed:\n${stdout}\n${stderr}`);
+    }
 }
 
 // ════════════════════════════════════════════════════════════════

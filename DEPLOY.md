@@ -52,33 +52,47 @@ git push test v1.xx.x-test.N
 - [update-bundle.json](update-bundle.json)에 `provider-manager.js` 최신 코드와 최신 `sha256`이 들어갔는지 확인
 - [versions.json](versions.json)의 `Cupcake Provider Manager` 버전/changes가 최신인지 확인
 - 메인 자동업데이트 관련 수정이었다면 반드시 `node scripts/release.cjs`를 다시 실행
+- 네트워크/업데이트/라우터 관련 수정이었다면 `npm run test:coverage`를 실행해 전체 브랜치 커버리지가 `90%` 이상 유지되는지 확인
 
 ---
 
 ## 프로덕션 배포 (origin) — 요청 시에만
 
-### 1단계: URL을 프로덕션으로 전환
+### 1단계: 프로덕션 빌드
 
-**변경할 파일은 1개만:**
-
-| 파일 | 변경 내용 |
-|------|-----------|
-| `src/cpm-url.config.js` | `CPM_BASE_URL`를 `https://cupcake-plugin-manager.vercel.app`로 변경 |
-
-`src/lib/endpoints.js`, `src/plugin-header.js`, Rollup 배너, 회귀 테스트는 모두 이 값을 기준으로 동기화된다.
-
-### 2단계: 빌드 & 테스트 & 릴리즈
+소스 파일 수정은 **불필요**. `CPM_ENV` 환경변수로 빌드 타임에 URL이 자동 전환된다.
 
 ```bash
-# release.cjs를 우선 사용한다.
-# 이 단계가 provider-manager.js / update-bundle.json / release-hashes.json 동기화를 보장한다.
-node scripts/release.cjs        # 권장
+# 프로덕션 빌드 (권장 — cross-platform)
+npm run build:production
 
-# 정말 필요할 때만 수동 절차:
-# npm run build
-# copy dist\provider-manager.js provider-manager.js
-# npm test
-# node scripts/release.cjs --dry-run
+# 또는 수동으로 환경변수 설정
+# Linux/Mac:
+CPM_ENV=production npm run build
+# Windows (PowerShell):
+$env:CPM_ENV="production"; npm run build
+```
+
+빌드 시 다음이 자동으로 수행된다:
+- `plugin-header.js`의 `@update-url`이 프로덕션 URL로 치환
+- 번들 내 모든 런타임 URL(`VERSIONS_URL`, `MAIN_UPDATE_URL` 등)이 프로덕션 URL로 치환
+- 콘솔에 `[rollup] CPM_ENV=production → https://cupcake-plugin-manager.vercel.app` 확인 메시지 출력
+
+추가 검증:
+- `dist/provider-manager.js` 헤더의 `@update-url`이 `https://cupcake-plugin-manager.vercel.app/api/main-plugin`인지 확인
+- `dist/provider-manager.js` 내부 런타임 엔드포인트도 동일하게 프로덕션 도메인을 가리키는지 확인
+
+### 2단계: 릴리즈 & 푸시
+
+```bash
+# release.cjs가 provider-manager.js / update-bundle.json / release-hashes.json 동기화를 보장한다.
+# release.cjs는 현재 CPM_ENV를 그대로 사용해 build → 동기화까지 수행한다.
+
+# Linux/Mac
+CPM_ENV=production node scripts/release.cjs
+
+# Windows (PowerShell)
+$env:CPM_ENV="production"; node scripts/release.cjs
 
 git add -A
 git commit -m "release: provider-manager vX.XX.X"
@@ -87,14 +101,15 @@ git tag vX.XX.X
 git push origin vX.XX.X
 ```
 
-### 3단계: URL을 다시 테스트로 복원
+### 3단계: 테스트 서버 복원
 
-1단계의 역순으로 [src/cpm-url.config.js](src/cpm-url.config.js)의 `CPM_BASE_URL`만 `https://cupcake-plugin-manager-test.vercel.app`으로 되돌린다.
+프로덕션 배포 후, 소스는 그대로 두고 **테스트 빌드로 돌아오기만 하면 된다.** 소스 파일 수정이 필요 없으므로 이전보다 훨씬 안전하다.
 
 ```bash
+npm run build            # CPM_ENV 기본값 = test
 node scripts/release.cjs
 git add -A
-git commit -m "chore: restore test domain URLs"
+git commit -m "chore: restore test build artifacts"
 git push test main
 ```
 
@@ -102,13 +117,15 @@ git push test main
 
 ## 주의사항
 
-- **origin에는 절대 test URL이 포함된 코드를 push하지 않는다**
-- **test에는 절대 production URL이 포함된 코드를 push하지 않는다**
-- 프로덕션 배포 후 반드시 3단계(URL 복원)를 수행한다
+- **origin에는 테스트 빌드 산출물을 push하지 않는다** — 반드시 `npm run build:production`으로 빌드한 산출물 사용
+- **test에는 프로덕션 빌드 산출물을 push하지 않는다** — 기본 `npm run build`는 자동으로 테스트 URL 사용
+- 프로덕션 배포 후 반드시 3단계(테스트 빌드 복원)를 수행한다
+- `CPM_ENV` 미설정 시 항상 테스트 URL로 빌드되므로, 실수로 프로덕션 URL이 테스트 서버에 올라가는 사고가 방지된다
 - 메인 자동업데이트 관련 수정 후에는 **소스만 커밋하지 말고 반드시 [node scripts/release.cjs](scripts/release.cjs)로 산출물을 재생성한다**
 - [provider-manager.js](provider-manager.js)와 [update-bundle.json](update-bundle.json)이 stale이면 메인 자동업데이트는 수정 전 코드를 계속 내려보낼 수 있다
 - 푸시 전 Husky가 `npm run verify:release-sync`와 `npm run test:release-sync`를 실행하므로, 산출물 버전/해시/번들 코드가 안 맞으면 푸시가 차단된다
 - `origin` push 전에 반드시 전체 테스트를 통과시킨다
+- URL/빌드 파이프라인 수정이었다면 `npm run build`와 `npm run build:production`을 각각 1회 실행해 test/prod 양쪽이 모두 올바르게 고정되는지 확인한다
 
 ---
 

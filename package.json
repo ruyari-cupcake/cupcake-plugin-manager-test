@@ -1,8 +1,11 @@
 {
   "name": "cupcake-provider-manager",
   "type": "module",
-  "version": "1.20.6",
+  "version": "1.20.7",
   "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "lint": "eslint src tests",
     "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
@@ -13,6 +16,7 @@
     "verify:release-sync": "node scripts/verify-release-sync.cjs",
     "build:css": "node scripts/build-tailwind.cjs",
     "build": "npm run build:css && rollup -c rollup.config.mjs",
+    "build:production": "node scripts/build-production.cjs",
     "wait:input": "node scripts/wait-for-input.cjs"
   },
   "devDependencies": {

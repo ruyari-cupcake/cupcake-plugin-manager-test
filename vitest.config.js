@@ -9,7 +9,7 @@ export default defineConfig({
         'src/plugin-header.js',       // RisuAI @arg declarations only
         'src/index.js',                // Re-export barrel (no logic)
       ],
-      reporter: ['text', 'json-summary'],
+      reporter: ['text', 'json-summary', 'json'],
       thresholds: {
         statements: 90,
         branches: 80,

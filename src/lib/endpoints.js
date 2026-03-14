@@ -7,7 +7,9 @@
  * source of truth shared with the Rollup build (which injects it into
  * the plugin-header.js banner at build time).
  *
- * To switch between test / production, edit ONLY `src/cpm-url.config.js`.
+ * To switch between test / production, set the `CPM_ENV` environment
+ * variable at build time (e.g., `CPM_ENV=production npm run build` or
+ * `npm run build:production`). See rollup.config.mjs for details.
  */
 
 import { CPM_BASE_URL } from '../cpm-url.config.js';

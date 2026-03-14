@@ -3,6 +3,11 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { MAIN_UPDATE_URL } from '../src/lib/endpoints.js';
 
+const TEST_MAIN_UPDATE_URL = 'https://cupcake-plugin-manager-test.vercel.app/api/main-plugin';
+const EXPECTED_BUILD_ENV = MAIN_UPDATE_URL.includes('cupcake-plugin-manager.vercel.app/api/main-plugin')
+    ? 'production'
+    : 'test';
+
 const packageJson = JSON.parse(
     readFileSync(new URL('../package.json', import.meta.url), 'utf-8')
 );
@@ -90,11 +95,27 @@ describe('main plugin update regression guard', () => {
         expect(rootDisplayName).toBe(headerDisplayName);
         expect(distName).toBe(headerName);
         expect(distDisplayName).toBe(headerDisplayName);
-        expect(updateUrl).toBe(MAIN_UPDATE_URL);
+        expect(updateUrl).toBe(TEST_MAIN_UPDATE_URL);
         expect(rootUpdateUrl).toBe(MAIN_UPDATE_URL);
         expect(distUpdateUrl).toBe(MAIN_UPDATE_URL);
         expect(versionOffset).toBeGreaterThanOrEqual(0);
         expect(new TextEncoder().encode(pluginHeader.slice(0, versionOffset) + '//@version').length).toBeLessThanOrEqual(512);
+    });
+
+    it('pins the built CPM environment without corrupting the bundled URL map', () => {
+        const distEnv = getRequiredMatch(distBundle, /const _env = '([^']+)'/, 'dist CPM_ENV');
+        const rootEnv = getRequiredMatch(rootBundle, /const _env = '([^']+)'/, 'root CPM_ENV');
+        const distProductionUrl = getRequiredMatch(distBundle, /production:\s*'([^']+)'/, 'dist production URL');
+        const distTestUrl = getRequiredMatch(distBundle, /test:\s*'([^']+)'/, 'dist test URL');
+        const rootProductionUrl = getRequiredMatch(rootBundle, /production:\s*'([^']+)'/, 'root production URL');
+        const rootTestUrl = getRequiredMatch(rootBundle, /test:\s*'([^']+)'/, 'root test URL');
+
+        expect(distEnv).toBe(EXPECTED_BUILD_ENV);
+        expect(rootEnv).toBe(EXPECTED_BUILD_ENV);
+        expect(distProductionUrl).toBe('https://cupcake-plugin-manager.vercel.app');
+        expect(distTestUrl).toBe('https://cupcake-plugin-manager-test.vercel.app');
+        expect(rootProductionUrl).toBe('https://cupcake-plugin-manager.vercel.app');
+        expect(rootTestUrl).toBe('https://cupcake-plugin-manager-test.vercel.app');
     });
 
     it('registers the settings panel before risky init phases in the shipped bundle', () => {
