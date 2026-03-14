@@ -3,6 +3,13 @@
   "installCommand": "",
   "headers": [
     {
+      "source": "/(.*)\\.exe",
+      "headers": [
+        { "key": "Content-Type", "value": "application/octet-stream" },
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+      ]
+    },
+    {
       "source": "/(.*)\\.js",
       "headers": [
         { "key": "Access-Control-Allow-Origin", "value": "*" },
