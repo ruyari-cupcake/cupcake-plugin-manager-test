@@ -42,6 +42,11 @@ export function setCopilotFetchFn(fn) {
  * @returns {Promise<string>} API token or empty string on failure
  */
 export async function ensureCopilotApiToken() {
+    // Negative cache: if a recent exchange failed, don't retry until expiry
+    if (!_copilotTokenCache.token && _copilotTokenCache.expiry > 0 && Date.now() < _copilotTokenCache.expiry) {
+        return '';
+    }
+
     // Return cached token if still valid (with 60s safety margin)
     if (_copilotTokenCache.token && Date.now() < _copilotTokenCache.expiry - 60000) {
         return _copilotTokenCache.token;

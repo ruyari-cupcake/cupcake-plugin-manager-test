@@ -348,8 +348,8 @@ export const autoUpdaterMethods = {
             if (mainUpdateInfo) {
                 const delay = updatesAvailable.length > 0 ? 1500 : 0;
                 setTimeout(async () => {
-                        try { await this._rememberPendingMainUpdate(mainUpdateInfo.remoteVersion, mainUpdateInfo.changes); } catch (_) { }
-                    try { await this.safeMainPluginUpdate(mainUpdateInfo.remoteVersion, mainUpdateInfo.changes); } catch (_) { }
+                        try { await this._rememberPendingMainUpdate(mainUpdateInfo.remoteVersion, mainUpdateInfo.changes); } catch (e) { console.warn('[CPM AutoCheck] _rememberPendingMainUpdate failed:', e); }
+                    try { await this.safeMainPluginUpdate(mainUpdateInfo.remoteVersion, mainUpdateInfo.changes); } catch (e) { console.warn('[CPM AutoCheck] safeMainPluginUpdate failed:', e); }
                 }, delay);
             }
         } catch (/** @type {any} */ e) {

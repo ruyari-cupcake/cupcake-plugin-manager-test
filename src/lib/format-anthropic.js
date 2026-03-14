@@ -65,7 +65,10 @@ export function formatToAnthropic(messages, config = {}) {
 
     /** @type {any[]} */
     const formattedMsgs = [];
-    for (const m of chatMsgs) {
+    /** @type {number[]} — maps each chatMsgs[i] to its formattedMsgs index, or -1 if skipped */
+    const srcToFmtMap = new Array(chatMsgs.length).fill(-1);
+    for (let ci = 0; ci < chatMsgs.length; ci++) {
+        const m = chatMsgs[ci];
         const role = m.role === 'assistant' ? 'assistant' : 'user';
         const payload = extractNormalizedMessagePayload(m);
 
@@ -96,10 +99,12 @@ export function formatToAnthropic(messages, config = {}) {
             const contentParts = [...imageParts, ...textParts];
             if (contentParts.length > 0) {
                 _mergeOrPush(formattedMsgs, role, contentParts);
+                srcToFmtMap[ci] = formattedMsgs.length - 1;
             } else {
                 const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
                 if (!hasNonEmptyMessageContent(content)) continue;
                 _mergeOrPush(formattedMsgs, role, [{ type: 'text', text: content }]);
+                srcToFmtMap[ci] = formattedMsgs.length - 1;
             }
             continue;
         }
@@ -137,6 +142,7 @@ export function formatToAnthropic(messages, config = {}) {
 
             if (contentParts.length > 0) {
                 _mergeOrPush(formattedMsgs, role, contentParts);
+                srcToFmtMap[ci] = formattedMsgs.length - 1;
                 continue;
             }
         }
@@ -145,11 +151,16 @@ export function formatToAnthropic(messages, config = {}) {
         const content = payload.text || (typeof m.content === 'string' ? m.content : JSON.stringify(m.content));
         if (!hasNonEmptyMessageContent(content)) continue;
         _mergeOrPush(formattedMsgs, role, [{ type: 'text', text: content }]);
+        srcToFmtMap[ci] = formattedMsgs.length - 1;
     }
 
     // Ensure first message is user role
     if (formattedMsgs.length === 0 || formattedMsgs[0].role !== 'user') {
         formattedMsgs.unshift({ role: 'user', content: [{ type: 'text', text: 'Start' }] });
+        // Adjust mapping indices after unshift
+        for (let i = 0; i < srcToFmtMap.length; i++) {
+            if (srcToFmtMap[i] >= 0) srcToFmtMap[i]++;
+        }
     }
 
     // Apply cache_control breakpoints
@@ -157,23 +168,15 @@ export function formatToAnthropic(messages, config = {}) {
     // Custom TTL strings are NOT supported by the API and would be silently ignored or rejected.
     if (config.caching) {
         const _cacheCtrl = { type: 'ephemeral' };
-        let fmtIdx = 0;
-        for (let ci = 0; ci < chatMsgs.length && fmtIdx < formattedMsgs.length; ci++) {
-            const srcMsg = chatMsgs[ci];
-            if (ci > 0) {
-                const prevRole = chatMsgs[ci - 1].role === 'assistant' ? 'assistant' : 'user';
-                const curRole = srcMsg.role === 'assistant' ? 'assistant' : 'user';
-                if (curRole !== prevRole) fmtIdx++;
-            }
-            if (fmtIdx >= formattedMsgs.length) break;
-
-            if (srcMsg.cachePoint) {
-                const fMsg = formattedMsgs[fmtIdx];
-                if (Array.isArray(fMsg.content) && fMsg.content.length > 0) {
-                    fMsg.content[fMsg.content.length - 1].cache_control = _cacheCtrl;
-                } else if (typeof fMsg.content === 'string') {
-                    fMsg.content = [{ type: 'text', text: fMsg.content, cache_control: _cacheCtrl }];
-                }
+        for (let ci = 0; ci < chatMsgs.length; ci++) {
+            if (!chatMsgs[ci].cachePoint) continue;
+            const fmtIdx = srcToFmtMap[ci];
+            if (fmtIdx < 0 || fmtIdx >= formattedMsgs.length) continue;
+            const fMsg = formattedMsgs[fmtIdx];
+            if (Array.isArray(fMsg.content) && fMsg.content.length > 0) {
+                fMsg.content[fMsg.content.length - 1].cache_control = _cacheCtrl;
+            } else if (typeof fMsg.content === 'string') {
+                fMsg.content = [{ type: 'text', text: fMsg.content, cache_control: _cacheCtrl }];
             }
         }
     }

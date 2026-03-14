@@ -264,8 +264,8 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
                     'model',
                     // tool / function injection — could execute arbitrary tool definitions the user didn't intend
                     'tools', 'functions', 'function_call', 'tool_choice', 'tool_config',
-                    // system-level overrides
-                    'system', 'system_instruction',
+                    // system-level overrides (both snake_case and camelCase variants)
+                    'system', 'system_instruction', 'systemInstruction',
                 ];
                 /** @type {string[]} */
                 const stripped = [];
@@ -347,7 +347,7 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
         try {
             const _origUrl = new URL(effectiveUrl);
             const _proxyBase = new URL(_proxyUrl);
-            effectiveUrl = _proxyBase.origin + _origUrl.pathname + _origUrl.search;
+            effectiveUrl = _proxyBase.origin + _proxyBase.pathname.replace(/\/+$/, '') + _origUrl.pathname + _origUrl.search;
             console.log(`[Cupcake PM] CORS Proxy active → ${effectiveUrl}`);
         } catch (_e) {
             console.warn(`[Cupcake PM] Invalid proxyUrl: ${_proxyUrl}`, _e);

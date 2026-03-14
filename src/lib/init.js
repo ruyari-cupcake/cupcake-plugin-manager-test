@@ -42,6 +42,7 @@ import {
 import { collectStream, checkStreamCapability } from './stream-utils.js';
 import { ensureCopilotApiToken, setCopilotGetArgFn, setCopilotFetchFn } from './copilot-token.js';
 import { SettingsBackup } from './settings-backup.js';
+import { parseCustomModelsValue, normalizeCustomModel } from './custom-model-serialization.js';
 import { SubPluginManager, setExposeScopeFunction } from './sub-plugin-manager.js';
 import { fetchCustom } from './fetch-custom.js';
 import { handleRequest, fetchByProviderId } from './router.js';
@@ -231,7 +232,7 @@ setupCupcakeAPI();
         try {
             const customModelsJson = await safeGetArg('cpm_custom_models', '[]');
             try {
-                state.CUSTOM_MODELS_CACHE = JSON.parse(customModelsJson);
+                state.CUSTOM_MODELS_CACHE = parseCustomModelsValue(customModelsJson).map(model => normalizeCustomModel(model));
                 if (!Array.isArray(state.CUSTOM_MODELS_CACHE)) state.CUSTOM_MODELS_CACHE = [];
             } catch (_e) {
                 state.CUSTOM_MODELS_CACHE = [];
@@ -369,11 +370,22 @@ setupCupcakeAPI();
                 if (!rootDoc) {
                     console.log('[CPM] Hotkey registration skipped: main DOM permission not granted.');
                 } else {
-                    await rootDoc.addEventListener('keydown', (/** @type {any} */ e) => {
+                    // ─ Remove previously registered handlers to prevent double-firing on re-init ─
+                    if (/** @type {any} */ (cpmWindow)._cpmKeydownHandler) {
+                        try { await rootDoc.removeEventListener('keydown', /** @type {any} */ (cpmWindow)._cpmKeydownHandler); } catch (_) {}
+                    }
+                    if (/** @type {any} */ (cpmWindow)._cpmAddPointerHandler) {
+                        try { await rootDoc.removeEventListener('pointerdown', /** @type {any} */ (cpmWindow)._cpmAddPointerHandler); } catch (_) {}
+                        try { await rootDoc.removeEventListener('pointerup', /** @type {any} */ (cpmWindow)._cpmRemovePointerHandler); } catch (_) {}
+                        try { await rootDoc.removeEventListener('pointercancel', /** @type {any} */ (cpmWindow)._cpmRemovePointerHandler); } catch (_) {}
+                    }
+
+                    const _keydownHandler = (/** @type {any} */ e) => {
                         if (e.ctrlKey && e.shiftKey && e.altKey && (e.key === 'p' || e.key === 'P')) {
                             openCpmSettings();
                         }
-                    });
+                    };
+                    await rootDoc.addEventListener('keydown', _keydownHandler);
 
                     // 4-finger touch gesture for mobile
                     let activePointersCount = 0;
@@ -394,6 +406,11 @@ setupCupcakeAPI();
                     await rootDoc.addEventListener('pointerdown', addPointer);
                     await rootDoc.addEventListener('pointerup', removePointer);
                     await rootDoc.addEventListener('pointercancel', removePointer);
+
+                    // Store handler references for cleanup on re-init
+                    /** @type {any} */ (cpmWindow)._cpmKeydownHandler = _keydownHandler;
+                    /** @type {any} */ (cpmWindow)._cpmAddPointerHandler = addPointer;
+                    /** @type {any} */ (cpmWindow)._cpmRemovePointerHandler = removePointer;
                 }
             }
             _phaseDone('hotkey-registration');

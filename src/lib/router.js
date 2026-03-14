@@ -229,12 +229,26 @@ export async function handleRequest(args, activeModelDef, abortSignal) {
             if (bridgeCapable) {
                 /** @type {any[]} */
                 const _chunks = [];
+                let _chunksTotalBytes = 0;
+                let _chunksOverflow = false;
+                const _STREAM_LOG_MAX_BYTES = 512 * 1024; // 512 KB cap for logging buffer
                 const _streamDecoder = new TextDecoder();
                 const _streamStartTime = _startTime;
                 const _streamModelName = _displayName;
                 const _streamShowTokens = _showTokens;
                 result.content = result.content.pipeThrough(new TransformStream({
-                    transform(chunk, controller) { _chunks.push(chunk); controller.enqueue(chunk); },
+                    transform(chunk, controller) {
+                        controller.enqueue(chunk);
+                        if (!_chunksOverflow) {
+                            const _sz = chunk.byteLength || chunk.length || 0;
+                            if (_chunksTotalBytes + _sz <= _STREAM_LOG_MAX_BYTES) {
+                                _chunks.push(chunk);
+                                _chunksTotalBytes += _sz;
+                            } else {
+                                _chunksOverflow = true;
+                            }
+                        }
+                    },
                     flush() {
                         const full = _chunks.map((c) => {
                             if (typeof c === 'string') return c;
@@ -242,7 +256,7 @@ export async function handleRequest(args, activeModelDef, abortSignal) {
                             if (c instanceof ArrayBuffer) return _streamDecoder.decode(new Uint8Array(c), { stream: true });
                             return String(c ?? '');
                         }).join('') + _streamDecoder.decode();
-                        _logResponse(full, '📥 Streamed Response');
+                        _logResponse(_chunksOverflow ? full + '\n[...truncated for logging]' : full, '📥 Streamed Response');
                         const streamUsage = _takeTokenUsage(_reqId, true);
                         if (_streamShowTokens && streamUsage) _showTokenUsageToast(_streamModelName, streamUsage, Date.now() - _streamStartTime);
                     }

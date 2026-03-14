@@ -1121,7 +1121,10 @@ var CupcakeProviderManager = (function (exports) {
 
         /** @type {any[]} */
         const formattedMsgs = [];
-        for (const m of chatMsgs) {
+        /** @type {number[]} — maps each chatMsgs[i] to its formattedMsgs index, or -1 if skipped */
+        const srcToFmtMap = new Array(chatMsgs.length).fill(-1);
+        for (let ci = 0; ci < chatMsgs.length; ci++) {
+            const m = chatMsgs[ci];
             const role = m.role === 'assistant' ? 'assistant' : 'user';
             const payload = extractNormalizedMessagePayload(m);
 
@@ -1152,10 +1155,12 @@ var CupcakeProviderManager = (function (exports) {
                 const contentParts = [...imageParts, ...textParts];
                 if (contentParts.length > 0) {
                     _mergeOrPush(formattedMsgs, role, contentParts);
+                    srcToFmtMap[ci] = formattedMsgs.length - 1;
                 } else {
                     const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
                     if (!hasNonEmptyMessageContent(content)) continue;
                     _mergeOrPush(formattedMsgs, role, [{ type: 'text', text: content }]);
+                    srcToFmtMap[ci] = formattedMsgs.length - 1;
                 }
                 continue;
             }
@@ -1193,6 +1198,7 @@ var CupcakeProviderManager = (function (exports) {
 
                 if (contentParts.length > 0) {
                     _mergeOrPush(formattedMsgs, role, contentParts);
+                    srcToFmtMap[ci] = formattedMsgs.length - 1;
                     continue;
                 }
             }
@@ -1201,11 +1207,16 @@ var CupcakeProviderManager = (function (exports) {
             const content = payload.text || (typeof m.content === 'string' ? m.content : JSON.stringify(m.content));
             if (!hasNonEmptyMessageContent(content)) continue;
             _mergeOrPush(formattedMsgs, role, [{ type: 'text', text: content }]);
+            srcToFmtMap[ci] = formattedMsgs.length - 1;
         }
 
         // Ensure first message is user role
         if (formattedMsgs.length === 0 || formattedMsgs[0].role !== 'user') {
             formattedMsgs.unshift({ role: 'user', content: [{ type: 'text', text: 'Start' }] });
+            // Adjust mapping indices after unshift
+            for (let i = 0; i < srcToFmtMap.length; i++) {
+                if (srcToFmtMap[i] >= 0) srcToFmtMap[i]++;
+            }
         }
 
         // Apply cache_control breakpoints
@@ -1213,23 +1224,15 @@ var CupcakeProviderManager = (function (exports) {
         // Custom TTL strings are NOT supported by the API and would be silently ignored or rejected.
         if (config.caching) {
             const _cacheCtrl = { type: 'ephemeral' };
-            let fmtIdx = 0;
-            for (let ci = 0; ci < chatMsgs.length && fmtIdx < formattedMsgs.length; ci++) {
-                const srcMsg = chatMsgs[ci];
-                if (ci > 0) {
-                    const prevRole = chatMsgs[ci - 1].role === 'assistant' ? 'assistant' : 'user';
-                    const curRole = srcMsg.role === 'assistant' ? 'assistant' : 'user';
-                    if (curRole !== prevRole) fmtIdx++;
-                }
-                if (fmtIdx >= formattedMsgs.length) break;
-
-                if (srcMsg.cachePoint) {
-                    const fMsg = formattedMsgs[fmtIdx];
-                    if (Array.isArray(fMsg.content) && fMsg.content.length > 0) {
-                        fMsg.content[fMsg.content.length - 1].cache_control = _cacheCtrl;
-                    } else if (typeof fMsg.content === 'string') {
-                        fMsg.content = [{ type: 'text', text: fMsg.content, cache_control: _cacheCtrl }];
-                    }
+            for (let ci = 0; ci < chatMsgs.length; ci++) {
+                if (!chatMsgs[ci].cachePoint) continue;
+                const fmtIdx = srcToFmtMap[ci];
+                if (fmtIdx < 0 || fmtIdx >= formattedMsgs.length) continue;
+                const fMsg = formattedMsgs[fmtIdx];
+                if (Array.isArray(fMsg.content) && fMsg.content.length > 0) {
+                    fMsg.content[fMsg.content.length - 1].cache_control = _cacheCtrl;
+                } else if (typeof fMsg.content === 'string') {
+                    fMsg.content = [{ type: 'text', text: fMsg.content, cache_control: _cacheCtrl }];
                 }
             }
         }
@@ -3331,6 +3334,11 @@ var CupcakeProviderManager = (function (exports) {
      * @returns {Promise<string>} API token or empty string on failure
      */
     async function ensureCopilotApiToken() {
+        // Negative cache: if a recent exchange failed, don't retry until expiry
+        if (!_copilotTokenCache.token && _copilotTokenCache.expiry > 0 && Date.now() < _copilotTokenCache.expiry) {
+            return '';
+        }
+
         // Return cached token if still valid (with 60s safety margin)
         if (_copilotTokenCache.token && Date.now() < _copilotTokenCache.expiry - 60000) {
             return _copilotTokenCache.token;
@@ -4719,8 +4727,8 @@ var CupcakeProviderManager = (function (exports) {
                 if (mainUpdateInfo) {
                     const delay = updatesAvailable.length > 0 ? 1500 : 0;
                     setTimeout(async () => {
-                            try { await this._rememberPendingMainUpdate(mainUpdateInfo.remoteVersion, mainUpdateInfo.changes); } catch (_) { }
-                        try { await this.safeMainPluginUpdate(mainUpdateInfo.remoteVersion, mainUpdateInfo.changes); } catch (_) { }
+                            try { await this._rememberPendingMainUpdate(mainUpdateInfo.remoteVersion, mainUpdateInfo.changes); } catch (e) { console.warn('[CPM AutoCheck] _rememberPendingMainUpdate failed:', e); }
+                        try { await this.safeMainPluginUpdate(mainUpdateInfo.remoteVersion, mainUpdateInfo.changes); } catch (e) { console.warn('[CPM AutoCheck] safeMainPluginUpdate failed:', e); }
                     }, delay);
                 }
             } catch (/** @type {any} */ e) {
@@ -6064,8 +6072,8 @@ var CupcakeProviderManager = (function (exports) {
                         'model',
                         // tool / function injection — could execute arbitrary tool definitions the user didn't intend
                         'tools', 'functions', 'function_call', 'tool_choice', 'tool_config',
-                        // system-level overrides
-                        'system', 'system_instruction',
+                        // system-level overrides (both snake_case and camelCase variants)
+                        'system', 'system_instruction', 'systemInstruction',
                     ];
                     /** @type {string[]} */
                     const stripped = [];
@@ -6147,7 +6155,7 @@ var CupcakeProviderManager = (function (exports) {
             try {
                 const _origUrl = new URL(effectiveUrl);
                 const _proxyBase = new URL(_proxyUrl);
-                effectiveUrl = _proxyBase.origin + _origUrl.pathname + _origUrl.search;
+                effectiveUrl = _proxyBase.origin + _proxyBase.pathname.replace(/\/+$/, '') + _origUrl.pathname + _origUrl.search;
                 console.log(`[Cupcake PM] CORS Proxy active → ${effectiveUrl}`);
             } catch (_e) {
                 console.warn(`[Cupcake PM] Invalid proxyUrl: ${_proxyUrl}`, _e);
@@ -6642,12 +6650,26 @@ var CupcakeProviderManager = (function (exports) {
                 if (bridgeCapable) {
                     /** @type {any[]} */
                     const _chunks = [];
+                    let _chunksTotalBytes = 0;
+                    let _chunksOverflow = false;
+                    const _STREAM_LOG_MAX_BYTES = 512 * 1024; // 512 KB cap for logging buffer
                     const _streamDecoder = new TextDecoder();
                     const _streamStartTime = _startTime;
                     const _streamModelName = _displayName;
                     const _streamShowTokens = _showTokens;
                     result.content = result.content.pipeThrough(new TransformStream({
-                        transform(chunk, controller) { _chunks.push(chunk); controller.enqueue(chunk); },
+                        transform(chunk, controller) {
+                            controller.enqueue(chunk);
+                            if (!_chunksOverflow) {
+                                const _sz = chunk.byteLength || chunk.length || 0;
+                                if (_chunksTotalBytes + _sz <= _STREAM_LOG_MAX_BYTES) {
+                                    _chunks.push(chunk);
+                                    _chunksTotalBytes += _sz;
+                                } else {
+                                    _chunksOverflow = true;
+                                }
+                            }
+                        },
                         flush() {
                             const full = _chunks.map((c) => {
                                 if (typeof c === 'string') return c;
@@ -6655,7 +6677,7 @@ var CupcakeProviderManager = (function (exports) {
                                 if (c instanceof ArrayBuffer) return _streamDecoder.decode(new Uint8Array(c), { stream: true });
                                 return String(c ?? '');
                             }).join('') + _streamDecoder.decode();
-                            _logResponse(full, '📥 Streamed Response');
+                            _logResponse(_chunksOverflow ? full + '\n[...truncated for logging]' : full, '📥 Streamed Response');
                             const streamUsage = _takeTokenUsage(_reqId, true);
                             if (_streamShowTokens && streamUsage) showTokenUsageToast(_streamModelName, streamUsage, Date.now() - _streamStartTime);
                         }
@@ -6827,6 +6849,123 @@ var CupcakeProviderManager = (function (exports) {
     }
 
     // @ts-check
+
+    const CUSTOM_MODEL_DEFAULTS = {
+        streaming: false,
+    };
+
+    /** @param {any} value */
+    function toText(value) {
+        return value == null ? '' : String(value);
+    }
+
+    /** @param {any} value */
+    function toInteger(value) {
+        const parsed = typeof value === 'number' ? value : parseInt(String(value ?? ''), 10);
+        return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    /** @param {any} value */
+    function toBool(value) {
+        if (typeof value === 'boolean') return value;
+        if (typeof value === 'number') return value !== 0;
+        if (typeof value === 'string') {
+            const normalized = value.trim().toLowerCase();
+            return normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on';
+        }
+        return false;
+    }
+
+    /**
+     * @param {any} value
+     * @returns {Array<Record<string, any>>}
+     */
+    function parseCustomModelsValue(value) {
+        if (Array.isArray(value)) return value.filter(entry => entry && typeof entry === 'object');
+        if (typeof value === 'string') {
+            try {
+                const parsed = JSON.parse(value);
+                return Array.isArray(parsed) ? parsed.filter(entry => entry && typeof entry === 'object') : [];
+            } catch {
+                return [];
+            }
+        }
+        return [];
+    }
+
+    /**
+     * @param {Record<string, any>} raw
+     * @param {{ includeKey?: boolean, includeUniqueId?: boolean, includeTag?: boolean, includeExportMarker?: boolean }} [options]
+     */
+    function normalizeCustomModel(raw, options = {}) {
+        const {
+            includeKey = true,
+            includeUniqueId = true,
+            includeTag = true,
+            includeExportMarker = false,
+        } = options;
+
+        const hasStreaming = raw && Object.prototype.hasOwnProperty.call(raw, 'streaming');
+        const hasDecoupled = raw && Object.prototype.hasOwnProperty.call(raw, 'decoupled');
+        const streaming = hasStreaming ? toBool(raw.streaming) : (hasDecoupled ? !toBool(raw.decoupled) : CUSTOM_MODEL_DEFAULTS.streaming);
+        const decoupled = hasDecoupled ? toBool(raw.decoupled) : !streaming;
+
+        /** @type {Record<string, any>} */
+        const normalized = {
+            name: toText(raw?.name),
+            model: toText(raw?.model),
+            url: toText(raw?.url),
+            proxyUrl: toText(raw?.proxyUrl).trim(),
+            format: toText(raw?.format || 'openai') || 'openai',
+            tok: toText(raw?.tok || 'o200k_base') || 'o200k_base',
+            responsesMode: toText(raw?.responsesMode || 'auto') || 'auto',
+            thinking: toText(raw?.thinking || 'none') || 'none',
+            thinkingBudget: toInteger(raw?.thinkingBudget),
+            maxOutputLimit: toInteger(raw?.maxOutputLimit),
+            promptCacheRetention: toText(raw?.promptCacheRetention || 'none') || 'none',
+            reasoning: toText(raw?.reasoning || 'none') || 'none',
+            verbosity: toText(raw?.verbosity || 'none') || 'none',
+            effort: toText(raw?.effort || 'none') || 'none',
+            sysfirst: toBool(raw?.sysfirst),
+            mergesys: toBool(raw?.mergesys),
+            altrole: toBool(raw?.altrole),
+            mustuser: toBool(raw?.mustuser),
+            maxout: toBool(raw?.maxout),
+            streaming,
+            decoupled,
+            thought: toBool(raw?.thought),
+            adaptiveThinking: toBool(raw?.adaptiveThinking),
+            customParams: toText(raw?.customParams),
+        };
+
+        if (includeKey) normalized.key = toText(raw?.key);
+        if (includeUniqueId && raw?.uniqueId) normalized.uniqueId = toText(raw.uniqueId);
+        if (includeTag && raw?._tag) normalized._tag = raw._tag;
+        if (includeExportMarker) normalized._cpmModelExport = true;
+
+        return normalized;
+    }
+
+    /** @param {Record<string, any>} raw */
+    function serializeCustomModelExport(raw) {
+        return normalizeCustomModel(raw, {
+            includeKey: false,
+            includeUniqueId: false,
+            includeTag: false,
+            includeExportMarker: true,
+        });
+    }
+
+    /**
+     * @param {any} value
+     * @param {{ includeKey?: boolean }} [options]
+     */
+    function serializeCustomModelsSetting(value, options = {}) {
+        const { includeKey = false } = options;
+        return JSON.stringify(parseCustomModelsValue(value).map(model => normalizeCustomModel(model, { includeKey })));
+    }
+
+    // @ts-check
     /**
      * settings-ui-custom-models.js — Custom Models Manager UI.
      * Extracted from settings-ui.js for modularity.
@@ -6979,7 +7118,7 @@ var CupcakeProviderManager = (function (exports) {
     // ── Read all editor values into a model object ──
     /** @param {string} uid */
     function readEditorValues(uid) {
-        return {
+        return normalizeCustomModel({
             uniqueId: uid,
             name: getField('cpm-cm-name').value,
             model: getField('cpm-cm-model').value,
@@ -7006,7 +7145,7 @@ var CupcakeProviderManager = (function (exports) {
             thought: getCheckbox('cpm-cm-thought').checked,
             adaptiveThinking: getCheckbox('cpm-cm-adaptive-thinking').checked,
             customParams: getField('cpm-cm-custom-params').value,
-        };
+        });
     }
 
     // ── Custom Models Manager logic ──
@@ -7045,7 +7184,7 @@ var CupcakeProviderManager = (function (exports) {
                 const idx = getDatasetIndex(e.target);
                 const m = /** @type {Record<string, any>} */ (state.CUSTOM_MODELS_CACHE[idx]);
                 if (!m) return;
-                const exportModel = /** @type {Record<string, any>} */ ({ ...m }); delete exportModel.key; exportModel._cpmModelExport = true;
+                const exportModel = serializeCustomModelExport(m);
                 const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(exportModel, null, 2));
                 const a = document.createElement('a'); a.href = dataStr;
                 a.download = `${(m.name || 'custom_model').replace(/[^a-zA-Z0-9가-힣_-]/g, '_')}.cpm-model.json`;
@@ -7083,9 +7222,9 @@ var CupcakeProviderManager = (function (exports) {
                     try {
                         const data = JSON.parse(await file.text());
                         if (!data._cpmModelExport || !data.name) { errorCount++; continue; }
-                        data.uniqueId = 'custom_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
-                        delete data._cpmModelExport; if (!data.key) data.key = '';
-                        state.CUSTOM_MODELS_CACHE.push(data); importedCount++;
+                        const normalized = normalizeCustomModel(data, { includeKey: true, includeUniqueId: false, includeTag: false });
+                        normalized.uniqueId = 'custom_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+                        state.CUSTOM_MODELS_CACHE.push(normalized); importedCount++;
                     } catch { errorCount++; }
                 }
                 if (importedCount > 0) {
@@ -7391,6 +7530,83 @@ var CupcakeProviderManager = (function (exports) {
      * Extracted from settings-ui.js for modularity.
      */
 
+    const CPM_EXPORT_VERSION = 2;
+    const CPM_PLUGIN_STORAGE_KEY_PATTERN = /^cpm[_-]/;
+    const KNOWN_CPM_PLUGIN_STORAGE_KEYS = [
+        'cpm_installed_subplugins',
+        'cpm_settings_backup',
+        'cpm_last_version_check',
+        'cpm_last_main_version_check',
+        'cpm_pending_main_update',
+        'cpm_last_boot_status',
+        'cpm_last_main_update_flush',
+    ];
+
+    /**
+     * @param {string} key
+     * @param {any} value
+     */
+    function normalizeManagedSettingValue(key, value) {
+        return key === 'cpm_custom_models'
+            ? serializeCustomModelsSetting(value, { includeKey: true })
+            : (value ?? '');
+    }
+
+    async function getCpmPluginStorageKeys() {
+        const keySet = new Set(KNOWN_CPM_PLUGIN_STORAGE_KEYS);
+        try {
+            if (typeof Risu?.pluginStorage?.keys === 'function') {
+                const dynamicKeys = await Risu.pluginStorage.keys();
+                for (const key of dynamicKeys || []) {
+                    if (CPM_PLUGIN_STORAGE_KEY_PATTERN.test(String(key))) keySet.add(String(key));
+                }
+            }
+        } catch (_) { /* ignore */ }
+        return [...keySet];
+    }
+
+    async function exportPluginStorageSnapshot() {
+        const snapshot = /** @type {Record<string, any>} */ ({});
+        for (const key of await getCpmPluginStorageKeys()) {
+            try {
+                const value = await Risu.pluginStorage.getItem(key);
+                if (value !== undefined && value !== null) snapshot[key] = value;
+            } catch (_) { /* ignore */ }
+        }
+        return snapshot;
+    }
+
+    /** @param {Record<string, any>} snapshot */
+    async function importPluginStorageSnapshot(snapshot) {
+        const existingKeys = await getCpmPluginStorageKeys();
+        for (const key of existingKeys) {
+            if (Object.prototype.hasOwnProperty.call(snapshot, key)) continue;
+            try {
+                if (typeof Risu.pluginStorage.removeItem === 'function') await Risu.pluginStorage.removeItem(key);
+                else await Risu.pluginStorage.setItem(key, '');
+            } catch (_) { /* ignore */ }
+        }
+
+        for (const [key, value] of Object.entries(snapshot)) {
+            if (!CPM_PLUGIN_STORAGE_KEY_PATTERN.test(key)) continue;
+            await Risu.pluginStorage.setItem(key, String(value ?? ''));
+        }
+    }
+
+    /** @param {any} importedData */
+    function normalizeImportEnvelope(importedData) {
+        if (!importedData || typeof importedData !== 'object' || Array.isArray(importedData)) {
+            throw new Error('설정 파일 형식이 올바르지 않습니다.');
+        }
+        if ('settings' in importedData || 'pluginStorage' in importedData || '_cpmExportVersion' in importedData) {
+            return {
+                settings: importedData.settings && typeof importedData.settings === 'object' ? importedData.settings : {},
+                pluginStorage: importedData.pluginStorage && typeof importedData.pluginStorage === 'object' ? importedData.pluginStorage : {},
+            };
+        }
+        return { settings: importedData, pluginStorage: {} };
+    }
+
     // ── API View Panel ──
     function initApiViewPanel() {
         const _renderApiViewEntry = (/** @type {any} */ r) => {
@@ -7459,11 +7675,17 @@ var CupcakeProviderManager = (function (exports) {
     // ── Export/Import ──
     function initExportImport(/** @type {any} */ setVal, /** @type {any} */ openCpmSettings) {
         document.getElementById('cpm-export-btn')?.addEventListener('click', async () => {
-            const exportData = /** @type {Record<string, any>} */ ({});
+            const exportSettings = /** @type {Record<string, any>} */ ({});
             for (const key of getManagedSettingKeys()) {
                 const val = await safeGetArg(key);
-                if (val !== undefined && val !== '') exportData[key] = val;
+                exportSettings[key] = normalizeManagedSettingValue(key, val);
             }
+            const exportData = {
+                _cpmExportVersion: CPM_EXPORT_VERSION,
+                exportedAt: new Date().toISOString(),
+                settings: exportSettings,
+                pluginStorage: await exportPluginStorageSnapshot(),
+            };
             const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(exportData, null, 2));
             const a = document.createElement('a'); a.href = dataStr; a.download = 'cupcake_pm_settings.json';
             document.body.appendChild(a); a.click(); a.remove();
@@ -7481,14 +7703,27 @@ var CupcakeProviderManager = (function (exports) {
                         const rawText = event.target?.result;
                         if (typeof rawText !== 'string') throw new Error('설정 파일 형식이 올바르지 않습니다.');
                         const importedData = JSON.parse(rawText);
-                        for (const [key, value] of Object.entries(importedData)) {
-                            await setVal(key, value);
+                        const envelope = normalizeImportEnvelope(importedData);
+                        for (const [key, value] of Object.entries(envelope.settings)) {
+                            const normalizedValue = normalizeManagedSettingValue(key, value);
+                            await setVal(key, normalizedValue);
                             /** @type {HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null} */
                             const el = /** @type {HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null} */ (document.getElementById(key));
                             if (el) {
-                                if ('type' in el && el.type === 'checkbox') /** @type {HTMLInputElement} */ (el).checked = (value === true || String(value).toLowerCase() === 'true');
-                                else el.value = String(value ?? '');
+                                if ('type' in el && el.type === 'checkbox') /** @type {HTMLInputElement} */ (el).checked = (normalizedValue === true || String(normalizedValue).toLowerCase() === 'true');
+                                else el.value = String(normalizedValue ?? '');
                             }
+                        }
+                        const prevPluginIds = Array.isArray(SubPluginManager.plugins) ? SubPluginManager.plugins.map(p => p.id) : [];
+                        await importPluginStorageSnapshot(envelope.pluginStorage || {});
+                        for (const pluginId of prevPluginIds) {
+                            try { SubPluginManager.unloadPlugin(pluginId); } catch (_) { /* ignore */ }
+                        }
+                        if (Object.prototype.hasOwnProperty.call(envelope.pluginStorage || {}, 'cpm_installed_subplugins')) {
+                            try {
+                                await SubPluginManager.loadRegistry();
+                                if (typeof SubPluginManager.executeEnabled === 'function') await SubPluginManager.executeEnabled();
+                            } catch (_) { /* ignore */ }
                         }
                         alert('설정을 성공적으로 불러왔습니다!');
                         openCpmSettings();
@@ -8168,7 +8403,7 @@ var CupcakeProviderManager = (function (exports) {
             try {
                 const customModelsJson = await safeGetArg('cpm_custom_models', '[]');
                 try {
-                    state.CUSTOM_MODELS_CACHE = JSON.parse(customModelsJson);
+                    state.CUSTOM_MODELS_CACHE = parseCustomModelsValue(customModelsJson).map(model => normalizeCustomModel(model));
                     if (!Array.isArray(state.CUSTOM_MODELS_CACHE)) state.CUSTOM_MODELS_CACHE = [];
                 } catch (_e) {
                     state.CUSTOM_MODELS_CACHE = [];
@@ -8306,11 +8541,22 @@ var CupcakeProviderManager = (function (exports) {
                     if (!rootDoc) {
                         console.log('[CPM] Hotkey registration skipped: main DOM permission not granted.');
                     } else {
-                        await rootDoc.addEventListener('keydown', (/** @type {any} */ e) => {
+                        // ─ Remove previously registered handlers to prevent double-firing on re-init ─
+                        if (/** @type {any} */ (cpmWindow)._cpmKeydownHandler) {
+                            try { await rootDoc.removeEventListener('keydown', /** @type {any} */ (cpmWindow)._cpmKeydownHandler); } catch (_) {}
+                        }
+                        if (/** @type {any} */ (cpmWindow)._cpmAddPointerHandler) {
+                            try { await rootDoc.removeEventListener('pointerdown', /** @type {any} */ (cpmWindow)._cpmAddPointerHandler); } catch (_) {}
+                            try { await rootDoc.removeEventListener('pointerup', /** @type {any} */ (cpmWindow)._cpmRemovePointerHandler); } catch (_) {}
+                            try { await rootDoc.removeEventListener('pointercancel', /** @type {any} */ (cpmWindow)._cpmRemovePointerHandler); } catch (_) {}
+                        }
+
+                        const _keydownHandler = (/** @type {any} */ e) => {
                             if (e.ctrlKey && e.shiftKey && e.altKey && (e.key === 'p' || e.key === 'P')) {
                                 openCpmSettings();
                             }
-                        });
+                        };
+                        await rootDoc.addEventListener('keydown', _keydownHandler);
 
                         // 4-finger touch gesture for mobile
                         let activePointersCount = 0;
@@ -8331,6 +8577,11 @@ var CupcakeProviderManager = (function (exports) {
                         await rootDoc.addEventListener('pointerdown', addPointer);
                         await rootDoc.addEventListener('pointerup', removePointer);
                         await rootDoc.addEventListener('pointercancel', removePointer);
+
+                        // Store handler references for cleanup on re-init
+                        /** @type {any} */ (cpmWindow)._cpmKeydownHandler = _keydownHandler;
+                        /** @type {any} */ (cpmWindow)._cpmAddPointerHandler = addPointer;
+                        /** @type {any} */ (cpmWindow)._cpmRemovePointerHandler = removePointer;
                     }
                 }
                 _phaseDone('hotkey-registration');
