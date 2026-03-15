@@ -541,7 +541,6 @@ describe('formatToGemini edge cases', () => {
 describe('KeyPool edge cases', () => {
     beforeEach(() => {
         KeyPool._pools = {};
-        KeyPool._cooldowns = {};
         KeyPool._getArgFn = null;
     });
 
@@ -597,13 +596,6 @@ describe('KeyPool edge cases', () => {
 
     it('_parseJsonCredentials returns empty for unparseable non-object', () => {
         expect(KeyPool._parseJsonCredentials('"just a string"')).toEqual([]);
-    });
-
-    it('pickJson returns empty during cooldown', async () => {
-        KeyPool._cooldowns = { test_key: Date.now() + 60000 };
-        KeyPool._getArgFn = async () => '';
-        const result = await KeyPool.pickJson('test_key');
-        expect(result).toBe('');
     });
 
     it('pickJson returns empty when credentials parse to empty', async () => {

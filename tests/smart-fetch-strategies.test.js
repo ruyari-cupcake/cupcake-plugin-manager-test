@@ -529,47 +529,15 @@ describe('smartNativeFetch — Compatibility mode (user toggle)', () => {
     });
 });
 
-describe('smartNativeFetch — Compatibility mode (auto-detected via checkStreamCapability)', () => {
+describe('smartNativeFetch — Copilot nativeFetch exemption (manual compat mode off)', () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        // User toggle OFF, but stream capability returns false → auto compat mode
+        // User toggle OFF → compat mode INACTIVE
         mockSafeGetBoolArg.mockResolvedValue(false);
-        vi.mocked(checkStreamCapability).mockResolvedValue(false);
         globalThis.fetch = vi.fn().mockRejectedValue(new Error('CORS'));
     });
 
-    it('auto-detects compat mode and skips Google nativeFetch', async () => {
-        mockRisu.risuFetch.mockResolvedValue({
-            status: 200,
-            data: new TextEncoder().encode('{"ok":true}'),
-            headers: { 'content-type': 'application/json' },
-        });
-
-        const res = await smartNativeFetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: '{"contents":[]}',
-        });
-
-        expect(res.status).toBe(200);
-        expect(mockRisu.nativeFetch).not.toHaveBeenCalled();
-    });
-
-    it('auto-detects compat mode and skips Strategy 3 nativeFetch', async () => {
-        mockRisu.risuFetch.mockResolvedValue({ status: 0, data: null });
-
-        await expect(
-            smartNativeFetch('https://api.openai.com/v1/chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: '{"messages":[]}',
-            })
-        ).rejects.toThrow('All fetch strategies failed');
-
-        expect(mockRisu.nativeFetch).not.toHaveBeenCalled();
-    });
-
-    it('auto-detects compat mode but still tries Copilot nativeFetch first', async () => {
+    it('tries Copilot nativeFetch first even without compat mode', async () => {
         // nativeFetch returns undefined (no mock configured) → unusable → falls through
         mockRisu.risuFetch.mockResolvedValue({
             status: 200,
@@ -682,8 +650,6 @@ describe('smartNativeFetch — Compatibility mode caching', () => {
 
         // safeGetBoolArg should only be called once (cached after first call)
         expect(mockSafeGetBoolArg).toHaveBeenCalledTimes(1);
-        // checkStreamCapability should only be called once (cached after first call)
-        expect(checkStreamCapability).toHaveBeenCalledTimes(1);
     });
 
     it('_resetCompatibilityCache clears cached values', async () => {
@@ -706,7 +672,6 @@ describe('smartNativeFetch — Compatibility mode caching', () => {
 
         // Both should be called twice now (once before reset, once after)
         expect(mockSafeGetBoolArg).toHaveBeenCalledTimes(2);
-        expect(checkStreamCapability).toHaveBeenCalledTimes(2);
     });
 });
 

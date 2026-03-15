@@ -12,10 +12,6 @@
 export const KeyPool = {
     /** @type {Record<string, any>} */
     _pools: {},
-    /** @type {Record<string, number>} Cooldown timestamps after key exhaustion */
-    _cooldowns: {},
-    /** Cooldown duration in ms after all keys are exhausted (30 seconds) */
-    _COOLDOWN_MS: 30000,
     /** Injected safeGetArg function. Set via setGetArgFn(). @type {((key: string, defaultValue?: string) => Promise<string>) | null} */
     _getArgFn: null,
 
@@ -33,19 +29,12 @@ export const KeyPool = {
      * @param {string} argName
      */
     async pick(argName) {
-        // Check cooldown — if all keys were recently exhausted, return empty
-        const cooldownUntil = this._cooldowns[argName];
-        if (cooldownUntil && Date.now() < cooldownUntil) {
-            return '';
-        }
-        delete this._cooldowns[argName];
-
         const pool = this._pools[argName];
         if (pool && pool._inline && pool.keys.length > 0) {
             return pool.keys[Math.floor(Math.random() * pool.keys.length)];
         }
         const getArg = this._getArgFn;
-        if (!getArg) throw new Error('KeyPool._getArgFn not set. Call setGetArgFn() first.');
+        if (!getArg) return '';  // No getArgFn → cannot re-parse keys after reset()
         const raw = await getArg(argName);
         if (!pool || pool.lastRaw !== raw || pool.keys.length === 0) {
             this._pools[argName] = {
@@ -113,10 +102,10 @@ export const KeyPool = {
             console.warn(`[KeyPool] 🔄 키 교체: ${argName} (HTTP ${result._status}, 남은 키: ${remaining}개, 시도: ${attempt + 1})`);
 
             if (remaining === 0) {
-                console.warn(`[KeyPool] ⚠️ ${argName}의 모든 키가 소진되었습니다. ${this._COOLDOWN_MS / 1000}초 쿨다운 적용.`);
-                this._cooldowns[argName] = Date.now() + this._COOLDOWN_MS;
+                console.warn(`[KeyPool] ⚠️ ${argName}의 모든 키가 소진되었습니다. 키를 재파싱합니다.`);
                 this.reset(argName);
-                return result;
+                // Don't return — reset() clears lastRaw so next pick() re-parses from settings.
+                // The loop continues and pick() will return a fresh key set.
             }
         }
         return { success: false, content: `[KeyPool] 최대 재시도 횟수(${maxRetries})를 초과했습니다.` };
@@ -186,15 +175,8 @@ export const KeyPool = {
      * @param {string} argName
      */
     async pickJson(argName) {
-        // Check cooldown — if all credentials were recently exhausted, return empty
-        const cooldownUntilJ = this._cooldowns[argName];
-        if (cooldownUntilJ && Date.now() < cooldownUntilJ) {
-            return '';
-        }
-        delete this._cooldowns[argName];
-
         const getArg = this._getArgFn;
-        if (!getArg) throw new Error('KeyPool._getArgFn not set. Call setGetArgFn() first.');
+        if (!getArg) return '';  // No getArgFn → cannot re-parse keys after reset()
         const raw = await getArg(argName);
         const pool = this._pools[argName];
         if (!pool || pool.lastRaw !== raw || pool.keys.length === 0) {
@@ -242,10 +224,9 @@ export const KeyPool = {
             console.warn(`[KeyPool] 🔄 JSON 인증 교체: ${argName} (HTTP ${result._status}, 남은 인증: ${remaining}개, 시도: ${attempt + 1})`);
 
             if (remaining === 0) {
-                console.warn(`[KeyPool] ⚠️ ${argName}의 모든 JSON 인증이 소진되었습니다. ${this._COOLDOWN_MS / 1000}초 쿨다운 적용.`);
-                this._cooldowns[argName] = Date.now() + this._COOLDOWN_MS;
+                console.warn(`[KeyPool] ⚠️ ${argName}의 모든 JSON 인증이 소진되었습니다. 키를 재파싱합니다.`);
                 this.reset(argName);
-                return result;
+                // Don't return — reset() clears lastRaw so next pickJson() re-parses from settings.
             }
         }
         return { success: false, content: `[KeyPool] 최대 재시도 횟수(${maxRetries})를 초과했습니다.` };

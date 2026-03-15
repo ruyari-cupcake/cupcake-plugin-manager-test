@@ -177,32 +177,6 @@ describe('fetchCustom — Compatibility mode & streaming interaction', () => {
         expect(body.stream).toBeFalsy();
     });
 
-    it('forces non-streaming when bridge is not capable', async () => {
-        mockGetBoolArg.mockImplementation(async (key) => {
-            if (key === 'cpm_streaming_enabled') return true;
-            return false;
-        });
-        mockCheckStreamCapability.mockResolvedValueOnce(false);
-        mockFetch.mockResolvedValueOnce(
-            makeOkJsonResponse({ choices: [{ message: { content: 'no-bridge-ok' } }] })
-        );
-
-        const result = await fetchCustom(
-            {
-                url: 'https://api.openai.com/v1/chat/completions',
-                key: 'sk-test',
-                model: 'gpt-4o',
-                format: 'openai',
-                streaming: true,
-            },
-            BASIC_MESSAGES, 0.7, 1024, {},
-        );
-
-        expect(result.success).toBe(true);
-        const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-        expect(body.stream).toBeFalsy();
-    });
-
     it('disables streaming for decoupled models by default', async () => {
         mockGetBoolArg.mockImplementation(async (key) => {
             if (key === 'cpm_streaming_enabled') return true;

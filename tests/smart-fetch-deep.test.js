@@ -761,12 +761,10 @@ describe('smartNativeFetch — internal helpers coverage', () => {
     it('caches compatibility mode lookups across calls', async () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('ok', { status: 200 })));
         h.safeGetBoolArg.mockResolvedValue(false);
-        h.checkStreamCapability.mockResolvedValue(true);
 
         await smartNativeFetch('https://api.openai.com/v1/chat', { method: 'POST', body: '{}' });
         await smartNativeFetch('https://api.openai.com/v1/chat', { method: 'POST', body: '{}' });
 
         expect(h.safeGetBoolArg).toHaveBeenCalledTimes(1);
-        expect(h.checkStreamCapability).toHaveBeenCalledTimes(1);
     });
 });

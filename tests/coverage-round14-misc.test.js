@@ -331,12 +331,6 @@ describe('key-pool.js additional branches — Round 14', () => {
         expect(result.success).toBe(false);
     });
 
-    it('pickJson respects cooldown', async () => {
-        KeyPool._cooldowns['cooldown_test'] = Date.now() + 60000;
-        const key = await KeyPool.pickJson('cooldown_test');
-        expect(key).toBe('');
-        delete KeyPool._cooldowns['cooldown_test'];
-    });
 });
 
 // ─── csp-exec.js ───

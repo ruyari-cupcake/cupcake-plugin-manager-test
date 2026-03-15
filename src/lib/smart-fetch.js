@@ -10,7 +10,7 @@
  */
 import { Risu, safeGetBoolArg } from './shared-state.js';
 import { sanitizeBodyJSON } from './sanitize.js';
-import { checkStreamCapability } from './stream-utils.js';
+// checkStreamCapability removed — compat mode is manual-toggle only now
 
 /**
  * Smart native fetch: 3-strategy fallback for V3 iframe sandbox.
@@ -75,35 +75,24 @@ function _isAbortError(e) {
 /** Cached compatibility mode flag — null = not yet read, boolean = cached value */
 /** @type {boolean | null} */
 let _compatibilityModeCache = null;
-/** Cached bridge capability — null = not yet checked */
-/** @type {boolean | null} */
-let _bridgeCapableCache = null;
 
 /**
  * Reset cached compatibility mode state (for testing).
  */
 export function _resetCompatibilityCache() {
     _compatibilityModeCache = null;
-    _bridgeCapableCache = null;
 }
 
 /**
- * Check if compatibility mode is active (user toggle OR auto-detected).
+ * Check if compatibility mode is active (manual user toggle only).
  * Result is cached for the lifetime of the plugin.
  * @returns {Promise<boolean>}
  */
 async function _isCompatibilityMode() {
-    // User toggle takes priority
     if (_compatibilityModeCache === null) {
         _compatibilityModeCache = await safeGetBoolArg('cpm_compatibility_mode', false);
     }
-    if (_compatibilityModeCache) return true;
-
-    // Auto-detect: if bridge cannot transfer ReadableStream, skip nativeFetch
-    if (_bridgeCapableCache === null) {
-        _bridgeCapableCache = await checkStreamCapability();
-    }
-    return !_bridgeCapableCache;
+    return _compatibilityModeCache;
 }
 
 /**

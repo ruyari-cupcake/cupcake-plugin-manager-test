@@ -1046,17 +1046,9 @@ import { KeyPool } from '../src/lib/key-pool.js';
 describe('KeyPool — deep branch coverage', () => {
     beforeEach(() => {
         KeyPool._pools = {};
-        KeyPool._cooldowns = {};
     });
 
-    it('pick returns empty during cooldown', async () => {
-        KeyPool._cooldowns['test_key'] = Date.now() + 60000; // 60s in future
-        const result = await KeyPool.pick('test_key');
-        expect(result).toBe('');
-    });
-
-    it('pick returns key after cooldown expires', async () => {
-        KeyPool._cooldowns['test_key'] = Date.now() - 1000; // expired
+    it('pick returns key from getArgFn', async () => {
         KeyPool._pools = {};
         KeyPool._getArgFn = vi.fn(async () => 'key1 key2');
         const result = await KeyPool.pick('test_key');

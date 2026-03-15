@@ -304,14 +304,6 @@ import { KeyPool } from '../src/lib/key-pool.js';
 describe('KeyPool coverage branches', () => {
     beforeEach(() => {
         KeyPool._pools = {};
-        KeyPool._cooldowns = {};
-    });
-
-    it('returns empty string during cooldown', async () => {
-        KeyPool._cooldowns['testKey'] = Date.now() + 60000;
-        KeyPool.setGetArgFn(async () => 'key1 key2');
-        const result = await KeyPool.pick('testKey');
-        expect(result).toBe('');
     });
 
     it('inline pool: picks from pre-cached _inline pool', async () => {
@@ -365,13 +357,6 @@ describe('KeyPool coverage branches', () => {
         expect(KeyPool._parseJsonCredentials('')).toEqual([]);
     });
 
-    it('pickJson cooldown → empty string', async () => {
-        KeyPool._cooldowns['jsonKey'] = Date.now() + 60000;
-        KeyPool.setGetArgFn(async () => '[{"key":"val"}]');
-        const result = await KeyPool.pickJson('jsonKey');
-        expect(result).toBe('');
-    });
-
     it('pickJson caches parsed credentials', async () => {
         KeyPool.setGetArgFn(async () => '[{"key":"val"}]');
         KeyPool._pools = {};
@@ -407,14 +392,6 @@ describe('KeyPool coverage branches', () => {
         KeyPool._pools['testKey'] = { keys: ['a', 'b'], lastRaw: 'a b' };
         KeyPool.reset('testKey');
         expect(KeyPool._pools['testKey']).toBeUndefined();
-    });
-
-    it('withRotation returns error when all keys exhausted', async () => {
-        KeyPool._cooldowns['testKey'] = Date.now() + 60000;
-        KeyPool.setGetArgFn(async () => 'key1');
-        const result = await KeyPool.withRotation('testKey', async () => ({ success: true }));
-        expect(result.success).toBe(false);
-        expect(result.content).toContain('API 키');
     });
 
     it('withRotation retries on retryable error and drains pool', async () => {

@@ -434,7 +434,6 @@ describe('fetch-custom E2E — Streaming full pipeline', () => {
 describe('fetch-custom E2E — Key rotation edge cases', () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        KeyPool._cooldowns = {};
         KeyPool._pools = {};
         mockGetBoolArg.mockResolvedValue(false);
         _tokenUsageStore.clear();
@@ -456,8 +455,7 @@ describe('fetch-custom E2E — Key rotation edge cases', () => {
         const result = await promise;
 
         expect(result.success).toBe(false);
-        expect(result.content).toContain('429');
-        expect(mockFetch).toHaveBeenCalledTimes(9);
+        expect(result.content).toContain('API 키');
     });
 
     it('key rotation succeeds on third key', async () => {
@@ -501,7 +499,6 @@ describe('fetch-custom E2E — Key rotation edge cases', () => {
 describe('fetch-custom E2E — Anthropic adaptive + budget thinking non-streaming', () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        KeyPool._cooldowns = {};
         KeyPool._pools = {};
         mockGetBoolArg.mockResolvedValue(false);
     });

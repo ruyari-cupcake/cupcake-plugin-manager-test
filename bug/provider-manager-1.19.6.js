@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.20.10
-//@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
+//@version 1.19.6
+//@update-url https://cupcake-plugin-manager.vercel.app/provider-manager.js
 
 // ==========================================
 // ARGUMENT SCHEMAS (Saved Natively by RisuAI)
@@ -87,63 +87,8 @@
 // --- Streaming Settings ---
 //@arg cpm_streaming_enabled string Enable Streaming Pass-Through (true/false)
 //@arg cpm_streaming_show_thinking string Show Anthropic Thinking Tokens in Stream (true/false)
-
-// --- Compatibility ---
-//@arg cpm_compatibility_mode string Compatibility Mode — skip nativeFetch, use risuFetch only. Enable if requests hang or fail on iPhone/Safari. (true/false)
-//@arg cpm_copilot_nodeless_mode string Copilot Node-less Experimental Mode (off, nodeless-1, nodeless-2)
 var CupcakeProviderManager = (function (exports) {
     'use strict';
-
-    // @ts-check
-    /**
-     * cpm-url.config.js — Single source of truth for the CPM deployment URL.
-     *
-     * Both `src/lib/endpoints.js` (runtime) and `rollup.config.mjs` (build-time
-     * banner injection into plugin-header.js) read from this file.
-     *
-     * URL is determined by the `CPM_ENV` environment variable:
-     *   - CPM_ENV=production  → https://cupcake-plugin-manager.vercel.app
-     *   - CPM_ENV=test (or unset) → https://cupcake-plugin-manager-test.vercel.app
-     *
-     * Build usage:
-     *   CPM_ENV=production npm run build   (production)
-     *   npm run build                      (test — default)
-     *   npm run build:production           (shorthand for production)
-     */
-
-    const _URLS = {
-        production: 'https://cupcake-plugin-manager.vercel.app',
-        test: 'https://cupcake-plugin-manager-test.vercel.app',
-    };
-
-    const _env = 'test';
-
-    /** @type {string} */
-    const CPM_BASE_URL = _URLS[_env];
-
-    // @ts-check
-    /**
-     * endpoints.js — Centralized endpoint URL constants.
-     *
-     * All remote URLs used by CPM live here.
-     * The base URL is imported from `src/cpm-url.config.js` — the single
-     * source of truth shared with the Rollup build (which injects it into
-     * the plugin-header.js banner at build time).
-     *
-     * To switch between test / production, set the `CPM_ENV` environment
-     * variable at build time (e.g., `CPM_ENV=production npm run build` or
-     * `npm run build:production`). See rollup.config.mjs for details.
-     */
-
-
-    /** Version manifest endpoint (GET → JSON). */
-    const VERSIONS_URL = `${CPM_BASE_URL}/api/versions`;
-
-    /** Main plugin JS download endpoint (GET → text/javascript). */
-    const MAIN_UPDATE_URL = `${CPM_BASE_URL}/api/main-plugin`;
-
-    /** Single-bundle update endpoint (GET → JSON with code + hashes). */
-    const UPDATE_BUNDLE_URL = `${CPM_BASE_URL}/api/update-bundle`;
 
     // @ts-check
     /**
@@ -180,7 +125,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.20.10';
+    const CPM_VERSION = '1.19.6';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -251,7 +196,6 @@ var CupcakeProviderManager = (function (exports) {
     /**
      * Check if dynamic model fetching is enabled for a given provider.
      * Setting key: cpm_dynamic_<providerName_lowercase> = 'true'.
-     * @param {string} providerName
      */
     async function isDynamicFetchEnabled(providerName) {
         const key = `cpm_dynamic_${providerName.toLowerCase()}`;
@@ -291,7 +235,6 @@ var CupcakeProviderManager = (function (exports) {
     /**
      * Safe JSON.stringify: replacer removes null/undefined from all arrays during serialization.
      * Catches nulls from toJSON(), undefined→null conversion, etc.
-     * @param {any} obj
      */
     function safeStringify(obj) {
         return JSON.stringify(obj, function (_key, value) {
@@ -304,7 +247,6 @@ var CupcakeProviderManager = (function (exports) {
 
     /**
      * Check if message content is non-empty (string, array, or object).
-     * @param {any} content
      */
     function hasNonEmptyMessageContent(content) {
         if (content === null || content === undefined) return false;
@@ -316,7 +258,6 @@ var CupcakeProviderManager = (function (exports) {
 
     /**
      * Check if a message has attached multimodal content (images, audio, etc.).
-     * @param {any} message
      */
     function hasAttachedMultimodals(message) {
         return !!(message && Array.isArray(message.multimodals) && message.multimodals.length > 0);
@@ -325,7 +266,6 @@ var CupcakeProviderManager = (function (exports) {
     /**
      * Escape HTML special characters to prevent XSS when interpolating into innerHTML.
      * Shared across all settings-ui modules.
-     * @param {any} s
      */
     function escHtml(s) {
         return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -351,7 +291,7 @@ var CupcakeProviderManager = (function (exports) {
     /**
      * Extract image URL from an OpenAI-format content part (image_url or input_image).
      * Handles both string and object forms of image_url.
-     * @param {Record<string, any>} part - Content part with image_url field
+     * @param {Object} part - Content part with image_url field
      * @returns {string} URL or empty string
      */
     function extractImageUrlFromPart(part) {
@@ -431,22 +371,14 @@ var CupcakeProviderManager = (function (exports) {
         const imageIntent = lower.includes('image') || lower.includes('photo') || lower.includes('picture') || lower.includes('첨부') || lower.includes('사진');
         if (!imageIntent) return text;
 
-        return text.replace(/\s*\[[a-z0-9][a-z0-9 ,.'"-]{6,}\]\s*$/i, (match) => {
-            // Only strip if the bracket content looks like an auto-generated image caption.
-            // Captions are typically multi-word descriptions (≥3 alphabetic words).
-            // This avoids stripping structured references like [Chapter 12, Part 2].
-            const inner = match.replace(/^\s*\[/, '').replace(/\]\s*$/, '');
-            const wordCount = (inner.match(/[a-z]{2,}/gi) || []).length;
-            if (wordCount >= 3) return '';
-            return match;   // Too few words to be an image caption — leave it alone
-        }).trim();
+        return text.replace(/\s*\[[a-z0-9][a-z0-9 ,.'"-]{6,}\]\s*$/i, '').trim();
     }
 
     /**
      * Extract and normalize message payload into { text, multimodals }.
      * Handles RisuAI multimodals array, OpenAI content parts (image_url, input_audio, input_image),
      * Anthropic image blocks, and Gemini inlineData.
-     * @param {Record<string, any>} message
+     * @param {Object} message
      * @returns {NormalizedPayload}
      */
     function extractNormalizedMessagePayload(message) {
@@ -479,9 +411,7 @@ var CupcakeProviderManager = (function (exports) {
                 }
 
                 if (part.type === 'image_url') {
-                    const imageUrl = typeof part.image_url === 'string'
-                        ? part.image_url
-                        : (part.image_url && typeof part.image_url.url === 'string' ? part.image_url.url : '');
+                    const imageUrl = part.image_url && typeof part.image_url.url === 'string' ? part.image_url.url : '';
                     if (imageUrl.startsWith('data:image/')) {
                         const mimeType = imageUrl.split(';')[0]?.split(':')[1] || 'image/png';
                         normalizedMultimodals.push({ type: 'image', base64: imageUrl, mimeType });
@@ -515,12 +445,6 @@ var CupcakeProviderManager = (function (exports) {
             }
         } else if (content !== null && content !== undefined) {
             if (typeof content === 'object' && typeof content.text === 'string') textParts.push(content.text);
-            else if (typeof content === 'object') {
-                // Structured objects (e.g. multimodal parts missing .text) must be
-                // JSON-serialized to preserve data. String(obj) produces the useless
-                // "[object Object]" which corrupts downstream API payloads.
-                try { textParts.push(JSON.stringify(content)); } catch (_) { textParts.push(String(content)); }
-            }
             else textParts.push(String(content));
         }
 
@@ -534,8 +458,8 @@ var CupcakeProviderManager = (function (exports) {
      * Deep-sanitize messages array: remove null/undefined entries,
      * strip internal RisuAI tags, filter messages with empty content.
      * Returns a NEW array — never mutates the input.
-     * @param {Array<Record<string, any>>} messages
-     * @returns {Array<Record<string, any>>}
+     * @param {Array<Object>} messages
+     * @returns {Array<Object>}
      */
     function sanitizeMessages(messages) {
         if (!Array.isArray(messages)) return [];
@@ -568,7 +492,7 @@ var CupcakeProviderManager = (function (exports) {
             const obj = JSON.parse(jsonStr);
             if (Array.isArray(obj.messages)) {
                 const before = obj.messages.length;
-                obj.messages = obj.messages.filter((/** @type {any} */ m) => {
+                obj.messages = obj.messages.filter(m => {
                     if (m == null || typeof m !== 'object') return false;
                     if (!hasNonEmptyMessageContent(m.content) && !hasAttachedMultimodals(m)) return false;
                     if (typeof m.role !== 'string' || !m.role) return false;
@@ -581,7 +505,7 @@ var CupcakeProviderManager = (function (exports) {
             }
             if (Array.isArray(obj.contents)) {
                 const before = obj.contents.length;
-                obj.contents = obj.contents.filter((/** @type {any} */ m) => m != null && typeof m === 'object');
+                obj.contents = obj.contents.filter(m => m != null && typeof m === 'object');
                 if (obj.contents.length < before) {
                     console.warn(`[Cupcake PM] sanitizeBodyJSON: removed ${before - obj.contents.length} null entries from contents`);
                 }
@@ -598,7 +522,7 @@ var CupcakeProviderManager = (function (exports) {
             if (typeof jsonStr === 'string' && !jsonStr.trimStart().startsWith('{') && !jsonStr.trimStart().startsWith('[')) {
                 return jsonStr;
             }
-            console.error('[Cupcake PM] sanitizeBodyJSON: JSON parse/stringify failed:', /** @type {Error} */ (e).message);
+            console.error('[Cupcake PM] sanitizeBodyJSON: JSON parse/stringify failed:', e.message);
             return jsonStr;
         }
     }
@@ -623,7 +547,7 @@ var CupcakeProviderManager = (function (exports) {
             const afterLastMarker = cleaned.substring(lastMarkerIdx);
             const contentMatch = afterLastMarker.match(/\n{3,}\s*(?=[^\s>\\])/);
             if (contentMatch) {
-                cleaned = afterLastMarker.substring(contentMatch.index ?? 0).trim();
+                cleaned = afterLastMarker.substring(contentMatch.index).trim();
             } else {
                 cleaned = '';
             }
@@ -654,7 +578,7 @@ var CupcakeProviderManager = (function (exports) {
     /**
      * Try known explicit Anthropic/proxy reasoning token fields first.
      * Future-proofed for proxy adapters that may expose separate reasoning counts.
-     * @param {Record<string, any>} raw
+     * @param {Object} raw
      * @returns {number}
      */
     function _extractAnthropicReasoningTokens(raw) {
@@ -716,7 +640,7 @@ var CupcakeProviderManager = (function (exports) {
         // Evict oldest entries when store exceeds max size to prevent memory leak
         if (_tokenUsageStore.size > _TOKEN_USAGE_STORE_MAX) {
             const it = _tokenUsageStore.keys();
-            _tokenUsageStore.delete(/** @type {string} */ (it.next().value));
+            _tokenUsageStore.delete(it.next().value);
         }
     }
 
@@ -743,7 +667,7 @@ var CupcakeProviderManager = (function (exports) {
 
     /**
      * Normalize token usage from different API formats into a unified shape.
-     * @param {Record<string, any>} raw - Raw usage object from API response
+     * @param {Object} raw - Raw usage object from API response
      * @param {'openai'|'anthropic'|'gemini'} format
      * @param {{ anthropicHasThinking?: boolean, anthropicVisibleText?: string }} [meta]
      * @returns {TokenUsage | null}
@@ -791,7 +715,6 @@ var CupcakeProviderManager = (function (exports) {
         return null;
     }
 
-    // @ts-check
     /**
      * token-toast.js — Lightweight toast notification for token usage display.
      * Shows input/output/reasoning/cached token counts at top-right corner.
@@ -815,7 +738,7 @@ var CupcakeProviderManager = (function (exports) {
             if (existing) { try { await existing.remove(); } catch (_) { } }
 
             // Format numbers with commas
-            const fmt = (/** @type {number} */ n) => n != null ? n.toLocaleString() : '0';
+            const fmt = (n) => n != null ? n.toLocaleString() : '0';
             const durationStr = durationMs ? `${(durationMs / 1000).toFixed(1)}s` : '';
 
             // Build detail parts
@@ -891,11 +814,10 @@ var CupcakeProviderManager = (function (exports) {
             }, 6000);
 
         } catch (e) {
-            console.debug('[CPM TokenToast] Failed:', /** @type {Error} */ (e).message);
+            console.debug('[CPM TokenToast] Failed:', e.message);
         }
     }
 
-    // @ts-check
     /**
      * format-openai.js — Format messages for OpenAI-compatible APIs.
      * Handles multimodal content, role normalization, developer role conversion.
@@ -903,18 +825,17 @@ var CupcakeProviderManager = (function (exports) {
 
     /**
      * Format messages for OpenAI Chat Completions API.
-     * @param {Array<any>} messages - Raw message array from RisuAI
-     * @param {object} config - Formatting options
+     * @param {Array} messages - Raw message array from RisuAI
+     * @param {Object} config - Formatting options
      * @param {boolean} [config.mergesys] - Merge system messages into first user message
      * @param {boolean} [config.mustuser] - Ensure first message is user/system
      * @param {boolean} [config.altrole] - Convert assistant→model (for Gemini-style APIs)
      * @param {boolean} [config.sysfirst] - Move first system message to top
      * @param {boolean} [config.developerRole] - Convert system→developer (GPT-5 series)
-     * @returns {Array<any>} Formatted messages array
+     * @returns {Array} Formatted messages array
      */
     function formatToOpenAI(messages, config = {}) {
         // Step 1: Deep sanitize — remove nulls, strip internal RisuAI tags
-        /** @type {Record<string, any>[]} */
         let msgs = sanitizeMessages(messages);
 
         if (config.mergesys) {
@@ -961,7 +882,7 @@ var CupcakeProviderManager = (function (exports) {
                         if (modal.base64) contentParts.push({ type: 'image_url', image_url: { url: modal.base64 } });
                         else if (modal.url) contentParts.push({ type: 'image_url', image_url: { url: modal.url } });
                     } else if (modal.type === 'audio') {
-                        const { mimeType: _audioMime, data: _audioData } = parseBase64DataUri(modal.base64 ?? '');
+                        const { mimeType: _audioMime, data: _audioData } = parseBase64DataUri(modal.base64);
                         let _audioFormat = 'mp3';
                         if (_audioMime) {
                             const _m = _audioMime.toLowerCase();
@@ -1056,7 +977,6 @@ var CupcakeProviderManager = (function (exports) {
         return arr;
     }
 
-    // @ts-check
     /**
      * format-anthropic.js — Format messages for Anthropic Claude API.
      * Handles system prompt extraction, consecutive message merging, multimodal content,
@@ -1064,35 +984,14 @@ var CupcakeProviderManager = (function (exports) {
      */
 
     /**
-     * Merge content parts into the previous message if same role, otherwise push a new entry.
-     * Eliminates the repeated consecutive-merge pattern throughout formatToAnthropic.
-     * @param {Array<any>} formattedMsgs - The formatted message array (mutated in place)
-     * @param {string} role - 'user' | 'assistant'
-     * @param {Array<any>} contentParts - Array of Anthropic content blocks to merge/push
-     */
-    function _mergeOrPush(formattedMsgs, role, contentParts) {
-        if (formattedMsgs.length > 0 && formattedMsgs[formattedMsgs.length - 1].role === role) {
-            const prev = formattedMsgs[formattedMsgs.length - 1];
-            if (typeof prev.content === 'string') {
-                prev.content = [{ type: 'text', text: prev.content }, ...contentParts];
-            } else if (Array.isArray(prev.content)) {
-                prev.content.push(...contentParts);
-            }
-        } else {
-            formattedMsgs.push({ role, content: contentParts });
-        }
-    }
-
-    /**
      * Format messages for Anthropic Messages API.
-     * @param {Array<any>} messages - Raw message array
+     * @param {Array} messages - Raw message array
      * @param {Object} config - Formatting options
      * @param {boolean} [config.caching] - Enable cache_control breakpoints
      * @param {boolean} [config.claude1HourCaching] - Use 1h TTL for cache_control
-     * @returns {{ messages: Array<any>, system: string }}
+     * @returns {{ messages: Array, system: string }}
      */
     function formatToAnthropic(messages, config = {}) {
-        /** @type {any[]} */
         const validMsgs = sanitizeMessages(messages);
 
         // Extract leading system messages
@@ -1110,7 +1009,6 @@ var CupcakeProviderManager = (function (exports) {
         const remainingMsgs = validMsgs.slice(splitIdx);
 
         // Non-leading system messages → user role with "system: " prefix
-        /** @type {any[]} */
         const chatMsgs = remainingMsgs.map(m => {
             if (m.role === 'system') {
                 const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
@@ -1119,12 +1017,8 @@ var CupcakeProviderManager = (function (exports) {
             return m;
         });
 
-        /** @type {any[]} */
         const formattedMsgs = [];
-        /** @type {number[]} — maps each chatMsgs[i] to its formattedMsgs index, or -1 if skipped */
-        const srcToFmtMap = new Array(chatMsgs.length).fill(-1);
-        for (let ci = 0; ci < chatMsgs.length; ci++) {
-            const m = chatMsgs[ci];
+        for (const m of chatMsgs) {
             const role = m.role === 'assistant' ? 'assistant' : 'user';
             const payload = extractNormalizedMessagePayload(m);
 
@@ -1137,14 +1031,7 @@ var CupcakeProviderManager = (function (exports) {
                 for (const modal of payload.multimodals) {
                     if (!modal || typeof modal !== 'object') continue;
                     if (modal.type === 'image') {
-                        if (typeof modal.url === 'string' && (modal.url.startsWith('http://') || modal.url.startsWith('https://'))) {
-                            imageParts.push({
-                                type: 'image',
-                                source: { type: 'url', url: modal.url }
-                            });
-                            continue;
-                        }
-                        const { mimeType: mediaType_raw, data } = parseBase64DataUri(/** @type {string} */ (modal.base64));
+                        const { mimeType: mediaType_raw, data } = parseBase64DataUri(modal.base64);
                         const mediaType = mediaType_raw || 'image/png';
                         imageParts.push({
                             type: 'image',
@@ -1154,13 +1041,26 @@ var CupcakeProviderManager = (function (exports) {
                 }
                 const contentParts = [...imageParts, ...textParts];
                 if (contentParts.length > 0) {
-                    _mergeOrPush(formattedMsgs, role, contentParts);
-                    srcToFmtMap[ci] = formattedMsgs.length - 1;
+                    if (formattedMsgs.length > 0 && formattedMsgs[formattedMsgs.length - 1].role === role) {
+                        const prev = formattedMsgs[formattedMsgs.length - 1];
+                        if (typeof prev.content === 'string') {
+                            prev.content = [{ type: 'text', text: prev.content }, ...contentParts];
+                        } else if (Array.isArray(prev.content)) {
+                            prev.content.push(...contentParts);
+                        }
+                    } else {
+                        formattedMsgs.push({ role, content: contentParts });
+                    }
                 } else {
                     const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
                     if (!hasNonEmptyMessageContent(content)) continue;
-                    _mergeOrPush(formattedMsgs, role, [{ type: 'text', text: content }]);
-                    srcToFmtMap[ci] = formattedMsgs.length - 1;
+                    if (formattedMsgs.length > 0 && formattedMsgs[formattedMsgs.length - 1].role === role) {
+                        const prev = formattedMsgs[formattedMsgs.length - 1];
+                        if (typeof prev.content === 'string') prev.content = [{ type: 'text', text: prev.content }, { type: 'text', text: content }];
+                        else if (Array.isArray(prev.content)) prev.content.push({ type: 'text', text: content });
+                    } else {
+                        formattedMsgs.push({ role, content: [{ type: 'text', text: content }] });
+                    }
                 }
                 continue;
             }
@@ -1197,8 +1097,13 @@ var CupcakeProviderManager = (function (exports) {
                 }
 
                 if (contentParts.length > 0) {
-                    _mergeOrPush(formattedMsgs, role, contentParts);
-                    srcToFmtMap[ci] = formattedMsgs.length - 1;
+                    if (formattedMsgs.length > 0 && formattedMsgs[formattedMsgs.length - 1].role === role) {
+                        const prev = formattedMsgs[formattedMsgs.length - 1];
+                        if (typeof prev.content === 'string') prev.content = [{ type: 'text', text: prev.content }, ...contentParts];
+                        else if (Array.isArray(prev.content)) prev.content.push(...contentParts);
+                    } else {
+                        formattedMsgs.push({ role, content: contentParts });
+                    }
                     continue;
                 }
             }
@@ -1206,33 +1111,45 @@ var CupcakeProviderManager = (function (exports) {
             // Text-only message
             const content = payload.text || (typeof m.content === 'string' ? m.content : JSON.stringify(m.content));
             if (!hasNonEmptyMessageContent(content)) continue;
-            _mergeOrPush(formattedMsgs, role, [{ type: 'text', text: content }]);
-            srcToFmtMap[ci] = formattedMsgs.length - 1;
+            if (formattedMsgs.length > 0 && formattedMsgs[formattedMsgs.length - 1].role === role) {
+                const prev = formattedMsgs[formattedMsgs.length - 1];
+                if (typeof prev.content === 'string') {
+                    prev.content = [{ type: 'text', text: prev.content }, { type: 'text', text: content }];
+                } else if (Array.isArray(prev.content)) {
+                    prev.content.push({ type: 'text', text: content });
+                }
+            } else {
+                formattedMsgs.push({ role, content: [{ type: 'text', text: content }] });
+            }
         }
 
         // Ensure first message is user role
         if (formattedMsgs.length === 0 || formattedMsgs[0].role !== 'user') {
             formattedMsgs.unshift({ role: 'user', content: [{ type: 'text', text: 'Start' }] });
-            // Adjust mapping indices after unshift
-            for (let i = 0; i < srcToFmtMap.length; i++) {
-                if (srcToFmtMap[i] >= 0) srcToFmtMap[i]++;
-            }
         }
 
         // Apply cache_control breakpoints
-        // NOTE: Anthropic cache_control only supports { type: 'ephemeral' } (5-min default TTL).
-        // Custom TTL strings are NOT supported by the API and would be silently ignored or rejected.
         if (config.caching) {
-            const _cacheCtrl = { type: 'ephemeral' };
-            for (let ci = 0; ci < chatMsgs.length; ci++) {
-                if (!chatMsgs[ci].cachePoint) continue;
-                const fmtIdx = srcToFmtMap[ci];
-                if (fmtIdx < 0 || fmtIdx >= formattedMsgs.length) continue;
-                const fMsg = formattedMsgs[fmtIdx];
-                if (Array.isArray(fMsg.content) && fMsg.content.length > 0) {
-                    fMsg.content[fMsg.content.length - 1].cache_control = _cacheCtrl;
-                } else if (typeof fMsg.content === 'string') {
-                    fMsg.content = [{ type: 'text', text: fMsg.content, cache_control: _cacheCtrl }];
+            const _cacheCtrl = config.claude1HourCaching
+                ? { type: 'ephemeral', ttl: '1h' }
+                : { type: 'ephemeral' };
+            let fmtIdx = 0;
+            for (let ci = 0; ci < chatMsgs.length && fmtIdx < formattedMsgs.length; ci++) {
+                const srcMsg = chatMsgs[ci];
+                if (ci > 0) {
+                    const prevRole = chatMsgs[ci - 1].role === 'assistant' ? 'assistant' : 'user';
+                    const curRole = srcMsg.role === 'assistant' ? 'assistant' : 'user';
+                    if (curRole !== prevRole) fmtIdx++;
+                }
+                if (fmtIdx >= formattedMsgs.length) break;
+
+                if (srcMsg.cachePoint) {
+                    const fMsg = formattedMsgs[fmtIdx];
+                    if (Array.isArray(fMsg.content) && fMsg.content.length > 0) {
+                        fMsg.content[fMsg.content.length - 1].cache_control = _cacheCtrl;
+                    } else if (typeof fMsg.content === 'string') {
+                        fMsg.content = [{ type: 'text', text: fMsg.content, cache_control: _cacheCtrl }];
+                    }
                 }
             }
         }
@@ -1240,7 +1157,6 @@ var CupcakeProviderManager = (function (exports) {
         return { messages: formattedMsgs, system: systemPrompt };
     }
 
-    // @ts-check
     /**
      * format-gemini.js — Format messages for Google Gemini API.
      * Includes safety settings, thinking config, parameter validation,
@@ -1276,18 +1192,15 @@ var CupcakeProviderManager = (function (exports) {
     /**
      * Validate and clamp Gemini API parameters to valid ranges.
      * Mutates the generationConfig object in place.
-     * @param {Record<string, any>} generationConfig
      */
     function validateGeminiParams(generationConfig) {
         if (!generationConfig || typeof generationConfig !== 'object') return;
         const rules = [
             { key: 'temperature', min: 0, max: 2, fallback: 1, exclusiveMax: false },
             { key: 'topP', min: 0, max: 1, fallback: undefined, exclusiveMax: false },
-            // Gemini 2.x+ supports topK up to 64
-            { key: 'topK', min: 1, max: 64, fallback: undefined, exclusiveMax: false },
-            // Boundary value 2.0 is valid (inclusive)
-            { key: 'frequencyPenalty', min: -2, max: 2, fallback: undefined, exclusiveMax: false },
-            { key: 'presencePenalty', min: -2, max: 2, fallback: undefined, exclusiveMax: false },
+            { key: 'topK', min: 1, max: 40, fallback: undefined, exclusiveMax: false },
+            { key: 'frequencyPenalty', min: -2, max: 2, fallback: undefined, exclusiveMax: true },
+            { key: 'presencePenalty', min: -2, max: 2, fallback: undefined, exclusiveMax: true },
         ];
         for (const { key, min, max, fallback, exclusiveMax } of rules) {
             if (generationConfig[key] == null) continue;
@@ -1303,7 +1216,6 @@ var CupcakeProviderManager = (function (exports) {
 
     /**
      * Check if a model is an experimental Gemini model.
-     * @param {string} modelId
      */
     function isExperimentalGeminiModel(modelId) {
         return modelId && (modelId.includes('exp') || modelId.includes('experimental'));
@@ -1311,7 +1223,6 @@ var CupcakeProviderManager = (function (exports) {
 
     /**
      * Check if a Gemini model supports penalty parameters.
-     * @param {string} modelId
      */
     function geminiSupportsPenalty(modelId) {
         if (!modelId) return false;
@@ -1326,8 +1237,6 @@ var CupcakeProviderManager = (function (exports) {
     /**
      * Strip frequencyPenalty/presencePenalty from generationConfig if model doesn't
      * support them, or if values are 0.
-     * @param {Record<string, any>} generationConfig
-     * @param {string} modelId
      */
     function cleanExperimentalModelParams(generationConfig, modelId) {
         const supported = geminiSupportsPenalty(modelId);
@@ -1372,7 +1281,7 @@ var CupcakeProviderManager = (function (exports) {
             return { includeThoughts: true, thinkingBudget: budgetNum };
         }
         if (level && level !== 'off' && level !== 'none') {
-            const budgets = /** @type {Record<string, number>} */ ({ 'MINIMAL': 1024, 'LOW': 4096, 'MEDIUM': 10240, 'HIGH': 24576 });
+            const budgets = { 'MINIMAL': 1024, 'LOW': 4096, 'MEDIUM': 10240, 'HIGH': 24576 };
             const mapped = budgets[level] || parseInt(level) || 10240;
             return { includeThoughts: true, thinkingBudget: mapped };
         }
@@ -1388,15 +1297,10 @@ var CupcakeProviderManager = (function (exports) {
     const ThoughtSignatureCache = {
         _cache: new Map(),
         _maxSize: 50,
-        /** @param {any} responseText */
         _keyOf(responseText) {
             const normalized = stripThoughtDisplayContent(stripInternalTags(String(responseText || '')) || '');
             return normalized.substring(0, 500);
         },
-        /**
-         * @param {any} responseText
-         * @param {any} signature
-         */
         save(responseText, signature) {
             if (!responseText || !signature) return;
             const key = this._keyOf(responseText);
@@ -1406,7 +1310,6 @@ var CupcakeProviderManager = (function (exports) {
                 this._cache.delete(firstKey);
             }
         },
-        /** @param {any} responseText */
         get(responseText) {
             if (!responseText) return null;
             const key = this._keyOf(responseText);
@@ -1419,8 +1322,8 @@ var CupcakeProviderManager = (function (exports) {
 
     /**
      * Convert a normalized multimodal object to a Gemini content part.
-     * @param {Record<string, any>} modal - Normalized modal { type, base64?, url?, mimeType? }
-     * @returns {any} Gemini part (inlineData or fileData)
+     * @param {Object} modal - Normalized modal { type, base64?, url?, mimeType? }
+     * @returns {Object} Gemini part (inlineData or fileData)
      */
     function _modalToGeminiPart(modal) {
         if (modal.url && modal.type === 'image') {
@@ -1432,14 +1335,14 @@ var CupcakeProviderManager = (function (exports) {
 
     /**
      * Format messages for Gemini generateContent / streamGenerateContent API.
-     * @param {Array<any>} messagesRaw - Raw message array
+     * @param {Array} messagesRaw - Raw message array
      * @param {Object} config - Formatting options
      * @param {boolean} [config.preserveSystem] - Keep system instructions in dedicated field
      * @param {boolean} [config.useThoughtSignature] - Inject cached thought signatures
-     * @returns {{ contents: Array<any>, systemInstruction: string[] }}
+     * @returns {{ contents: Array, systemInstruction: string[] }}
      */
     function formatToGemini(messagesRaw, config = {}) {
-        const messages = /** @type {any[]} */ (sanitizeMessages(messagesRaw));
+        const messages = sanitizeMessages(messagesRaw);
         const systemInstruction = [];
         const contents = [];
 
@@ -1482,7 +1385,7 @@ var CupcakeProviderManager = (function (exports) {
 
             // Multimodal handling
             if (normalizedMultimodals.length > 0) {
-                const lastMessage = /** @type {any} */ (contents.length > 0 ? contents[contents.length - 1] : null);
+                const lastMessage = contents.length > 0 ? contents[contents.length - 1] : null;
 
                 if (lastMessage && lastMessage.role === role) {
                     if (trimmed) {
@@ -1512,7 +1415,6 @@ var CupcakeProviderManager = (function (exports) {
             }
 
             // Text-only message
-            /** @type {Record<string, any>} */
             const part = { text: trimmed || text };
             if (config.useThoughtSignature && role === 'model') {
                 const cachedSig = ThoughtSignatureCache.get(trimmed || text);
@@ -1543,7 +1445,6 @@ var CupcakeProviderManager = (function (exports) {
         return { contents, systemInstruction };
     }
 
-    // @ts-check
     /**
      * sse-parsers.js — SSE line parsers for different API formats.
      * Pure functions that extract delta text from SSE "data: {...}" lines.
@@ -1603,7 +1504,7 @@ var CupcakeProviderManager = (function (exports) {
      * Gemini SSE line parser: extracts text parts from streamed JSON chunks.
      * Handles thinking blocks, thought signatures, safety blocks, and usageMetadata.
      * @param {string} line - SSE data line
-     * @param {Record<string, any>} config - Mutable config for tracking state across chunks
+     * @param {Object} config - Mutable config for tracking state across chunks
      * @returns {string|null} Delta text content or null
      */
     function parseGeminiSSELine(line, config = {}) {
@@ -1661,7 +1562,6 @@ var CupcakeProviderManager = (function (exports) {
         } catch { return null; }
     }
 
-    // @ts-check
     /**
      * key-pool.js — API Key rotation engine.
      * Supports whitespace-separated key pools and JSON credential rotation (Vertex AI).
@@ -1673,14 +1573,13 @@ var CupcakeProviderManager = (function (exports) {
      * Random pick per request; on 429/529/503, drain failed key and retry.
      */
     const KeyPool = {
-        /** @type {Record<string, any>} */
         _pools: {},
-        /** Injected safeGetArg function. Set via setGetArgFn(). @type {((key: string, defaultValue?: string) => Promise<string>) | null} */
+        /** Injected safeGetArg function. Set via setGetArgFn(). */
         _getArgFn: null,
 
         /**
          * Set the argument retrieval function (dependency injection).
-         * @param {(key: string, defaultValue?: string) => Promise<string>} fn
+         * @param {function} fn - async (key, defaultValue) => string
          */
         setGetArgFn(fn) {
             this._getArgFn = fn;
@@ -1689,7 +1588,6 @@ var CupcakeProviderManager = (function (exports) {
         /**
          * Parse keys from the setting string (whitespace-separated), cache them,
          * and return a random key from the pool.
-         * @param {string} argName
          */
         async pick(argName) {
             const pool = this._pools[argName];
@@ -1697,7 +1595,7 @@ var CupcakeProviderManager = (function (exports) {
                 return pool.keys[Math.floor(Math.random() * pool.keys.length)];
             }
             const getArg = this._getArgFn;
-            if (!getArg) return '';  // No getArgFn → cannot re-parse keys after reset()
+            if (!getArg) throw new Error('KeyPool._getArgFn not set. Call setGetArgFn() first.');
             const raw = await getArg(argName);
             if (!pool || pool.lastRaw !== raw || pool.keys.length === 0) {
                 this._pools[argName] = {
@@ -1712,8 +1610,6 @@ var CupcakeProviderManager = (function (exports) {
 
         /**
          * Remove a failed key from the pool. Returns remaining count.
-         * @param {string} argName
-         * @param {string} failedKey
          */
         drain(argName, failedKey) {
             const pool = this._pools[argName];
@@ -1725,7 +1621,6 @@ var CupcakeProviderManager = (function (exports) {
 
         /**
          * Get the number of remaining keys in the pool.
-         * @param {string} argName
          */
         remaining(argName) {
             return this._pools[argName]?.keys?.length || 0;
@@ -1733,7 +1628,6 @@ var CupcakeProviderManager = (function (exports) {
 
         /**
          * Force re-parse keys from settings on next pick.
-         * @param {string} argName
          */
         reset(argName) {
             delete this._pools[argName];
@@ -1741,13 +1635,10 @@ var CupcakeProviderManager = (function (exports) {
 
         /**
          * Pick key → fetchFn(key) → on retryable error, drain and retry.
-         * @param {string} argName
-         * @param {(key: string) => Promise<any>} fetchFn
-         * @param {{maxRetries?: number, isRetryable?: (result: any) => boolean}} [opts]
          */
         async withRotation(argName, fetchFn, opts = {}) {
             const maxRetries = opts.maxRetries || 30;
-            const isRetryable = opts.isRetryable || ((/** @type {any} */ result) => {
+            const isRetryable = opts.isRetryable || ((result) => {
                 if (!result._status) return false;
                 return result._status === 429 || result._status === 529 || result._status === 503;
             });
@@ -1765,10 +1656,9 @@ var CupcakeProviderManager = (function (exports) {
                 console.warn(`[KeyPool] 🔄 키 교체: ${argName} (HTTP ${result._status}, 남은 키: ${remaining}개, 시도: ${attempt + 1})`);
 
                 if (remaining === 0) {
-                    console.warn(`[KeyPool] ⚠️ ${argName}의 모든 키가 소진되었습니다. 키를 재파싱합니다.`);
+                    console.warn(`[KeyPool] ⚠️ ${argName}의 모든 키가 소진되었습니다.`);
                     this.reset(argName);
-                    // Don't return — reset() clears lastRaw so next pick() re-parses from settings.
-                    // The loop continues and pick() will return a fresh key set.
+                    return result;
                 }
             }
             return { success: false, content: `[KeyPool] 최대 재시도 횟수(${maxRetries})를 초과했습니다.` };
@@ -1776,79 +1666,42 @@ var CupcakeProviderManager = (function (exports) {
 
         // ── JSON Credential Rotation (Vertex AI 등 JSON 크레덴셜용) ──
 
-        /** @param {string} raw */
-        _looksLikeWindowsPath(raw) {
-            const trimmed = (raw || '').trim();
-            return /^[A-Za-z]:\\/.test(trimmed) || /^\\\\[^\\]/.test(trimmed);
-        },
-
-        /**
-         * @param {string} raw
-         * @param {any} [error]
-         */
-        _buildJsonCredentialError(raw, error) {
-            if (this._looksLikeWindowsPath(raw)) {
-                return new Error('JSON 인증 정보 대신 Windows 파일 경로가 입력되었습니다. 파일 경로가 아니라 Service Account JSON 본문 전체를 붙여넣어야 합니다.');
-            }
-
-            const message = error?.message || '알 수 없는 JSON 파싱 오류';
-            if (/Bad Unicode escape/i.test(message)) {
-                return new Error('JSON 파싱 오류: 역슬래시(\\)가 이스케이프되지 않았습니다. Windows 경로를 넣었다면 \\\\ 로 이스케이프하거나 파일 경로 대신 JSON 본문을 붙여넣으세요.');
-            }
-
-            return new Error(`JSON 인증 정보 파싱 오류: ${message}`);
-        },
-
         /**
          * Extract individual JSON objects from raw textarea input.
          * Supports: single, comma-separated, JSON array, or newline-separated.
-         * @param {string} raw
          */
         _parseJsonCredentials(raw) {
             const trimmed = (raw || '').trim();
             if (!trimmed) return [];
-            if (this._looksLikeWindowsPath(trimmed)) {
-                throw this._buildJsonCredentialError(trimmed);
-            }
-
-            let lastError = null;
             try {
                 const arr = JSON.parse(trimmed);
                 if (Array.isArray(arr)) return arr.filter(o => o && typeof o === 'object').map(o => JSON.stringify(o));
-            } catch (error) { lastError = error; }
+            } catch (_) { }
             if (trimmed.startsWith('{')) {
                 try {
                     const arr = JSON.parse('[' + trimmed + ']');
                     if (Array.isArray(arr)) return arr.filter(o => o && typeof o === 'object').map(o => JSON.stringify(o));
-                } catch (error) { lastError = error; }
+                } catch (_) { }
             }
             try {
                 const obj = JSON.parse(trimmed);
                 if (obj && typeof obj === 'object' && !Array.isArray(obj)) return [trimmed];
-            } catch (error) { lastError = error; }
-            if (lastError && /Bad Unicode escape/i.test(/** @type {Error} */ (lastError).message || '')) {
-                throw this._buildJsonCredentialError(trimmed, lastError);
-            }
+            } catch (_) { }
             return [];
         },
 
         /**
          * Parse JSON credentials from a textarea field, cache them,
          * and return a random one from the pool.
-         * @param {string} argName
          */
         async pickJson(argName) {
             const getArg = this._getArgFn;
-            if (!getArg) return '';  // No getArgFn → cannot re-parse keys after reset()
+            if (!getArg) throw new Error('KeyPool._getArgFn not set. Call setGetArgFn() first.');
             const raw = await getArg(argName);
             const pool = this._pools[argName];
             if (!pool || pool.lastRaw !== raw || pool.keys.length === 0) {
-                try {
-                    const jsons = this._parseJsonCredentials(raw);
-                    this._pools[argName] = { lastRaw: raw, keys: jsons, error: '' };
-                } catch (error) {
-                    this._pools[argName] = { lastRaw: raw, keys: [], error: /** @type {Error} */ (error).message };
-                }
+                const jsons = this._parseJsonCredentials(raw);
+                this._pools[argName] = { lastRaw: raw, keys: jsons };
             }
             const keys = this._pools[argName].keys;
             if (keys.length === 0) return '';
@@ -1857,13 +1710,10 @@ var CupcakeProviderManager = (function (exports) {
 
         /**
          * Like withRotation but uses pickJson for JSON credential parsing.
-         * @param {string} argName
-         * @param {(key: string) => Promise<any>} fetchFn
-         * @param {{maxRetries?: number, isRetryable?: (result: any) => boolean}} [opts]
          */
         async withJsonRotation(argName, fetchFn, opts = {}) {
             const maxRetries = opts.maxRetries || 30;
-            const isRetryable = opts.isRetryable || ((/** @type {any} */ result) => {
+            const isRetryable = opts.isRetryable || ((result) => {
                 if (!result._status) return false;
                 return result._status === 429 || result._status === 529 || result._status === 503;
             });
@@ -1871,13 +1721,7 @@ var CupcakeProviderManager = (function (exports) {
             for (let attempt = 0; attempt < maxRetries; attempt++) {
                 const credJson = await this.pickJson(argName);
                 if (!credJson) {
-                    const errorMessage = this._pools[argName]?.error;
-                    return {
-                        success: false,
-                        content: errorMessage
-                            ? `[KeyPool] ${errorMessage}`
-                            : `[KeyPool] ${argName}에 사용 가능한 JSON 인증 정보가 없습니다. 설정에서 확인하세요.`
-                    };
+                    return { success: false, content: `[KeyPool] ${argName}에 사용 가능한 JSON 인증 정보가 없습니다. 설정에서 확인하세요.` };
                 }
 
                 const result = await fetchFn(credJson);
@@ -1887,16 +1731,15 @@ var CupcakeProviderManager = (function (exports) {
                 console.warn(`[KeyPool] 🔄 JSON 인증 교체: ${argName} (HTTP ${result._status}, 남은 인증: ${remaining}개, 시도: ${attempt + 1})`);
 
                 if (remaining === 0) {
-                    console.warn(`[KeyPool] ⚠️ ${argName}의 모든 JSON 인증이 소진되었습니다. 키를 재파싱합니다.`);
+                    console.warn(`[KeyPool] ⚠️ ${argName}의 모든 JSON 인증이 소진되었습니다.`);
                     this.reset(argName);
-                    // Don't return — reset() clears lastRaw so next pickJson() re-parses from settings.
+                    return result;
                 }
             }
             return { success: false, content: `[KeyPool] 최대 재시도 횟수(${maxRetries})를 초과했습니다.` };
         }
     };
 
-    // @ts-check
     /**
      * slot-inference.js — Infer which auxiliary slot a request is targeting.
      * Uses model assignment matching + prompt content heuristics for disambiguation.
@@ -1969,7 +1812,7 @@ var CupcakeProviderManager = (function (exports) {
      * @returns {number} Score (higher = more confident match)
      */
     function scoreSlotHeuristic(promptText, slotName) {
-        const heuristic = SLOT_HEURISTICS[/** @type {keyof typeof SLOT_HEURISTICS} */ (slotName)];
+        const heuristic = SLOT_HEURISTICS[slotName];
         if (!heuristic || !promptText) return 0;
         let score = 0;
         for (const pattern of heuristic.patterns) {
@@ -1997,8 +1840,8 @@ var CupcakeProviderManager = (function (exports) {
      *
      * When heuristics fail, Risu's native parameter values are used as-is.
      *
-     * @param {Record<string, any>} activeModelDef - Model definition with uniqueId
-     * @param {Record<string, any>} args - Request arguments (contains prompt_chat)
+     * @param {Object} activeModelDef - Model definition with uniqueId
+     * @param {Object} args - Request arguments (contains prompt_chat)
      * @returns {Promise<{slot: string, heuristicConfirmed: boolean}>}
      *          slot = 'chat' | 'translation' | 'emotion' | 'memory' | 'other'
      *          heuristicConfirmed = true when the slot was confirmed via content analysis
@@ -2072,7 +1915,6 @@ var CupcakeProviderManager = (function (exports) {
         return { slot: 'chat', heuristicConfirmed: false };
     }
 
-    // @ts-check
     /**
      * aws-signer.js — AWS Signature Version 4 signer.
      * Self-contained implementation using Web Crypto API (available in iframe sandbox).
@@ -2095,10 +1937,6 @@ var CupcakeProviderManager = (function (exports) {
 
     const HEX_CHARS = '0123456789abcdef'.split('');
 
-    /**
-     * @param {ArrayBuffer} arrayBuffer
-     * @returns {string}
-     */
     function buf2hex(arrayBuffer) {
         const buffer = new Uint8Array(arrayBuffer);
         let out = '';
@@ -2110,19 +1948,10 @@ var CupcakeProviderManager = (function (exports) {
         return out;
     }
 
-    /**
-     * @param {string} urlEncodedStr
-     * @returns {string}
-     */
     function encodeRfc3986(urlEncodedStr) {
-        return urlEncodedStr.replace(/[!'()*]/g, (/** @type {string} */ c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+        return urlEncodedStr.replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
     }
 
-    /**
-     * @param {string|ArrayBuffer} key
-     * @param {string} string
-     * @returns {Promise<ArrayBuffer>}
-     */
     async function hmac(key, string) {
         const cryptoKey = await crypto.subtle.importKey(
             'raw',
@@ -2134,10 +1963,6 @@ var CupcakeProviderManager = (function (exports) {
         return crypto.subtle.sign('HMAC', cryptoKey, encoder.encode(string));
     }
 
-    /**
-     * @param {string|ArrayBuffer} content
-     * @returns {Promise<ArrayBuffer>}
-     */
     async function hash(content) {
         return crypto.subtle.digest(
             'SHA-256',
@@ -2145,11 +1970,6 @@ var CupcakeProviderManager = (function (exports) {
         );
     }
 
-    /**
-     * @param {URL} url
-     * @param {Headers} headers
-     * @returns {[string, string]}
-     */
     function guessServiceRegion(url, headers) {
         const { hostname, pathname } = url;
 
@@ -2188,7 +2008,7 @@ var CupcakeProviderManager = (function (exports) {
             [service, region] = [region, service];
         }
 
-        return [/** @type {Record<string, string>} */ (HOST_SERVICES)[service] || service, region || ''];
+        return [HOST_SERVICES[service] || service, region || ''];
     }
 
     /**
@@ -2196,24 +2016,6 @@ var CupcakeProviderManager = (function (exports) {
      * Signs HTTP requests for AWS services (Bedrock, STS, etc.) using Web Crypto API.
      */
     class AwsV4Signer {
-        /**
-         * @param {object} options
-         * @param {string} [options.method]
-         * @param {string|URL} options.url
-         * @param {HeadersInit} [options.headers]
-         * @param {string|ArrayBuffer|null} [options.body]
-         * @param {string} options.accessKeyId
-         * @param {string} options.secretAccessKey
-         * @param {string} [options.sessionToken]
-         * @param {string} [options.service]
-         * @param {string} [options.region]
-         * @param {Map<string, ArrayBuffer>} [options.cache]
-         * @param {string} [options.datetime]
-         * @param {boolean} [options.signQuery]
-         * @param {boolean} [options.appendSessionToken]
-         * @param {boolean} [options.allHeaders]
-         * @param {boolean} [options.singleEncode]
-         */
         constructor({ method, url, headers, body, accessKeyId, secretAccessKey, sessionToken, service, region, cache, datetime, signQuery, appendSessionToken, allHeaders, singleEncode }) {
             if (url == null) throw new TypeError('url is a required option');
             if (accessKeyId == null) throw new TypeError('accessKeyId is a required option');
@@ -2356,7 +2158,6 @@ var CupcakeProviderManager = (function (exports) {
         }
     }
 
-    // @ts-check
     /**
      * api-request-log.js — API Request History (ring buffer for API View feature).
      * Tracks HTTP requests/responses for debugging UI. Max 20 entries.
@@ -2364,7 +2165,6 @@ var CupcakeProviderManager = (function (exports) {
 
     const _apiRequestHistory = new Map();
     const _API_REQUEST_HISTORY_MAX = 20;
-    /** @type {string | null} */
     let _apiRequestLatestId = null;
 
     /**
@@ -2404,7 +2204,7 @@ var CupcakeProviderManager = (function (exports) {
 
     /**
      * Get all API request entries as an array, newest first.
-     * @returns {any[]}
+     * @returns {Array}
      */
     function getAllApiRequests() {
         const entries = [];
@@ -2446,8 +2246,7 @@ var CupcakeProviderManager = (function (exports) {
     function supportsOpenAIReasoningEffort(modelName) {
         if (!modelName) return false;
         const m = String(modelName).toLowerCase();
-        // o3/o4 family (all variants: o3, o3-mini, o3-pro, o4-mini, etc.)
-        if (/(?:^|\/)o(?:3|4)(?:[\w.-]*)$/i.test(m)) return true;
+        if (/(?:^|\/)o(?:3(?:-mini|-pro|-deep-research)?|4-mini(?:-deep-research)?)$/i.test(m)) return true;
         return /(?:^|\/)gpt-5(?:\.\d+)?(?:-(?:mini|nano))?(?:-\d{4}-\d{2}-\d{2})?$/i.test(m);
     }
 
@@ -2472,9 +2271,9 @@ var CupcakeProviderManager = (function (exports) {
      */
     function shouldStripOpenAISamplingParams(modelName) {
         if (!modelName) return false;
-        const m = String(modelName).toLowerCase();
-        // o3/o4 family: strip all sampling params (temperature, top_p, etc.)
-        return /(?:^|\/)o(?:3|4)(?:[\w.-]*)$/i.test(m);
+        return /(?:^|\/)o(?:3(?:-mini|-pro|-deep-research)?|4-mini(?:-deep-research)?)$/i.test(
+            String(modelName).toLowerCase(),
+        );
     }
 
     /**
@@ -2504,7 +2303,6 @@ var CupcakeProviderManager = (function (exports) {
         return /(?:^|\/)(?:gpt-(?:4\.5|5)|o[1-9])/i.test(modelName);
     }
 
-    // @ts-check
     /**
      * response-parsers.js — Non-streaming response parsers for all providers.
      * Pure functions that extract text content from API JSON responses.
@@ -2513,7 +2311,7 @@ var CupcakeProviderManager = (function (exports) {
     /**
      * Parse OpenAI Chat Completions non-streaming response.
      * Handles reasoning_content (o-series), reasoning (OpenRouter), DeepSeek <think> blocks.
-     * @param {Record<string, any>} data - Parsed JSON response
+     * @param {Object} data - Parsed JSON response
      * @param {string} [_requestId] - Optional API View request ID
      * @returns {{ success: boolean, content: string }}
      */
@@ -2545,8 +2343,7 @@ var CupcakeProviderManager = (function (exports) {
         out += content;
 
         if (data.usage) {
-            const _tu = _normalizeTokenUsage(data.usage, 'openai');
-            if (_tu) _setTokenUsage(/** @type {string} */ (_requestId), _tu, false);
+            _setTokenUsage(_requestId, _normalizeTokenUsage(data.usage, 'openai'), false);
         }
         return { success: !!out, content: out || '[OpenAI] Empty response' };
     }
@@ -2554,7 +2351,7 @@ var CupcakeProviderManager = (function (exports) {
     /**
      * Parse OpenAI Responses API non-streaming response (GPT-5.4+).
      * Extracts text from output[].content[].text and reasoning from output[].summary[].
-     * @param {Record<string, any>} data - Parsed JSON response
+     * @param {Object} data - Parsed JSON response
      * @param {string} [_requestId] - Optional API View request ID
      * @returns {{ success: boolean, content: string }}
      */
@@ -2569,8 +2366,8 @@ var CupcakeProviderManager = (function (exports) {
             if (!item || typeof item !== 'object') continue;
             if (item.type === 'reasoning' && Array.isArray(item.summary)) {
                 const reasoningText = item.summary
-                    .filter(/** @type {(s: any) => boolean} */ (s) => s && s.type === 'summary_text')
-                    .map(/** @type {(s: any) => string} */ (s) => s.text || '')
+                    .filter(s => s && s.type === 'summary_text')
+                    .map(s => s.text || '')
                     .join('');
                 if (reasoningText) out += '<Thoughts>\n' + reasoningText + '\n</Thoughts>\n';
             }
@@ -2583,8 +2380,7 @@ var CupcakeProviderManager = (function (exports) {
         }
 
         if (data.usage) {
-            const _tu = _normalizeTokenUsage(data.usage, 'openai');
-            if (_tu) _setTokenUsage(/** @type {string} */ (_requestId), _tu, false);
+            _setTokenUsage(_requestId, _normalizeTokenUsage(data.usage, 'openai'), false);
         }
         return { success: !!out, content: out || '[Responses API] Empty response' };
     }
@@ -2592,14 +2388,15 @@ var CupcakeProviderManager = (function (exports) {
     /**
      * Parse Gemini generateContent non-streaming response.
      * Handles safety blocks, thoughts, thought_signature caching.
-     * @param {Record<string, any>} data - Parsed JSON response
-     * @param {Record<string, any>} [config] - { useThoughtSignature }
+     * @param {Object} data - Parsed JSON response
+     * @param {Object} [config] - { useThoughtSignature }
      * @param {string} [_requestId] - Optional API View request ID
      * @returns {{ success: boolean, content: string }}
      */
     function parseGeminiNonStreamingResponse(data, config = {}, _requestId) {
         const blockReason = data?.promptFeedback?.blockReason ?? data?.candidates?.[0]?.finishReason;
-        if (blockReason && GEMINI_BLOCK_REASONS.includes(blockReason)) {
+        const BLOCK_REASONS = ['SAFETY', 'RECITATION', 'OTHER', 'BLOCKLIST', 'PROHIBITED_CONTENT', 'SPII'];
+        if (blockReason && BLOCK_REASONS.includes(blockReason)) {
             return {
                 success: false,
                 content: `[⚠️ Gemini Safety Block: ${blockReason}] ${JSON.stringify(data.promptFeedback || data.candidates?.[0]?.safetyRatings || '').substring(0, 500)}`,
@@ -2632,8 +2429,7 @@ var CupcakeProviderManager = (function (exports) {
             ThoughtSignatureCache.save(result, extractedSignature);
         }
         if (data.usageMetadata) {
-            const _tu = _normalizeTokenUsage(data.usageMetadata, 'gemini');
-            if (_tu) _setTokenUsage(/** @type {string} */ (_requestId), _tu, false);
+            _setTokenUsage(_requestId, _normalizeTokenUsage(data.usageMetadata, 'gemini'), false);
         }
         return { success: !!result, content: result || '[Gemini] Empty response' };
     }
@@ -2641,8 +2437,8 @@ var CupcakeProviderManager = (function (exports) {
     /**
      * Parse Claude (Anthropic) non-streaming response.
      * Handles thinking/redacted_thinking blocks.
-     * @param {Record<string, any>} data - Parsed JSON response
-     * @param {Record<string, any>} [_config] - Unused, reserved for future options
+     * @param {Object} data - Parsed JSON response
+     * @param {Object} [_config] - Unused, reserved for future options
      * @param {string} [_requestId] - Optional API View request ID
      * @returns {{ success: boolean, content: string }}
      */
@@ -2680,11 +2476,10 @@ var CupcakeProviderManager = (function (exports) {
 
         if (inThinking) result += '</Thoughts>\n\n';
         if (data.usage) {
-            const _tu = _normalizeTokenUsage(data.usage, 'anthropic', {
+            _setTokenUsage(_requestId, _normalizeTokenUsage(data.usage, 'anthropic', {
                 anthropicHasThinking: hasThinking,
                 anthropicVisibleText: visibleText,
-            });
-            if (_tu) _setTokenUsage(/** @type {string} */ (_requestId), _tu, false);
+            }), false);
         }
         return { success: !!result, content: result || '[Claude] Empty response' };
     }
@@ -2696,8 +2491,7 @@ var CupcakeProviderManager = (function (exports) {
      * Uses dependency injection for _updateApiRequest to avoid tight coupling.
      */
 
-    /** Module-level reference to the API request logger. Set via setApiRequestLogger().
-     * @type {Function|null} */
+    /** Module-level reference to the API request logger. Set via setApiRequestLogger(). */
     let _logFn = null;
 
     /**
@@ -2708,7 +2502,6 @@ var CupcakeProviderManager = (function (exports) {
         _logFn = typeof fn === 'function' ? fn : null;
     }
 
-    /** @param {string|undefined} requestId @param {any} updates */
     function _log(requestId, updates) {
         if (_logFn && requestId) _logFn(requestId, updates);
     }
@@ -2725,7 +2518,7 @@ var CupcakeProviderManager = (function (exports) {
      * @returns {ReadableStream<string>}
      */
     function createSSEStream(response, lineParser, abortSignal, onComplete, _logRequestId) {
-        const reader = /** @type {ReadableStream<Uint8Array>} */ (response.body).getReader();
+        const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
         let _accumulatedContent = '';
@@ -2764,9 +2557,9 @@ var CupcakeProviderManager = (function (exports) {
                         }
                     }
                 } catch (e) {
-                    if (/** @type {any} */ (e).name !== 'AbortError') {
+                    if (e.name !== 'AbortError') {
                         if (typeof onComplete === 'function') try { const _f = onComplete(); if (_f) controller.enqueue(_f); } catch (_) { /* */ }
-                        _log(_logRequestId, { response: _accumulatedContent + `\n[Stream Error: ${/** @type {any} */ (e).message}]` });
+                        _log(_logRequestId, { response: _accumulatedContent + `\n[Stream Error: ${e.message}]` });
                         controller.error(e);
                     } else {
                         if (typeof onComplete === 'function') try { const _f = onComplete(); if (_f) controller.enqueue(_f); } catch (_) { /* */ }
@@ -2794,10 +2587,8 @@ var CupcakeProviderManager = (function (exports) {
      */
     function createOpenAISSEStream(response, abortSignal, _logRequestId) {
         let inReasoning = false;
-        /** @type {any} */
         let _streamUsage = null;
 
-        /** @param {string} line */
         function parser(line) {
             if (!line.startsWith('data:')) return null;
             const jsonStr = line.slice(5).trim();
@@ -2822,7 +2613,7 @@ var CupcakeProviderManager = (function (exports) {
         }
 
         function onComplete() {
-            if (_streamUsage) _setTokenUsage(/** @type {string} */ (_logRequestId), _streamUsage, true);
+            if (_streamUsage) _setTokenUsage(_logRequestId, _streamUsage, true);
             if (inReasoning) { inReasoning = false; return '\n</Thoughts>\n'; }
             return null;
         }
@@ -2842,10 +2633,8 @@ var CupcakeProviderManager = (function (exports) {
      */
     function createResponsesAPISSEStream(response, abortSignal, _logRequestId) {
         let inReasoning = false;
-        /** @type {any} */
         let _streamUsage = null;
 
-        /** @param {string} line */
         function parser(line) {
             if (!line.startsWith('data:')) return null;
             const jsonStr = line.slice(5).trim();
@@ -2872,7 +2661,7 @@ var CupcakeProviderManager = (function (exports) {
         }
 
         function onComplete() {
-            if (_streamUsage) _setTokenUsage(/** @type {string} */ (_logRequestId), _streamUsage, true);
+            if (_streamUsage) _setTokenUsage(_logRequestId, _streamUsage, true);
             if (inReasoning) { inReasoning = false; return '\n</Thoughts>\n'; }
             return null;
         }
@@ -2888,12 +2677,10 @@ var CupcakeProviderManager = (function (exports) {
      * @param {Response} response
      * @param {AbortSignal} [abortSignal]
      * @param {string} [_logRequestId]
-     * @param {{showThinking?: boolean}} [opts]
      * @returns {ReadableStream<string>}
      */
-    function createAnthropicSSEStream(response, abortSignal, _logRequestId, opts) {
-        const _showThinking = opts?.showThinking !== false; // default: true (show thinking)
-        const reader = /** @type {ReadableStream<Uint8Array>} */ (response.body).getReader();
+    function createAnthropicSSEStream(response, abortSignal, _logRequestId) {
+        const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
         let currentEvent = '';
@@ -2908,16 +2695,16 @@ var CupcakeProviderManager = (function (exports) {
                 try {
                     while (true) {
                         if (abortSignal && abortSignal.aborted) {
-                            if (thinking && _showThinking) {
+                            if (thinking) {
                                 const closeTag = '</Thoughts>\n\n';
                                 try { controller.enqueue(closeTag); _accumulatedContent += closeTag; } catch (_) { /* */ }
+                                thinking = false;
                             }
-                            thinking = false;
                             if (_streamUsage.input_tokens > 0 || _streamUsage.output_tokens > 0) {
-                                _setTokenUsage(/** @type {string} */ (_logRequestId), /** @type {any} */ (_normalizeTokenUsage(_streamUsage, 'anthropic', {
+                                _setTokenUsage(_logRequestId, _normalizeTokenUsage(_streamUsage, 'anthropic', {
                                     anthropicHasThinking: hasThinking,
                                     anthropicVisibleText: _visibleText,
-                                })), true);
+                                }), true);
                             }
                             reader.cancel();
                             _log(_logRequestId, { response: _accumulatedContent || '(aborted)' });
@@ -2926,17 +2713,17 @@ var CupcakeProviderManager = (function (exports) {
                         }
                         const { done, value } = await reader.read();
                         if (done) {
-                            if (thinking && _showThinking) {
+                            if (thinking) {
                                 const closeTag = '</Thoughts>\n\n';
                                 controller.enqueue(closeTag);
                                 _accumulatedContent += closeTag;
+                                thinking = false;
                             }
-                            thinking = false;
                             if (_streamUsage.input_tokens > 0 || _streamUsage.output_tokens > 0) {
-                                _setTokenUsage(/** @type {string} */ (_logRequestId), /** @type {any} */ (_normalizeTokenUsage(_streamUsage, 'anthropic', {
+                                _setTokenUsage(_logRequestId, _normalizeTokenUsage(_streamUsage, 'anthropic', {
                                     anthropicHasThinking: hasThinking,
                                     anthropicVisibleText: _visibleText,
-                                })), true);
+                                }), true);
                             }
                             _log(_logRequestId, { response: _accumulatedContent || '(empty stream)' });
                             if (_accumulatedContent) console.log('[CupcakePM] 📥 Streamed Response Body (Anthropic):', _accumulatedContent);
@@ -2962,24 +2749,16 @@ var CupcakeProviderManager = (function (exports) {
                                         if (obj.delta?.type === 'thinking' || obj.delta?.type === 'thinking_delta') {
                                             if (obj.delta.thinking) {
                                                 hasThinking = true;
-                                                if (_showThinking) {
-                                                    if (!thinking) { thinking = true; deltaText += '<Thoughts>\n'; }
-                                                    deltaText += obj.delta.thinking;
-                                                } else {
-                                                    thinking = true; // track state even when hidden
-                                                }
+                                                if (!thinking) { thinking = true; deltaText += '<Thoughts>\n'; }
+                                                deltaText += obj.delta.thinking;
                                             }
                                         } else if (obj.delta?.type === 'redacted_thinking') {
                                             hasThinking = true;
-                                            if (_showThinking) {
-                                                if (!thinking) { thinking = true; deltaText += '<Thoughts>\n'; }
-                                                deltaText += '\n{{redacted_thinking}}\n';
-                                            } else {
-                                                thinking = true;
-                                            }
+                                            if (!thinking) { thinking = true; deltaText += '<Thoughts>\n'; }
+                                            deltaText += '\n{{redacted_thinking}}\n';
                                         } else if (obj.delta?.type === 'text_delta' || obj.delta?.type === 'text') {
                                             if (obj.delta.text) {
-                                                if (thinking) { thinking = false; if (_showThinking) deltaText += '</Thoughts>\n\n'; }
+                                                if (thinking) { thinking = false; deltaText += '</Thoughts>\n\n'; }
                                                 _visibleText += obj.delta.text;
                                                 deltaText += obj.delta.text;
                                             }
@@ -2988,15 +2767,11 @@ var CupcakeProviderManager = (function (exports) {
                                     } else if (currentEvent === 'content_block_start') {
                                         if (obj.content_block?.type === 'redacted_thinking') {
                                             hasThinking = true;
-                                            if (_showThinking) {
-                                                let rt = '';
-                                                if (!thinking) { thinking = true; rt += '<Thoughts>\n'; }
-                                                rt += '\n{{redacted_thinking}}\n';
-                                                controller.enqueue(rt);
-                                                _accumulatedContent += rt;
-                                            } else {
-                                                thinking = true;
-                                            }
+                                            let rt = '';
+                                            if (!thinking) { thinking = true; rt += '<Thoughts>\n'; }
+                                            rt += '\n{{redacted_thinking}}\n';
+                                            controller.enqueue(rt);
+                                            _accumulatedContent += rt;
                                         }
                                     } else if (currentEvent === 'error' || obj.type === 'error') {
                                         const errMsg = obj.error?.message || obj.message || 'Unknown stream error';
@@ -3017,19 +2792,19 @@ var CupcakeProviderManager = (function (exports) {
                         }
                     }
                 } catch (e) {
-                    if (thinking && _showThinking) {
+                    if (thinking) {
                         const closeTag = '</Thoughts>\n\n';
                         try { controller.enqueue(closeTag); _accumulatedContent += closeTag; } catch (_) { /* */ }
+                        thinking = false;
                     }
-                    thinking = false;
                     if (_streamUsage.input_tokens > 0 || _streamUsage.output_tokens > 0) {
-                        _setTokenUsage(/** @type {string} */ (_logRequestId), /** @type {any} */ (_normalizeTokenUsage(_streamUsage, 'anthropic', {
+                        _setTokenUsage(_logRequestId, _normalizeTokenUsage(_streamUsage, 'anthropic', {
                             anthropicHasThinking: hasThinking,
                             anthropicVisibleText: _visibleText,
-                        })), true);
+                        }), true);
                     }
-                    if (/** @type {any} */ (e).name !== 'AbortError') {
-                        _log(_logRequestId, { response: _accumulatedContent + `\n[Stream Error: ${/** @type {any} */ (e).message}]` });
+                    if (e.name !== 'AbortError') {
+                        _log(_logRequestId, { response: _accumulatedContent + `\n[Stream Error: ${e.message}]` });
                         controller.error(e);
                     } else {
                         _log(_logRequestId, { response: _accumulatedContent || '(aborted)' });
@@ -3040,10 +2815,10 @@ var CupcakeProviderManager = (function (exports) {
             cancel() {
                 _log(_logRequestId, { response: _accumulatedContent || '(cancelled)' });
                 if (_streamUsage.input_tokens > 0 || _streamUsage.output_tokens > 0) {
-                    _setTokenUsage(/** @type {string} */ (_logRequestId), /** @type {any} */ (_normalizeTokenUsage(_streamUsage, 'anthropic', {
+                    _setTokenUsage(_logRequestId, _normalizeTokenUsage(_streamUsage, 'anthropic', {
                         anthropicHasThinking: hasThinking,
                         anthropicVisibleText: _visibleText,
-                    })), true);
+                    }), true);
                 }
                 reader.cancel();
             },
@@ -3054,7 +2829,7 @@ var CupcakeProviderManager = (function (exports) {
 
     /**
      * onComplete callback for Gemini streams — saves thought_signature from config.
-     * @param {Record<string, any>} config - Mutable config object populated during streaming
+     * @param {Object} config - Mutable config object populated during streaming
      * @param {string} [_requestId]
      * @returns {string|undefined} Final chunk to enqueue (e.g. closing </Thoughts>)
      */
@@ -3070,12 +2845,11 @@ var CupcakeProviderManager = (function (exports) {
         }
         if (config._streamUsageMetadata) {
             const _usageReqId = _requestId || config._tokenUsageReqId;
-            _setTokenUsage(_usageReqId, /** @type {any} */ (_normalizeTokenUsage(config._streamUsageMetadata, 'gemini')), true);
+            _setTokenUsage(_usageReqId, _normalizeTokenUsage(config._streamUsageMetadata, 'gemini'), true);
         }
         return finalChunk || undefined;
     }
 
-    // @ts-check
     /**
      * stream-utils.js — Stream utility functions.
      * Provides stream collection and bridge capability detection.
@@ -3105,7 +2879,6 @@ var CupcakeProviderManager = (function (exports) {
     }
 
     /** Cached result of stream bridge capability detection. */
-    /** @type {boolean | null} */
     let _streamBridgeCapable = null;
 
     /**
@@ -3168,129 +2941,18 @@ var CupcakeProviderManager = (function (exports) {
         _streamBridgeCapable = null;
     }
 
-    // @ts-check
-    /**
-     * copilot-headers.js — Copilot API emulation header constants.
-     *
-     * Extracted from fetch-custom.js so that version bumps (e.g. when GitHub
-     * updates the Copilot Chat extension) can be done in a single place
-     * without touching the core fetch logic.
-     */
-
-    /** Copilot Chat extension version emulated by CPM. */
-    const COPILOT_CHAT_VERSION = '0.37.4';
-
-    /** VS Code editor version emulated by CPM. */
-    const VSCODE_VERSION = '1.109.2';
-
-    /** GitHub API version header value. */
-    const GITHUB_API_VERSION = '2025-10-01';
-
-    /** Token exchange API version header value. */
-    const GITHUB_TOKEN_API_VERSION = '2024-12-15';
-
-    /** Browser-like User-Agent used for token exchange. */
-    const COPILOT_TOKEN_USER_AGENT = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Code/${VSCODE_VERSION} Chrome/142.0.7444.265 Electron/39.3.0 Safari/537.36`;
-
-    /** @typedef {'off' | 'nodeless-1' | 'nodeless-2'} CopilotNodelessMode */
-
-    /**
-     * Normalize the persisted node-less compatibility mode.
-     *
-     * @param {string | null | undefined} value
-     * @returns {CopilotNodelessMode}
-     */
-    function normalizeCopilotNodelessMode(value) {
-        if (value === 'nodeless-1' || value === 'nodeless-2') return value;
-        return 'off';
-    }
-
-    /**
-     * @param {string | null | undefined} mode
-     * @returns {boolean}
-     */
-    function shouldUseNodelessTokenHeaders(mode) {
-        const normalized = normalizeCopilotNodelessMode(mode);
-        return normalized === 'nodeless-1' || normalized === 'nodeless-2';
-    }
-
-    /**
-     * @param {string | null | undefined} mode
-     * @returns {boolean}
-     */
-    function shouldUseLegacyCopilotRequestHeaders(mode) {
-        return normalizeCopilotNodelessMode(mode) === 'nodeless-2';
-    }
-
-    /**
-     * Build headers for GitHub OAuth → Copilot token exchange.
-     * `nodeless-1` and `nodeless-2` intentionally keep this minimal so users can
-     * test browser-direct node-less environments with fewer CORS-preflight issues.
-     *
-     * @param {string} oauthToken
-     * @param {string | null | undefined} [mode='off']
-     * @returns {Record<string, string>}
-     */
-    function buildCopilotTokenExchangeHeaders(oauthToken, mode = 'off') {
-        const headers = {
-            'Accept': 'application/json',
-            'Authorization': `Bearer ${oauthToken}`,
-            'User-Agent': COPILOT_TOKEN_USER_AGENT,
-        };
-        if (shouldUseNodelessTokenHeaders(mode)) return headers;
-        return {
-            ...headers,
-            'Editor-Version': `vscode/${VSCODE_VERSION}`,
-            'Editor-Plugin-Version': `copilot-chat/${COPILOT_CHAT_VERSION}`,
-            'X-GitHub-Api-Version': GITHUB_TOKEN_API_VERSION,
-        };
-    }
-
-    /**
-     * Build the static Copilot emulation headers.
-     * Dynamic per-request headers (machine-id, session-id, interaction-id, etc.)
-     * are NOT included here — they are set by the caller.
-     *
-     * `nodeless-2` uses the old minimal request-header profile so users can test
-     * restrictive node-less hosts without changing the global/default behavior.
-     *
-     * @param {string | null | undefined} [mode='off']
-     * @returns {Record<string, string>}
-     */
-    function getCopilotStaticHeaders(mode = 'off') {
-        if (shouldUseLegacyCopilotRequestHeaders(mode)) {
-            return {
-                'Copilot-Integration-Id': 'vscode-chat',
-            };
-        }
-        return {
-            'Copilot-Integration-Id': 'vscode-chat',
-            'Editor-Plugin-Version': `copilot-chat/${COPILOT_CHAT_VERSION}`,
-            'Editor-Version': `vscode/${VSCODE_VERSION}`,
-            'User-Agent': `GitHubCopilotChat/${COPILOT_CHAT_VERSION}`,
-            'X-Github-Api-Version': GITHUB_API_VERSION,
-            'X-Initiator': 'user',
-            'X-Interaction-Type': 'conversation-panel',
-            'X-Vscode-User-Agent-Library-Version': 'electron-fetch',
-        };
-    }
-
-    // @ts-check
     /**
      * copilot-token.js — GitHub Copilot API token management.
      * Handles OAuth → API token exchange with caching and single-flight dedup.
      * Uses dependency injection for safeGetArg and fetch to enable testing.
      */
 
-    /** Negative cache duration (ms) — prevents rapid-fire retries after failure */
-    const _NEGATIVE_CACHE_MS = 60000;
-
     let _copilotTokenCache = { token: '', expiry: 0 };
-    let _copilotTokenPromise = /** @type {Promise<string> | null} */ (null);
+    let _copilotTokenPromise = null;
 
     /** Injected dependencies */
-    let _getArgFn = /** @type {Function | null} */ (null);
-    let _fetchFn = /** @type {Function | null} */ (null);
+    let _getArgFn = null;
+    let _fetchFn = null;
 
     /**
      * Set the safeGetArg dependency for reading stored arguments.
@@ -3315,11 +2977,6 @@ var CupcakeProviderManager = (function (exports) {
      * @returns {Promise<string>} API token or empty string on failure
      */
     async function ensureCopilotApiToken() {
-        // Negative cache: if a recent exchange failed, don't retry until expiry
-        if (!_copilotTokenCache.token && _copilotTokenCache.expiry > 0 && Date.now() < _copilotTokenCache.expiry) {
-            return '';
-        }
-
         // Return cached token if still valid (with 60s safety margin)
         if (_copilotTokenCache.token && Date.now() < _copilotTokenCache.expiry - 60000) {
             return _copilotTokenCache.token;
@@ -3339,7 +2996,6 @@ var CupcakeProviderManager = (function (exports) {
 
         _copilotTokenPromise = (async () => {
             const githubToken = await _getArgFn('tools_githubCopilotToken');
-            const nodelessMode = normalizeCopilotNodelessMode(await _getArgFn('cpm_copilot_nodeless_mode'));
             if (!githubToken) {
                 console.warn('[Cupcake PM] Copilot: No GitHub OAuth token found. Set token via Copilot Manager.');
                 return '';
@@ -3351,13 +3007,18 @@ var CupcakeProviderManager = (function (exports) {
             console.log('[Cupcake PM] Copilot: Exchanging OAuth token for API token...');
             const res = await fetchFn('https://api.github.com/copilot_internal/v2/token', {
                 method: 'GET',
-                headers: buildCopilotTokenExchangeHeaders(cleanToken, nodelessMode),
+                headers: {
+                    'Accept': 'application/json',
+                    'Authorization': `Bearer ${cleanToken}`,
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Code/1.109.2 Chrome/142.0.7444.265 Electron/39.3.0 Safari/537.36',
+                    'Editor-Version': 'vscode/1.109.2',
+                    'Editor-Plugin-Version': 'copilot-chat/0.37.4',
+                    'X-GitHub-Api-Version': '2024-12-15',
+                },
             });
 
             if (!res.ok) {
                 console.error(`[Cupcake PM] Copilot token exchange failed (${res.status}): ${await res.text()}`);
-                // Negative cache: avoid retrying the same failed exchange for 60s
-                _copilotTokenCache = { token: '', expiry: Date.now() + _NEGATIVE_CACHE_MS };
                 return '';
             }
 
@@ -3389,15 +3050,13 @@ var CupcakeProviderManager = (function (exports) {
             }
 
             console.error('[Cupcake PM] Copilot token exchange returned no token');
-            // Negative cache: avoid retrying the same failed exchange for 60s
-            _copilotTokenCache = { token: '', expiry: Date.now() + _NEGATIVE_CACHE_MS };
             return '';
         })();
 
         try {
             return await _copilotTokenPromise;
         } catch (e) {
-            console.error('[Cupcake PM] Copilot token exchange error:', /** @type {Error} */ (e).message);
+            console.error('[Cupcake PM] Copilot token exchange error:', e.message);
             return '';
         } finally {
             _copilotTokenPromise = null;
@@ -3412,7 +3071,6 @@ var CupcakeProviderManager = (function (exports) {
         _copilotTokenPromise = null;
     }
 
-    // @ts-check
     /**
      * smart-fetch.js — 3-strategy fetch wrapper for V3 iframe sandbox.
      *
@@ -3422,7 +3080,6 @@ var CupcakeProviderManager = (function (exports) {
      *
      * Dependency: sanitizeBodyJSON from sanitize.js, Risu from shared-state.js
      */
-    // checkStreamCapability removed — compat mode is manual-toggle only now
 
     /**
      * Smart native fetch: 3-strategy fallback for V3 iframe sandbox.
@@ -3430,182 +3087,46 @@ var CupcakeProviderManager = (function (exports) {
      * @param {RequestInit} options
      * @returns {Promise<Response>}
      */
-
-    /**
-     * Race a fetch-like promise against an AbortSignal.
-     * When the V3 bridge cannot serialize AbortSignal (DataCloneError), we strip
-     * the signal from the outgoing request but still need the caller to see
-     * AbortError when the user cancels. This helper monitors the original signal
-     * and rejects with AbortError if it fires before the fetch resolves.
-     *
-     * Limitation: the underlying HTTP request on the host side continues
-     * (V3 bridge cannot relay abort in the guest→host direction).
-     *
-     * @template T
-     * @param {Promise<T>} fetchPromise - The in-flight fetch (already started without signal)
-     * @param {AbortSignal} signal - The original signal to monitor
-     * @returns {Promise<T>}
-     */
-    function _raceWithAbortSignal(fetchPromise, signal) {
-        if (!signal) return fetchPromise;
-        if (signal.aborted) {
-            return Promise.reject(new DOMException('The operation was aborted.', 'AbortError'));
-        }
-        return new Promise((resolve, reject) => {
-            let settled = false;
-            const onAbort = () => {
-                if (!settled) {
-                    settled = true;
-                    reject(new DOMException('The operation was aborted.', 'AbortError'));
-                }
-            };
-            signal.addEventListener('abort', onAbort, { once: true });
-            fetchPromise.then(
-                (result) => {
-                    if (!settled) { settled = true; signal.removeEventListener('abort', onAbort); resolve(result); }
-                },
-                (error) => {
-                    if (!settled) { settled = true; signal.removeEventListener('abort', onAbort); reject(error); }
-                }
-            );
-        });
-    }
-
-    /**
-     * Check if an error is an AbortError (user cancellation).
-     * AbortErrors must propagate through all strategy catch blocks.
-     * @param {*} e
-     * @returns {boolean}
-     */
-    function _isAbortError(e) {
-        if (!e) return false;
-        if (e.name === 'AbortError') return true;
-        if (e instanceof DOMException && e.code === 20) return true;
-        return false;
-    }
-
-    /** Cached compatibility mode flag — null = not yet read, boolean = cached value */
-    /** @type {boolean | null} */
-    let _compatibilityModeCache = null;
-
-    /**
-     * Reset cached compatibility mode state (for testing).
-     */
-    function _resetCompatibilityCache() {
-        _compatibilityModeCache = null;
-    }
-
-    /**
-     * Check if compatibility mode is active (manual user toggle only).
-     * Result is cached for the lifetime of the plugin.
-     * @returns {Promise<boolean>}
-     */
-    async function _isCompatibilityMode() {
-        if (_compatibilityModeCache === null) {
-            _compatibilityModeCache = await safeGetBoolArg('cpm_compatibility_mode', false);
-        }
-        return _compatibilityModeCache;
-    }
-
-    /**
-     * @param {string} url
-     * @param {RequestInit & Record<string, any>} [options]
-     * @returns {Promise<Response>}
-     */
     async function smartNativeFetch(url, options = {}) {
-        // Early abort check — avoid unnecessary work if already cancelled
-        if (options.signal && options.signal.aborted) {
-            throw new DOMException('The operation was aborted.', 'AbortError');
-        }
-
         // Final body sanitization before any network call
         if (options.method === 'POST' && typeof options.body === 'string') {
             try {
                 options = { ...options, body: sanitizeBodyJSON(options.body) };
             } catch (e) {
-                console.error('[CupcakePM] smartNativeFetch: body re-sanitization failed:', /** @type {Error} */ (e).message);
+                console.error('[CupcakePM] smartNativeFetch: body re-sanitization failed:', e.message);
             }
+        }
+
+        // Strategy 1: Direct browser fetch from iframe
+        try {
+            const res = await fetch(url, options);
+            return res;
+        } catch (e) {
+            console.log(`[CupcakePM] Direct fetch failed for ${url.substring(0, 60)}...: ${e.message}`);
         }
 
         const _isCopilotUrl = url.includes('githubcopilot.com') || url.includes('copilot_internal');
-        const _isGoogleApiUrl = url.includes('generativelanguage.googleapis.com') || url.includes('aiplatform.googleapis.com') || url.includes('oauth2.googleapis.com');
-        // Copilot URLs always skip direct browser fetch (CSP blocks it in iframe sandbox).
-        // Google URLs skip only for non-GET (POST/SSE) where nativeFetch is more stable.
-        const _preferNativeFirst = (_isGoogleApiUrl && (options.method || 'POST') !== 'GET') || _isCopilotUrl;
-
-        // ─── Compatibility Mode: skip nativeFetch entirely ───
-        const _compatMode = await _isCompatibilityMode();
-        if (_compatMode) {
-            console.log(`[CupcakePM] Compatibility mode active — skipping nativeFetch for ${url.substring(0, 60)}`);
-        }
 
         // Best-effort AbortSignal propagation across V3 bridge.
-        // V3 factory.ts only handles AbortSignal in the host→guest direction
-        // (ABORT_SIGNAL_REF). The guest→host direction (plugin calling nativeFetch)
-        // cannot serialize AbortSignal via postMessage. When this DataCloneError
-        // occurs, we strip the signal but race the request against the original
-        // signal so callers still see AbortError on cancellation.
-        const callNativeFetchWithAbortFallback = async (/** @type {string} */ _url, /** @type {any} */ _options) => {
-            if (_options?.signal?.aborted) {
-                throw new DOMException('The operation was aborted.', 'AbortError');
-            }
+        const callNativeFetchWithAbortFallback = async (_url, _options) => {
             try {
                 return await Risu.nativeFetch(_url, _options);
             } catch (_err) {
-                const _msg = String(/** @type {any} */ (_err)?.message || _err || '');
+                const _msg = String(_err?.message || _err || '');
                 const _hasSignal = !!(_options && _options.signal);
                 const _cloneIssue = /clone|structured|postmessage|AbortSignal|DataCloneError/i.test(_msg);
                 if (_hasSignal && _cloneIssue) {
-                    const _signal = _options.signal;
                     const _retry = { ..._options };
                     delete _retry.signal;
-                    console.warn('[CupcakePM] nativeFetch signal bridge failed; retrying without signal (abort monitored locally):', _msg);
-                    return await _raceWithAbortSignal(Risu.nativeFetch(_url, _retry), _signal);
+                    console.warn('[CupcakePM] nativeFetch signal bridge failed; retrying without signal:', _msg);
+                    return await Risu.nativeFetch(_url, _retry);
                 }
                 throw _err;
             }
         };
 
-        // Strategy 1: Direct browser fetch from iframe
-        // For Google/Vertex and Copilot POST/SSE requests, skip direct fetch and try native/proxy first.
-        if (!_preferNativeFirst) {
-            try {
-                const res = await fetch(url, options);
-                return res;
-            } catch (e) {
-                if (_isAbortError(e)) throw e;
-                console.log(`[CupcakePM] Direct fetch failed for ${url.substring(0, 60)}...: ${/** @type {Error} */ (e).message}`);
-            }
-        }
-
-        // ─── Google / Vertex: nativeFetch first for POST/SSE stability ───
-        // Skipped in compatibility mode — nativeFetch returns Response(ReadableStream) which
-        // fails to transfer across the V3 iframe bridge on Safari < 16.4.
-        if (!_compatMode && _isGoogleApiUrl && (options.method || 'POST') !== 'GET' && Risu && typeof Risu.nativeFetch === 'function') {
-            try {
-                const nfOptions = { ...options };
-                if (typeof nfOptions.body === 'string') {
-                    nfOptions.body = new TextEncoder().encode(nfOptions.body);
-                }
-                const nfRes = await callNativeFetchWithAbortFallback(url, nfOptions);
-                if (nfRes && (nfRes.ok || (nfRes.status && nfRes.status !== 0))) {
-                    console.log(`[CupcakePM] Google/Vertex nativeFetch succeeded: status=${nfRes.status} for ${url.substring(0, 60)}`);
-                    return nfRes;
-                }
-                console.log(`[CupcakePM] Google/Vertex nativeFetch returned unusable response, trying fallbacks: status=${nfRes?.status || 'unknown'}`);
-            } catch (e) {
-                if (_isAbortError(e)) throw e;
-                console.log(`[CupcakePM] Google/Vertex nativeFetch error: ${/** @type {Error} */ (e).message}`);
-            }
-        }
-
-        // ─── Copilot-specific: nativeFetch first (GET token exchange + POST/SSE chat) ───
-        // Unlike Google, Copilot MUST NOT skip nativeFetch in compatibility mode.
-        // Copilot API does not support CORS, and the /proxy2 endpoint requires
-        // RisuAI JWT auth that plugins don't have. nativeFetch (host-side fetch)
-        // is the ONLY viable path for Copilot. If ReadableStream transfer fails
-        // in compat mode, the response will be caught by error handling below.
-        if (_isCopilotUrl && Risu && typeof Risu.nativeFetch === 'function') {
+        // ─── Copilot-specific: nativeFetch first for POST/SSE ───
+        if (_isCopilotUrl && (options.method || 'POST') !== 'GET' && typeof Risu.nativeFetch === 'function') {
             try {
                 const nfOptions = { ...options };
                 if (typeof nfOptions.body === 'string') {
@@ -3630,13 +3151,12 @@ var CupcakeProviderManager = (function (exports) {
                     console.log(`[CupcakePM] Copilot nativeFetch returned unusable response, trying proxy fallback: status=${nfRes?.status || 'unknown'}`);
                 }
             } catch (e) {
-                if (_isAbortError(e)) throw e;
-                console.log(`[CupcakePM] Copilot nativeFetch error: ${/** @type {Error} */ (e).message}`);
+                console.log(`[CupcakePM] Copilot nativeFetch error: ${e.message}`);
             }
         }
 
         // ─── Copilot risuFetch (plainFetchDeforce) ───
-        if (_isCopilotUrl && Risu && typeof Risu.risuFetch === 'function') {
+        if (_isCopilotUrl && typeof Risu.risuFetch === 'function') {
             const copilotResult = await _tryCopilotRisuFetch(url, options, 'plainFetchDeforce');
             if (copilotResult) return copilotResult;
 
@@ -3652,7 +3172,7 @@ var CupcakeProviderManager = (function (exports) {
         )) || '';
         const _isJsonBody = !_contentType || _contentType.includes('application/json');
 
-        if (!_isCopilotUrl && _isJsonBody && Risu && typeof Risu.risuFetch === 'function') {
+        if (!_isCopilotUrl && _isJsonBody && typeof Risu.risuFetch === 'function') {
             try {
                 let bodyObj = _parseBodyForRisuFetch(options.body);
                 if (bodyObj === undefined && options.body) {
@@ -3669,7 +3189,7 @@ var CupcakeProviderManager = (function (exports) {
                     try {
                         bodyObj = JSON.parse(JSON.stringify(bodyObj));
                     } catch (serErr) {
-                        console.warn('[CupcakePM] bodyObj JSON round-trip failed, stripping non-serializable keys:', /** @type {Error} */ (serErr).message);
+                        console.warn('[CupcakePM] bodyObj JSON round-trip failed, stripping non-serializable keys:', serErr.message);
                         try { bodyObj = _stripNonSerializable(bodyObj, 0); } catch (_) { }
                     }
                 }
@@ -3685,19 +3205,16 @@ var CupcakeProviderManager = (function (exports) {
                         abortSignal: options.signal,
                     });
                 } catch (_rfErr) {
-                    const _rfMsg = String(/** @type {any} */ (_rfErr)?.message || _rfErr || '');
+                    const _rfMsg = String(_rfErr?.message || _rfErr || '');
                     if (options.signal && /clone|structured|postmessage|AbortSignal|DataCloneError/i.test(_rfMsg)) {
-                        console.warn('[CupcakePM] risuFetch signal clone failed; retrying without signal (abort monitored locally):', _rfMsg);
-                        result = await _raceWithAbortSignal(
-                            Risu.risuFetch(url, {
-                                method: options.method || 'POST',
-                                headers: options.headers || {},
-                                body: bodyObj,
-                                rawResponse: true,
-                                plainFetchForce: true,
-                            }),
-                            options.signal
-                        );
+                        console.warn('[CupcakePM] risuFetch signal clone failed; retrying without signal:', _rfMsg);
+                        result = await Risu.risuFetch(url, {
+                            method: options.method || 'POST',
+                            headers: options.headers || {},
+                            body: bodyObj,
+                            rawResponse: true,
+                            plainFetchForce: true,
+                        });
                     } else {
                         throw _rfErr;
                     }
@@ -3706,7 +3223,7 @@ var CupcakeProviderManager = (function (exports) {
                 const responseBody = _extractResponseBody(result);
                 if (responseBody) {
                     console.log(`[CupcakePM] risuFetch succeeded: status=${result.status} for ${url.substring(0, 60)}`);
-                    return new Response(/** @type {any} */ (responseBody), {
+                    return new Response(responseBody, {
                         status: result.status || 200,
                         headers: new Headers(result.headers || {}),
                     });
@@ -3714,27 +3231,21 @@ var CupcakeProviderManager = (function (exports) {
                 const errPreview = typeof result?.data === 'string' ? result.data.substring(0, 120) : 'unknown';
                 console.log(`[CupcakePM] risuFetch not a real response: ${errPreview}`);
             } catch (e) {
-                if (_isAbortError(e)) throw e;
-                console.log(`[CupcakePM] risuFetch error: ${/** @type {Error} */ (e).message}`);
+                console.log(`[CupcakePM] risuFetch error: ${e.message}`);
             }
         }
 
         // ─── Strategy 3 (fallback): nativeFetch — proxy-based fetch ───
-        // In compatibility mode, skip this too — risuFetch should have already succeeded.
-        // nativeFetch returns Response(ReadableStream) which may fail on Safari < 16.4.
-        if (!_compatMode) {
-            try {
-                console.log(`[CupcakePM] Falling back to nativeFetch (proxy) for ${url.substring(0, 60)}...`);
-                const nfOptions = { ...options };
-                if (typeof nfOptions.body === 'string') {
-                    nfOptions.body = new TextEncoder().encode(nfOptions.body);
-                }
-                const res = await callNativeFetchWithAbortFallback(url, nfOptions);
-                return res;
-            } catch (e) {
-                if (_isAbortError(e)) throw e;
-                console.error(`[CupcakePM] nativeFetch also failed: ${/** @type {Error} */ (e).message}`);
+        try {
+            console.log(`[CupcakePM] Falling back to nativeFetch (proxy) for ${url.substring(0, 60)}...`);
+            const nfOptions = { ...options };
+            if (typeof nfOptions.body === 'string') {
+                nfOptions.body = new TextEncoder().encode(nfOptions.body);
             }
+            const res = await callNativeFetchWithAbortFallback(url, nfOptions);
+            return res;
+        } catch (e) {
+            console.error(`[CupcakePM] nativeFetch also failed: ${e.message}`);
         }
 
         throw new Error(`[CupcakePM] All fetch strategies failed for ${url.substring(0, 60)}`);
@@ -3742,10 +3253,6 @@ var CupcakeProviderManager = (function (exports) {
 
     // ─── Internal helpers ───
 
-    /**
-     * @param {any} body
-     * @returns {any}
-     */
     function _parseBodyForRisuFetch(body) {
         if (!body) return undefined;
         if (typeof body === 'string') {
@@ -3757,10 +3264,6 @@ var CupcakeProviderManager = (function (exports) {
         return body;
     }
 
-    /**
-     * @param {any} bodyObj
-     * @returns {any}
-     */
     function _deepSanitizeBody(bodyObj) {
         if (Array.isArray(bodyObj.messages)) {
             try {
@@ -3771,33 +3274,22 @@ var CupcakeProviderManager = (function (exports) {
                     if (_rm == null || typeof _rm !== 'object') continue;
                     if (typeof _rm.role !== 'string' || !_rm.role) continue;
                     if (_rm.content === null || _rm.content === undefined) continue;
-                    /** @type {Record<string, any>} */
                     const safeMsg = { role: _rm.role, content: _rm.content };
                     if (_rm.name && typeof _rm.name === 'string') safeMsg.name = _rm.name;
-                    // Preserve tool-calling properties required by OpenAI/Anthropic tool-use flows
-                    if (_rm.tool_calls) safeMsg.tool_calls = _rm.tool_calls;
-                    if (_rm.tool_call_id) safeMsg.tool_call_id = _rm.tool_call_id;
-                    if (_rm.function_call) safeMsg.function_call = _rm.function_call;
-                    if (_rm.refusal) safeMsg.refusal = _rm.refusal;
                     bodyObj.messages.push(safeMsg);
                 }
             } catch (_e) {
-                console.error('[CupcakePM] Deep reconstruct of messages failed:', /** @type {Error} */ (_e).message);
-                bodyObj.messages = bodyObj.messages.filter((/** @type {any} */ m) => m != null && typeof m === 'object');
+                console.error('[CupcakePM] Deep reconstruct of messages failed:', _e.message);
+                bodyObj.messages = bodyObj.messages.filter(m => m != null && typeof m === 'object');
             }
         }
         if (Array.isArray(bodyObj.contents)) {
             try { bodyObj.contents = JSON.parse(JSON.stringify(bodyObj.contents)); } catch (_) { }
-            bodyObj.contents = bodyObj.contents.filter((/** @type {any} */ m) => m != null && typeof m === 'object');
+            bodyObj.contents = bodyObj.contents.filter(m => m != null && typeof m === 'object');
         }
         return bodyObj;
     }
 
-    /**
-     * @param {any} obj
-     * @param {number} depth
-     * @returns {any}
-     */
     function _stripNonSerializable(obj, depth) {
         if (depth > 15) return undefined;
         if (obj === null || obj === undefined) return obj;
@@ -3806,7 +3298,6 @@ var CupcakeProviderManager = (function (exports) {
         if (t === 'function' || t === 'symbol' || t === 'bigint') return undefined;
         if (Array.isArray(obj)) return obj.map(v => _stripNonSerializable(v, depth + 1)).filter(v => v !== undefined);
         if (t === 'object') {
-            /** @type {Record<string, any>} */
             const out = {};
             for (const k of Object.keys(obj)) {
                 try { const v = _stripNonSerializable(obj[k], depth + 1); if (v !== undefined) out[k] = v; } catch (_) { }
@@ -3816,10 +3307,6 @@ var CupcakeProviderManager = (function (exports) {
         return undefined;
     }
 
-    /**
-     * @param {any} result
-     * @returns {Uint8Array | null}
-     */
     function _extractResponseBody(result) {
         if (!result || result.data == null) return null;
         if (result.data instanceof Uint8Array) return result.data;
@@ -3847,12 +3334,6 @@ var CupcakeProviderManager = (function (exports) {
         return null;
     }
 
-    /**
-     * @param {string} url
-     * @param {RequestInit & Record<string, any>} options
-     * @param {string} mode
-     * @returns {Promise<Response | null>}
-     */
     async function _tryCopilotRisuFetch(url, options, mode) {
         try {
             const bodyObj = _parseBodyForRisuFetch(options.body);
@@ -3860,7 +3341,6 @@ var CupcakeProviderManager = (function (exports) {
                 throw new Error('Body JSON parse failed — cannot safely pass to risuFetch');
             }
 
-            /** @type {Record<string, any>} */
             const fetchOpts = {
                 method: options.method || 'POST',
                 headers: options.headers || {},
@@ -3875,12 +3355,11 @@ var CupcakeProviderManager = (function (exports) {
             try {
                 result = await Risu.risuFetch(url, fetchOpts);
             } catch (_rfErr) {
-                const _rfMsg = String(/** @type {any} */ (_rfErr)?.message || _rfErr || '');
+                const _rfMsg = String(_rfErr?.message || _rfErr || '');
                 if (options.signal && /clone|structured|postmessage|AbortSignal|DataCloneError/i.test(_rfMsg)) {
-                    console.warn(`[CupcakePM] Copilot risuFetch(${mode}) signal clone failed; retrying without signal (abort monitored locally)`);
-                    const _signal = options.signal;
+                    console.warn(`[CupcakePM] Copilot risuFetch(${mode}) signal clone failed; retrying without signal`);
                     delete fetchOpts.abortSignal;
-                    result = await _raceWithAbortSignal(Risu.risuFetch(url, fetchOpts), _signal);
+                    result = await Risu.risuFetch(url, fetchOpts);
                 } else {
                     throw _rfErr;
                 }
@@ -3889,37 +3368,11 @@ var CupcakeProviderManager = (function (exports) {
             const responseBody = _extractResponseBody(result);
             if (responseBody) {
                 if (result.status === 524) {
-                    // In compatibility mode, block the retry to prevent duplicate requests on iPhone/Safari
-                    const _compatActive = await _isCompatibilityMode();
-                    if (_compatActive) {
-                        console.warn(`[CupcakePM] Copilot ${mode} risuFetch returned 524 — compatibility mode blocks retry to prevent duplicate requests.`);
-                        return new Response(
-                            JSON.stringify({ error: { message: 'Copilot proxy returned 524 — retry blocked by compatibility mode to prevent duplicate requests', type: 'compat_524_blocked' } }),
-                            { status: 524, headers: new Headers({ 'Content-Type': 'application/json' }) }
-                        );
-                    }
                     console.warn(`[CupcakePM] Copilot ${mode} risuFetch returned 524 for ${url.substring(0, 60)}; falling back.`);
                     return null;
                 }
-                // ─── Detect Node server proxy auth errors ───
-                // On Node-hosted RisuAI, the /proxy2 endpoint requires JWT auth
-                // (risu-auth header). When plainFetchDeforce routes through
-                // fetchWithProxy but the auth is missing/invalid, the proxy returns
-                // its own 400 error — NOT from the target API. Detect this and fall
-                // through to plainFetchForce (direct fetch) instead.
-                if (result.status === 400 && mode === 'plainFetchDeforce') {
-                    try {
-                        const _proxyErrText = new TextDecoder().decode(responseBody);
-                        const _proxyErrObj = JSON.parse(_proxyErrText);
-                        const _knownProxyErrors = ['No auth header', 'Password Incorrect', 'Token Expired', 'Unknown Public Key', 'Invalid Signature'];
-                        if (_proxyErrObj?.error && _knownProxyErrors.some(e => String(_proxyErrObj.error).includes(e))) {
-                            console.warn(`[CupcakePM] Copilot ${mode} risuFetch got proxy auth error: "${_proxyErrObj.error}" — falling through to plainFetchForce`);
-                            return null;
-                        }
-                    } catch (_) { /* not a proxy error JSON — continue normally */ }
-                }
                 console.log(`[CupcakePM] Copilot ${mode} risuFetch succeeded: status=${result.status} for ${url.substring(0, 60)}`);
-                return new Response(/** @type {any} */ (responseBody), {
+                return new Response(responseBody, {
                     status: result.status || 200,
                     headers: new Headers(result.headers || {}),
                 });
@@ -3928,13 +3381,11 @@ var CupcakeProviderManager = (function (exports) {
             const errPreview = typeof result?.data === 'string' ? result.data.substring(0, 120) : 'unknown';
             console.log(`[CupcakePM] Copilot ${mode} risuFetch not a real response: ${errPreview}`);
         } catch (e) {
-            if (_isAbortError(e)) throw e;
-            console.log(`[CupcakePM] Copilot ${mode} risuFetch error: ${/** @type {Error} */ (e).message}`);
+            console.log(`[CupcakePM] Copilot ${mode} risuFetch error: ${e.message}`);
         }
         return null;
     }
 
-    // @ts-check
     /**
      * csp-exec.js — CSP-safe code execution (replaces eval() in V3 iframe sandbox).
      * Uses <script> tag injection with nonce for sub-plugin execution.
@@ -3972,19 +3423,19 @@ var CupcakeProviderManager = (function (exports) {
                 ? safeUUID().replace(/-/g, '')
                 : Math.random().toString(36).slice(2));
             const safeName = JSON.stringify(pluginName || 'unknown');
-            let scriptEl = /** @type {HTMLScriptElement | null} */ (null);
+            let scriptEl = null;
 
             const timeout = setTimeout(() => {
-                if (/** @type {any} */ (window)[cbId]) {
-                    delete /** @type {any} */ (window)[cbId];
+                if (window[cbId]) {
+                    delete window[cbId];
                     try { if (scriptEl && scriptEl.parentNode) scriptEl.parentNode.removeChild(scriptEl); } catch (_) {}
                     reject(new Error(`Plugin ${pluginName} script timed out (CSP block?)`));
                 }
             }, 10000);
 
-            /** @type {any} */ (window)[cbId] = (/** @type {any} */ err) => {
+            window[cbId] = (err) => {
                 clearTimeout(timeout);
-                delete /** @type {any} */ (window)[cbId];
+                delete window[cbId];
                 try { if (scriptEl && scriptEl.parentNode) scriptEl.parentNode.removeChild(scriptEl); } catch (_) {}
                 if (err) reject(err);
                 else resolve();
@@ -3999,217 +3450,6 @@ var CupcakeProviderManager = (function (exports) {
         });
     }
 
-    // @ts-check
-    /**
-     * schema.js — Lightweight structural schema validation for parsed JSON.
-     *
-     * No external dependencies. Validates shapes of objects/arrays coming
-     * from pluginStorage, remote update bundles, and backup restore paths.
-     *
-     * Usage:
-     *   import { validateSchema, schemas } from './schema.js';
-     *   const result = validateSchema(data, schemas.subPluginRegistry);
-     *   if (!result.ok) { console.error(result.error); data = result.fallback; }
-     */
-
-    /**
-     * @typedef {{ ok: true, data: any, error?: undefined, fallback?: undefined }} ValidationSuccess
-     */
-
-    /**
-     * @typedef {{ ok: false, error: string, fallback: any, data?: undefined }} ValidationFailure
-     */
-
-    /**
-     * @typedef {ValidationSuccess | ValidationFailure} ValidationResult
-     */
-
-    /**
-     * @typedef {Object} SchemaRule
-     * @property {'array'|'object'|'string'|'number'|'boolean'} type
-     * @property {any} [fallback]          - value to use on validation failure
-     * @property {Object<string, SchemaRule>} [properties] - for object type
-     * @property {SchemaRule} [items]      - for array items
-     * @property {string[]} [required]     - required keys for object type
-     * @property {number} [maxItems]       - max array length (soft truncate)
-     * @property {number} [maxLength]      - max string length
-     */
-
-    /**
-     * Validate `data` against a schema rule. Returns { ok, data/error, fallback }.
-     * @param {any} data
-     * @param {SchemaRule} schema
-     * @returns {ValidationResult}
-     */
-    function validateSchema(data, schema) {
-        if (data === null || data === undefined) {
-            return { ok: false, error: 'Data is null/undefined', fallback: schema.fallback };
-        }
-
-        // Type check
-        if (schema.type === 'array') {
-            if (!Array.isArray(data)) {
-                return { ok: false, error: `Expected array, got ${typeof data}`, fallback: schema.fallback ?? [] };
-            }
-            // maxItems soft truncation
-            if (schema.maxItems && data.length > schema.maxItems) {
-                data = data.slice(0, schema.maxItems);
-            }
-            // Validate each item if items schema exists
-            if (schema.items) {
-                const validItems = [];
-                for (let i = 0; i < data.length; i++) {
-                    const itemResult = validateSchema(data[i], schema.items);
-                    if (itemResult.ok) {
-                        validItems.push(itemResult.data);
-                    }
-                    // Skip invalid items silently (filter instead of fail)
-                }
-                return { ok: true, data: validItems };
-            }
-            return { ok: true, data };
-        }
-
-        if (schema.type === 'object') {
-            if (typeof data !== 'object' || Array.isArray(data)) {
-                return { ok: false, error: `Expected object, got ${Array.isArray(data) ? 'array' : typeof data}`, fallback: schema.fallback ?? {} };
-            }
-            // Required keys
-            if (schema.required) {
-                for (const key of schema.required) {
-                    if (!(key in data) || data[key] === undefined) {
-                        return { ok: false, error: `Missing required key: ${key}`, fallback: schema.fallback ?? {} };
-                    }
-                }
-            }
-            // Validate known properties
-            if (schema.properties) {
-                const out = { ...data };
-                for (const [key, propSchema] of Object.entries(schema.properties)) {
-                    if (key in out) {
-                        const propResult = validateSchema(out[key], propSchema);
-                        if (!propResult.ok) {
-                            // Use property-level fallback
-                            out[key] = propResult.fallback;
-                        } else {
-                            out[key] = propResult.data;
-                        }
-                    }
-                }
-                return { ok: true, data: out };
-            }
-            return { ok: true, data };
-        }
-
-        if (schema.type === 'string') {
-            if (typeof data !== 'string') {
-                return { ok: false, error: `Expected string, got ${typeof data}`, fallback: schema.fallback ?? '' };
-            }
-            if (schema.maxLength && data.length > schema.maxLength) {
-                data = data.substring(0, schema.maxLength);
-            }
-            return { ok: true, data };
-        }
-
-        if (schema.type === 'number') {
-            if (typeof data !== 'number' || !isFinite(data)) {
-                return { ok: false, error: `Expected finite number, got ${data}`, fallback: schema.fallback ?? 0 };
-            }
-            return { ok: true, data };
-        }
-
-        if (schema.type === 'boolean') {
-            if (typeof data !== 'boolean') {
-                return { ok: false, error: `Expected boolean, got ${typeof data}`, fallback: schema.fallback ?? false };
-            }
-            return { ok: true, data };
-        }
-
-        return { ok: true, data };
-    }
-
-    /**
-     * Convenience: parse JSON string + validate in one step.
-     * @param {string} jsonString
-     * @param {SchemaRule} schema
-     * @returns {ValidationResult}
-     */
-    function parseAndValidate(jsonString, schema) {
-        let parsed;
-        try {
-            parsed = JSON.parse(jsonString);
-        } catch (e) {
-            return { ok: false, error: `JSON parse failed: ${/** @type {Error} */ (e).message}`, fallback: schema.fallback };
-        }
-        return validateSchema(parsed, schema);
-    }
-
-
-    // ════════════════════════════════════════════════════════════════
-    // Pre-defined schemas for CPM data structures
-    // ════════════════════════════════════════════════════════════════
-
-    /** @type {SchemaRule} Sub-plugin registry entry */
-    const subPluginEntry = {
-        type: 'object',
-        required: ['id', 'code'],
-        properties: {
-            id:          { type: 'string', fallback: '' },
-            name:        { type: 'string', fallback: 'Unnamed Sub-Plugin' },
-            version:     { type: 'string', fallback: '' },
-            description: { type: 'string', fallback: '' },
-            icon:        { type: 'string', fallback: '📦' },
-            code:        { type: 'string', fallback: '' },
-            enabled:     { type: 'boolean', fallback: true },
-            updateUrl:   { type: 'string', fallback: '' },
-        },
-        fallback: null,
-    };
-
-    const schemas = {
-        /** Array of installed sub-plugins (pluginStorage) */
-        subPluginRegistry: {
-            type: /** @type {const} */ ('array'),
-            items: subPluginEntry,
-            maxItems: 100,
-            fallback: [],
-        },
-
-        /** update-bundle versions manifest (from remote) */
-        updateBundleVersions: {
-            type: /** @type {const} */ ('object'),
-            fallback: {},
-        },
-
-        /** update-bundle top-level structure */
-        updateBundle: {
-            type: /** @type {const} */ ('object'),
-            required: ['versions'],
-            properties: {
-                versions: { type: /** @type {const} */ ('object'), fallback: {} },
-                code:     { type: /** @type {const} */ ('object'), fallback: {} },
-            },
-            fallback: { versions: {}, code: {} },
-        },
-
-        /** Settings backup (key-value map) */
-        settingsBackup: {
-            type: /** @type {const} */ ('object'),
-            fallback: {},
-        },
-
-        /** boot-status diagnostic (pluginStorage) */
-        bootStatus: {
-            type: /** @type {const} */ ('object'),
-            properties: {
-                ts:      { type: 'number', fallback: 0 },
-                version: { type: 'string', fallback: '' },
-            },
-            fallback: {},
-        },
-    };
-
-    // @ts-check
     /**
      * settings-backup.js — Persistent settings backup/restore via pluginStorage.
      * Survives plugin deletion — settings can be auto-restored on reinstall.
@@ -4225,64 +3465,33 @@ var CupcakeProviderManager = (function (exports) {
         ]);
     }
 
-    const NON_PREFIX_MANAGED_SETTING_KEYS = [
-        'common_openai_servicetier',
-        'tools_githubCopilotToken',
-        'chat_claude_caching',
-        'chat_claude_cachingBreakpoints',
-        'chat_claude_cachingMaxExtension',
-        'chat_gemini_preserveSystem',
-        'chat_gemini_showThoughtsToken',
-        'chat_gemini_useThoughtSignature',
-        'chat_gemini_usePlainFetch',
-        'chat_vertex_preserveSystem',
-        'chat_vertex_showThoughtsToken',
-        'chat_vertex_useThoughtSignature',
-    ];
-
     const BASE_SETTING_KEYS = [
         'cpm_enable_chat_resizer',
         'cpm_custom_models',
         'cpm_fallback_temp', 'cpm_fallback_max_tokens', 'cpm_fallback_top_p', 'cpm_fallback_freq_pen', 'cpm_fallback_pres_pen',
-        'cpm_openai_key', 'cpm_openai_url', 'cpm_openai_model', 'cpm_openai_reasoning', 'cpm_openai_verbosity', 'common_openai_servicetier', 'cpm_openai_prompt_cache_retention', 'cpm_dynamic_openai',
-        'cpm_anthropic_key', 'cpm_anthropic_url', 'cpm_anthropic_model', 'cpm_anthropic_thinking_budget', 'cpm_anthropic_thinking_effort', 'chat_claude_caching', 'chat_claude_cachingBreakpoints', 'chat_claude_cachingMaxExtension', 'cpm_anthropic_cache_ttl', 'cpm_dynamic_anthropic',
+        'cpm_openai_key', 'cpm_openai_url', 'cpm_openai_model', 'cpm_openai_reasoning', 'cpm_openai_verbosity', 'common_openai_servicetier',
+        'cpm_anthropic_key', 'cpm_anthropic_url', 'cpm_anthropic_model', 'cpm_anthropic_thinking_budget', 'cpm_anthropic_thinking_effort', 'chat_claude_caching', 'cpm_anthropic_cache_ttl',
         'cpm_gemini_key', 'cpm_gemini_model', 'cpm_gemini_thinking_level', 'cpm_gemini_thinking_budget',
-        'chat_gemini_preserveSystem', 'chat_gemini_showThoughtsToken', 'chat_gemini_useThoughtSignature', 'chat_gemini_usePlainFetch', 'cpm_dynamic_googleai',
-        'cpm_vertex_key_json', 'cpm_vertex_location', 'cpm_vertex_model', 'cpm_vertex_thinking_level', 'cpm_vertex_thinking_budget', 'cpm_vertex_claude_thinking_budget', 'cpm_vertex_claude_effort',
-        'chat_vertex_preserveSystem', 'chat_vertex_showThoughtsToken', 'chat_vertex_useThoughtSignature', 'cpm_dynamic_vertexai',
-        'cpm_aws_key', 'cpm_aws_secret', 'cpm_aws_region', 'cpm_aws_thinking_budget', 'cpm_aws_thinking_effort', 'cpm_dynamic_aws',
-        'cpm_openrouter_key', 'cpm_openrouter_url', 'cpm_openrouter_model', 'cpm_openrouter_provider', 'cpm_openrouter_reasoning', 'cpm_dynamic_openrouter',
-        'cpm_deepseek_key', 'cpm_deepseek_url', 'cpm_deepseek_model', 'cpm_dynamic_deepseek',
-        'tools_githubCopilotToken',
-        'cpm_transcache_display_enabled',
+        'chat_gemini_preserveSystem', 'chat_gemini_showThoughtsToken', 'chat_gemini_useThoughtSignature', 'chat_gemini_usePlainFetch',
+        'cpm_vertex_key_json', 'cpm_vertex_location', 'cpm_vertex_model', 'cpm_vertex_thinking_level', 'cpm_vertex_thinking_budget', 'cpm_vertex_claude_thinking_budget',
+        'chat_vertex_preserveSystem', 'chat_vertex_showThoughtsToken', 'chat_vertex_useThoughtSignature',
+        'cpm_aws_key', 'cpm_aws_secret', 'cpm_aws_region', 'cpm_aws_thinking_budget', 'cpm_aws_thinking_effort',
+        'cpm_openrouter_key', 'cpm_openrouter_url', 'cpm_openrouter_model', 'cpm_openrouter_provider', 'cpm_openrouter_reasoning',
+        'cpm_deepseek_key', 'cpm_deepseek_url', 'cpm_deepseek_model',
         'cpm_show_token_usage',
         'cpm_streaming_enabled', 'cpm_streaming_show_thinking',
-        'cpm_compatibility_mode',
-        'cpm_copilot_nodeless_mode',
     ];
-
-    /**
-     * @param {any} key
-     * @returns {boolean}
-     */
-    function isManagedSettingKey(key) {
-        return typeof key === 'string' && key.length > 0 && (
-            key.startsWith('cpm_')
-            || key.startsWith('cpm-')
-            || NON_PREFIX_MANAGED_SETTING_KEYS.includes(key)
-        );
-    }
 
     function getManagedSettingKeys(providerTabs = registeredProviderTabs) {
         const dynamicKeys = Array.isArray(providerTabs)
-            ? providerTabs.flatMap(tab => (/** @type {Record<string, any>} */ (tab))?.exportKeys || []).filter(isManagedSettingKey)
+            ? providerTabs.flatMap(tab => tab?.exportKeys || [])
             : [];
         return [...new Set([...getAuxSettingKeys(), ...BASE_SETTING_KEYS, ...dynamicKeys])];
     }
 
     const SettingsBackup = {
         STORAGE_KEY: 'cpm_settings_backup',
-        _cache: /** @type {Record<string, any> | null} */ (null),
+        _cache: null,
 
         getAllKeys() {
             return getManagedSettingKeys();
@@ -4291,14 +3500,7 @@ var CupcakeProviderManager = (function (exports) {
         async load() {
             try {
                 const data = await Risu.pluginStorage.getItem(this.STORAGE_KEY);
-                if (!data) { this._cache = {}; return this._cache; }
-                const result = parseAndValidate(data, schemas.settingsBackup);
-                if (!result.ok) {
-                    console.warn('[CPM Backup] Backup schema validation failed:', result.error);
-                    this._cache = result.fallback;
-                } else {
-                    this._cache = result.data;
-                }
+                this._cache = data ? JSON.parse(data) : {};
             } catch (e) {
                 console.error('[CPM Backup] Failed to load backup', e);
                 this._cache = {};
@@ -4314,34 +3516,32 @@ var CupcakeProviderManager = (function (exports) {
             }
         },
 
-        async updateKey(/** @type {string} */ key, /** @type {any} */ value) {
+        async updateKey(key, value) {
             if (!this._cache) await this.load();
-            if (this._cache) this._cache[key] = value;
+            this._cache[key] = value;
             await this.save();
         },
 
         async snapshotAll() {
             if (!this._cache) this._cache = {};
-            const cache = this._cache;
             for (const key of this.getAllKeys()) {
                 const val = await safeGetArg(key);
                 if (val !== undefined && val !== '') {
-                    cache[key] = val;
+                    this._cache[key] = val;
                 }
             }
             await this.save();
-            console.log(`[CPM Backup] Snapshot saved (${Object.keys(cache).length} keys)`);
+            console.log(`[CPM Backup] Snapshot saved (${Object.keys(this._cache).length} keys)`);
         },
 
         async restoreIfEmpty() {
             if (!this._cache) await this.load();
-            const cache = this._cache;
-            if (!cache || Object.keys(cache).length === 0) {
+            if (!this._cache || Object.keys(this._cache).length === 0) {
                 console.log('[CPM Backup] No backup found, skipping restore.');
                 return 0;
             }
             let restoredCount = 0;
-            for (const [key, value] of Object.entries(cache)) {
+            for (const [key, value] of Object.entries(this._cache)) {
                 const current = await safeGetArg(key);
                 if ((current === undefined || current === null || current === '') && value !== undefined && value !== '') {
                     Risu.setArgument(key, String(value));
@@ -4357,26 +3557,9 @@ var CupcakeProviderManager = (function (exports) {
 
     // @ts-check
     /**
-     * auto-updater.js — Main plugin auto-update logic.
-     *
-     * Extracted from sub-plugin-manager.js for maintainability.
-     * All methods are designed to be spread into SubPluginManager and called
-     * with `this` referencing SubPluginManager.
-     *
-     * Responsibilities:
-     *   - Pending update marker persistence (read/write/clear/remember)
-     *   - Retriable error classification
-     *   - Version check (manifest + JS fallback)
-     *   - Download with bundle-first strategy + Content-Length integrity
-     *   - Validate & install to RisuAI DB (header parsing, settings preservation)
-     *   - Boot retry lifecycle
-     *   - Single-bundle sub-plugin update check & apply
-     *   - Concurrent dedup via _mainUpdateInFlight
+     * sub-plugin-manager.js — Dynamic sub-plugin lifecycle management.
+     * Handles install, remove, toggle, execute, hot-reload, and auto-update.
      */
-
-    // ────────────────────────────────────────────────────────────────
-    // SHA-256 utility (module-level, not a method)
-    // ────────────────────────────────────────────────────────────────
 
     /**
      * Compute SHA-256 hex digest of a string using Web Crypto API.
@@ -4395,251 +3578,112 @@ var CupcakeProviderManager = (function (exports) {
         }
     }
 
-    /**
-     * Race a promise against a timeout and clear the timer once settled.
-     * Prevents dangling timer handles during tests and retries.
-     * @template T
-     * @param {Promise<T>} promise
-     * @param {number} ms
-     * @param {string} message
-     * @returns {Promise<T>}
-     */
-    function _withTimeout(promise, ms, message) {
-        return new Promise((resolve, reject) => {
-            const timer = setTimeout(() => reject(new Error(message)), ms);
-            Promise.resolve(promise).then(
-                value => {
-                    clearTimeout(timer);
-                    resolve(value);
-                },
-                error => {
-                    clearTimeout(timer);
-                    reject(error);
+    // DI: _exposeScopeToWindow is injected by init.js to avoid circular dependency.
+    let _exposeScopeToWindow$1 = () => {};
+    function setExposeScopeFunction(fn) { _exposeScopeToWindow$1 = fn; }
+
+    const SubPluginManager = {
+        STORAGE_KEY: 'cpm_installed_subplugins',
+        plugins: [],
+
+        async loadRegistry() {
+            try {
+                const data = await Risu.pluginStorage.getItem(this.STORAGE_KEY);
+                this.plugins = data ? JSON.parse(data) : [];
+            } catch (e) {
+                console.error('[CPM Loader] Failed to load registry', e);
+                this.plugins = [];
+            }
+        },
+
+        async saveRegistry() {
+            await Risu.pluginStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.plugins));
+        },
+
+        extractMetadata(code) {
+            const meta = { name: 'Unnamed Sub-Plugin', version: '', description: '', icon: '📦', updateUrl: '' };
+            const nameMatch = code.match(/\/\/\s*@(?:name|display-name)\s+(.+)/i);
+            if (nameMatch) meta.name = nameMatch[1].trim();
+            const verMatch = code.match(/\/\/\s*@version\s+([^\r\n]+)/i);
+            if (verMatch) meta.version = verMatch[1].trim();
+            const descMatch = code.match(/\/\/\s*@description\s+(.+)/i);
+            if (descMatch) meta.description = descMatch[1].trim();
+            const iconMatch = code.match(/\/\/\s*@icon\s+(.+)/i);
+            if (iconMatch) meta.icon = iconMatch[1].trim();
+            const updateMatch = code.match(/\/\/\s*@update-url\s+(.+)/i);
+            if (updateMatch) meta.updateUrl = updateMatch[1].trim();
+            return meta;
+        },
+
+        async install(code) {
+            const meta = this.extractMetadata(code);
+            const existing = this.plugins.find(p => p.name === meta.name);
+            if (existing) {
+                existing.code = code;
+                existing.version = meta.version;
+                existing.description = meta.description;
+                existing.icon = meta.icon;
+                existing.updateUrl = meta.updateUrl;
+                await this.saveRegistry();
+                return meta.name;
+            }
+            const id = 'subplugin_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+            this.plugins.push({ id, code, enabled: true, ...meta });
+            await this.saveRegistry();
+            return meta.name;
+        },
+
+        async remove(id) {
+            this.plugins = this.plugins.filter(p => p.id !== id);
+            await this.saveRegistry();
+        },
+
+        async toggle(id, enabled) {
+            const p = this.plugins.find(p => p.id === id);
+            if (p) {
+                p.enabled = enabled;
+                await this.saveRegistry();
+            }
+        },
+
+        async executeEnabled() {
+            _exposeScopeToWindow$1();
+            /** @type {any} */ (window).CupcakePM_SubPlugins = /** @type {any} */ (window).CupcakePM_SubPlugins || [];
+            for (const p of this.plugins) {
+                if (p.enabled) {
+                    try {
+                        state._currentExecutingPluginId = p.id;
+                        if (!_pluginRegistrations[p.id]) _pluginRegistrations[p.id] = { providerNames: [], tabObjects: [], fetcherEntries: [] };
+                        await _executeViaScriptTag(p.code, p.name);
+                        console.log(`[CPM Loader] Loaded Sub-Plugin: ${p.name}`);
+                    } catch (e) {
+                        console.error(`[CPM Loader] Failed to load ${p.name}`, e);
+                    } finally {
+                        state._currentExecutingPluginId = null;
+                    }
                 }
-            );
-        });
-    }
+            }
+        },
 
-    // ────────────────────────────────────────────────────────────────
-    // Auto-updater method collection
-    // ────────────────────────────────────────────────────────────────
+        compareVersions(a, b) {
+            if (!a || !b) return 0;
+            const pa = a.replace(/[^0-9.]/g, '').split('.').map(Number);
+            const pb = b.replace(/[^0-9.]/g, '').split('.').map(Number);
+            for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+                const na = pa[i] || 0, nb = pb[i] || 0;
+                if (nb > na) return 1;
+                if (na > nb) return -1;
+            }
+            return 0;
+        },
 
-    /**
-     * @typedef {Object} SubPluginLike
-     * @property {string} id
-     * @property {string} name
-     * @property {string} [version]
-     * @property {string} [code]
-     * @property {string} [description]
-     * @property {string} [icon]
-     * @property {string} [updateUrl]
-     * @property {boolean} [enabled]
-     */
-
-    /**
-     * Represents the full SubPluginManager object after all spreads are merged.
-     * Used as `@this` context for auto-updater methods.
-     * @typedef {Object} SubPluginManagerCtx
-     * @property {SubPluginLike[]} plugins
-     * @property {(a: string, b: string) => number} compareVersions
-     * @property {(code: string) => {name: string, version: string, description?: string, icon?: string, updateUrl?: string}} extractMetadata
-     * @property {() => Promise<void>} saveRegistry
-     * @property {(updates: any[]) => Promise<void>} showUpdateToast
-     * @property {(local: string, remote: string, changes: string, success: boolean, error?: string) => Promise<void>} _showMainAutoUpdateResult
-     * @property {() => Promise<void>} _waitForMainPluginPersistence
-     * @property {(remoteVersion: string, changes?: string) => Promise<{ok: boolean, error?: string}>} safeMainPluginUpdate
-     * @property {(remoteVersion: string, changes: string) => Promise<void>} _rememberPendingMainUpdate
-     * @property {() => Promise<void>} _clearPendingMainUpdate
-     * @property {(error: string) => boolean} _isRetriableMainUpdateError
-     * @property {() => Promise<string>} _getInstalledMainPluginVersion
-     * @property {(data: any) => Promise<void>} _writePendingMainUpdate
-     * @property {() => Promise<any>} _readPendingMainUpdate
-     * @property {(expectedVersion?: string) => Promise<{ok: boolean, code?: string, error?: string}>} _downloadMainPluginCode
-     * @property {(code: string, remoteVersion: string, changes?: string) => Promise<{ok: boolean, error?: string}>} _validateAndInstallMainPlugin
-     * @property {string} VERSIONS_URL
-     * @property {string} MAIN_UPDATE_URL
-     * @property {string} UPDATE_BUNDLE_URL
-     * @property {number} _VERSION_CHECK_COOLDOWN
-     * @property {string} _VERSION_CHECK_STORAGE_KEY
-     * @property {string} _MAIN_VERSION_CHECK_STORAGE_KEY
-     * @property {string} _MAIN_UPDATE_RETRY_STORAGE_KEY
-     * @property {number} _MAIN_UPDATE_RETRY_COOLDOWN
-     * @property {number} _MAIN_UPDATE_RETRY_MAX_ATTEMPTS
-     * @property {Promise<{ok: boolean, error?: string}>|null} _mainUpdateInFlight
-     * @property {string[]} _pendingUpdateNames
-     */
-
-    /**
-     * Methods to be spread into SubPluginManager.
-     * Every method uses `this` which will reference SubPluginManager at call-time.
-     * @type {{[K: string]: any}}
-     */
-    const autoUpdaterMethods = {
-        // ── Constants & State ──
-        VERSIONS_URL: VERSIONS_URL,
-        MAIN_UPDATE_URL: MAIN_UPDATE_URL,
+        // ── Lightweight Silent Version Check ──
+        VERSIONS_URL: 'https://cupcake-plugin-manager.vercel.app/api/versions',
+        MAIN_UPDATE_URL: 'https://cupcake-plugin-manager.vercel.app/provider-manager.js',
         _VERSION_CHECK_COOLDOWN: 600000,
         _VERSION_CHECK_STORAGE_KEY: 'cpm_last_version_check',
         _MAIN_VERSION_CHECK_STORAGE_KEY: 'cpm_last_main_version_check',
-        _MAIN_UPDATE_RETRY_STORAGE_KEY: 'cpm_pending_main_update',
-        _MAIN_UPDATE_RETRY_COOLDOWN: 300000,
-        _MAIN_UPDATE_RETRY_MAX_ATTEMPTS: 2,
-        _mainUpdateInFlight: null,
         _pendingUpdateNames: [],
-
-        // ── Pending update marker persistence ──
-
-        async _readPendingMainUpdate() {
-            try {
-                const raw = await Risu.pluginStorage.getItem(this._MAIN_UPDATE_RETRY_STORAGE_KEY);
-                if (!raw) return null;
-                const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-                if (!parsed || typeof parsed !== 'object') {
-                    await this._clearPendingMainUpdate();
-                    return null;
-                }
-                const version = String(parsed.version || '').trim();
-                if (!version) {
-                    await this._clearPendingMainUpdate();
-                    return null;
-                }
-                return {
-                    version,
-                    changes: typeof parsed.changes === 'string' ? parsed.changes : '',
-                    createdAt: Number(parsed.createdAt) || 0,
-                    attempts: Number(parsed.attempts) || 0,
-                    lastAttemptTs: Number(parsed.lastAttemptTs) || 0,
-                    lastError: typeof parsed.lastError === 'string' ? parsed.lastError : '',
-                };
-            } catch (/** @type {any} */ e) {
-                console.warn('[CPM Retry] Failed to read pending main update marker:', e.message || e);
-                try { await this._clearPendingMainUpdate(); } catch (_) { }
-                return null;
-            }
-        },
-
-        /** @param {any} data */
-        async _writePendingMainUpdate(data) {
-            try {
-                await Risu.pluginStorage.setItem(this._MAIN_UPDATE_RETRY_STORAGE_KEY, JSON.stringify(data));
-            } catch (/** @type {any} */ e) {
-                console.warn('[CPM Retry] Failed to write pending main update marker:', e.message || e);
-            }
-        },
-
-        async _clearPendingMainUpdate() {
-            try {
-                if (typeof Risu.pluginStorage.removeItem === 'function') {
-                    await Risu.pluginStorage.removeItem(this._MAIN_UPDATE_RETRY_STORAGE_KEY);
-                } else {
-                    await Risu.pluginStorage.setItem(this._MAIN_UPDATE_RETRY_STORAGE_KEY, '');
-                }
-            } catch (/** @type {any} */ e) {
-                console.warn('[CPM Retry] Failed to clear pending main update marker:', e.message || e);
-            }
-        },
-
-        /**
-         * @param {string} remoteVersion
-         * @param {string} [changes]
-         */
-        async _rememberPendingMainUpdate(remoteVersion, changes) {
-            const version = String(remoteVersion || '').trim();
-            if (!version) return;
-            const existing = await this._readPendingMainUpdate();
-            const sameVersion = existing && existing.version === version;
-            await this._writePendingMainUpdate({
-                version,
-                changes: typeof changes === 'string' ? changes : (existing?.changes || ''),
-                createdAt: sameVersion ? (existing.createdAt || Date.now()) : Date.now(),
-                attempts: sameVersion ? (existing.attempts || 0) : 0,
-                lastAttemptTs: sameVersion ? (existing.lastAttemptTs || 0) : 0,
-                lastError: sameVersion ? (existing.lastError || '') : '',
-            });
-        },
-
-        // ── Error classification ──
-
-        /** @param {string|Error} error */
-        _isRetriableMainUpdateError(error) {
-            const msg = String(error || '').toLowerCase();
-            if (!msg) return true;
-            const nonRetriablePatterns = [
-                '이름 불일치',
-                '버전 불일치',
-                'api 버전이 3.0이 아닙니다',
-                '다운그레이드 차단',
-                '이미 같은 버전입니다',
-                '플러그인을 db에서 찾을 수 없습니다',
-                '플러그인 목록을 찾을 수 없습니다',
-            ];
-            return !nonRetriablePatterns.some(pattern => msg.includes(pattern.toLowerCase()));
-        },
-
-        // ── Installed version helper ──
-
-        async _getInstalledMainPluginVersion() {
-            try {
-                const db = await Risu.getDatabase();
-                const plugin = db?.plugins?.find?.((/** @type {any} */ p) => p?.name === 'Cupcake_Provider_Manager');
-                return String(plugin?.versionOfPlugin || CPM_VERSION || '').trim();
-            } catch (_) {
-                return String(CPM_VERSION).trim();
-            }
-        },
-
-        // ── Boot retry lifecycle ──
-
-        async retryPendingMainPluginUpdateOnBoot() {
-            try {
-                const pending = await this._readPendingMainUpdate();
-                if (!pending) return false;
-
-                const installedVersion = await this._getInstalledMainPluginVersion();
-                if (installedVersion && this.compareVersions(installedVersion, pending.version) <= 0) {
-                    console.log(`[CPM Retry] Pending main update already satisfied (${installedVersion} >= ${pending.version}). Clearing marker.`);
-                    await this._clearPendingMainUpdate();
-                    return true;
-                }
-
-                if (pending.attempts >= this._MAIN_UPDATE_RETRY_MAX_ATTEMPTS) {
-                    console.warn(`[CPM Retry] Pending main update exceeded max attempts (${pending.attempts}/${this._MAIN_UPDATE_RETRY_MAX_ATTEMPTS}). Clearing marker.`);
-                    await this._clearPendingMainUpdate();
-                    return false;
-                }
-
-                const elapsed = Date.now() - (pending.lastAttemptTs || 0);
-                if (pending.lastAttemptTs && elapsed < this._MAIN_UPDATE_RETRY_COOLDOWN) {
-                    console.log(`[CPM Retry] Pending main update cooldown active (${Math.ceil((this._MAIN_UPDATE_RETRY_COOLDOWN - elapsed) / 1000)}s left).`);
-                    return false;
-                }
-
-                await this._writePendingMainUpdate({
-                    ...pending,
-                    attempts: (pending.attempts || 0) + 1,
-                    lastAttemptTs: Date.now(),
-                    lastError: '',
-                });
-
-                console.log(`[CPM Retry] Retrying pending main update on boot: ${installedVersion || 'unknown'} → ${pending.version}`);
-                const result = await this.safeMainPluginUpdate(pending.version, pending.changes || '');
-                if (!result.ok) {
-                    const latest = await this._readPendingMainUpdate();
-                    if (latest) {
-                        await this._writePendingMainUpdate({
-                            ...latest,
-                            lastError: String(result.error || ''),
-                        });
-                    }
-                }
-                return true;
-            } catch (/** @type {any} */ e) {
-                console.warn('[CPM Retry] Pending main update retry failed:', e.message || e);
-                return false;
-            }
-        },
-
-        // ── Manifest-based version check ──
 
         async checkVersionsQuiet() {
             try {
@@ -4660,21 +3704,14 @@ var CupcakeProviderManager = (function (exports) {
                 const cacheBuster = this.VERSIONS_URL + '?_t=' + Date.now();
                 console.log(`[CPM AutoCheck] Fetching version manifest...`);
 
-                const fetchPromise = Risu.risuFetch(cacheBuster, { method: 'GET', plainFetchForce: true });
-                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Version manifest fetch timed out (15s)')), 15000));
-                const result = await Promise.race([fetchPromise, timeoutPromise]);
+                const result = await Risu.risuFetch(cacheBuster, { method: 'GET', plainFetchForce: true });
 
                 if (!result.data || (result.status && result.status >= 400)) {
-                    console.warn(`[CPM AutoCheck] Fetch failed (status=${result.status}), silently skipped.`);
+                    console.debug(`[CPM AutoCheck] Fetch failed (${result.status}), silently skipped.`);
                     return;
                 }
 
                 const manifest = (typeof result.data === 'string') ? JSON.parse(result.data) : result.data;
-                const manifestResult = validateSchema(manifest, schemas.updateBundleVersions);
-                if (!manifestResult.ok) {
-                    console.warn(`[CPM AutoCheck] Invalid manifest structure: ${manifestResult.error}`);
-                    return;
-                }
                 if (!manifest || typeof manifest !== 'object') return;
 
                 const updatesAvailable = [];
@@ -4695,16 +3732,14 @@ var CupcakeProviderManager = (function (exports) {
                 let mainUpdateInfo = null;
                 const mainRemote = manifest['Cupcake Provider Manager'];
                 if (mainRemote && mainRemote.version) {
-                    /** @type {any} */ (window)._cpmMainVersionFromManifest = true;
                     const mainCmp = this.compareVersions(CPM_VERSION, mainRemote.version);
                     if (mainCmp > 0) {
                         mainUpdateInfo = {
                             localVersion: CPM_VERSION, remoteVersion: mainRemote.version,
                             changes: mainRemote.changes || '',
                         };
+                        /** @type {any} */ (window)._cpmMainVersionFromManifest = true;
                         console.log(`[CPM AutoCheck] Main plugin update available: ${CPM_VERSION}→${mainRemote.version}`);
-                    } else {
-                        console.log(`[CPM AutoCheck] Main plugin is up to date (${CPM_VERSION}).`);
                     }
                 }
 
@@ -4723,644 +3758,14 @@ var CupcakeProviderManager = (function (exports) {
                 if (mainUpdateInfo) {
                     const delay = updatesAvailable.length > 0 ? 1500 : 0;
                     setTimeout(async () => {
-                            try { await this._rememberPendingMainUpdate(mainUpdateInfo.remoteVersion, mainUpdateInfo.changes); } catch (e) { console.warn('[CPM AutoCheck] _rememberPendingMainUpdate failed:', e); }
-                        try { await this.safeMainPluginUpdate(mainUpdateInfo.remoteVersion, mainUpdateInfo.changes); } catch (e) { console.warn('[CPM AutoCheck] safeMainPluginUpdate failed:', e); }
+                        try { await this.showMainUpdateToast(mainUpdateInfo.localVersion, mainUpdateInfo.remoteVersion, mainUpdateInfo.changes); } catch (_) { }
                     }, delay);
                 }
-            } catch (/** @type {any} */ e) {
+            } catch (e) {
                 console.debug(`[CPM AutoCheck] Silent error:`, e.message || e);
             }
         },
 
-        // ── JS fallback version check ──
-
-        async checkMainPluginVersionQuiet() {
-            try {
-                if (/** @type {any} */ (window)._cpmMainVersionFromManifest) {
-                    console.log('[CPM MainAutoCheck] Already checked via manifest, skipping JS fallback.');
-                    return;
-                }
-                if (/** @type {any} */ (window)._cpmMainVersionChecked) return;
-                /** @type {any} */ (window)._cpmMainVersionChecked = true;
-
-                try {
-                    const lastCheck = await Risu.pluginStorage.getItem(this._MAIN_VERSION_CHECK_STORAGE_KEY);
-                    if (lastCheck) {
-                        const elapsed = Date.now() - parseInt(lastCheck, 10);
-                        if (elapsed < this._VERSION_CHECK_COOLDOWN) {
-                            console.log(`[CPM MainAutoCheck] Skipped — last check ${Math.round(elapsed / 60000)}min ago`);
-                            return;
-                        }
-                    }
-                } catch (_) { /* ignore */ }
-
-                const cacheBuster = this.MAIN_UPDATE_URL + '?_t=' + Date.now();
-                console.log('[CPM MainAutoCheck] Fallback: fetching remote main plugin script...');
-
-                let code;
-                try {
-                    const response = await Promise.race([
-                        Risu.nativeFetch(cacheBuster, { method: 'GET' }),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('nativeFetch timed out (20s)')), 20000)),
-                    ]);
-                    if (!response.ok || response.status < 200 || response.status >= 300) {
-                        console.warn(`[CPM MainAutoCheck] nativeFetch failed (HTTP ${response.status}), skipped.`);
-                        return;
-                    }
-                    code = await Promise.race([
-                        response.text(),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('nativeFetch body read timed out (20s)')), 20000)),
-                    ]);
-                    console.log(`[CPM MainAutoCheck] nativeFetch OK (${(code.length / 1024).toFixed(1)}KB)`);
-                } catch (/** @type {any} */ nativeErr) {
-                    console.warn(`[CPM MainAutoCheck] nativeFetch failed: ${nativeErr.message || nativeErr}, trying risuFetch...`);
-                    try {
-                        const result = await Promise.race([
-                            Risu.risuFetch(cacheBuster, { method: 'GET', plainFetchForce: true }),
-                            new Promise((_, reject) => setTimeout(() => reject(new Error('risuFetch timed out (20s)')), 20000)),
-                        ]);
-                        if (!result.data || (result.status && result.status >= 400)) {
-                            console.warn(`[CPM MainAutoCheck] risuFetch also failed (status=${result.status}), skipped.`);
-                            return;
-                        }
-                        code = typeof result.data === 'string' ? result.data : String(result.data || '');
-                        console.log(`[CPM MainAutoCheck] risuFetch OK (${(code.length / 1024).toFixed(1)}KB)`);
-                    } catch (/** @type {any} */ risuErr) {
-                        console.warn(`[CPM MainAutoCheck] Both fetch methods failed: ${risuErr.message || risuErr}`);
-                        return;
-                    }
-                }
-                const verMatch = code.match(/\/\/\s*@version\s+([^\r\n]+)/i);
-                if (!verMatch) { console.warn('[CPM MainAutoCheck] Remote version tag not found in fetched code, skipped.'); return; }
-                const changesMatch = code.match(/\/\/\s*@changes\s+(.+)/i);
-                const changes = changesMatch ? changesMatch[1].trim() : '';
-
-                const remoteVersion = (verMatch[1] || '').trim();
-                const localVersion = CPM_VERSION;
-                const cmp = this.compareVersions(localVersion, remoteVersion);
-
-                try { await Risu.pluginStorage.setItem(this._MAIN_VERSION_CHECK_STORAGE_KEY, String(Date.now())); } catch (_) { /* ignore */ }
-
-                if (cmp > 0) {
-                    console.log(`[CPM MainAutoCheck] Main update available: ${localVersion}→${remoteVersion}`);
-                    try { await this._rememberPendingMainUpdate(remoteVersion, changes); } catch (_) { }
-                    const installResult = await this._validateAndInstallMainPlugin(code, remoteVersion, changes);
-                    if (!installResult.ok) {
-                        console.warn(`[CPM MainAutoCheck] Direct install failed (${installResult.error}), trying fresh verified download...`);
-                        await this.safeMainPluginUpdate(remoteVersion, changes);
-                    }
-                } else {
-                    console.log('[CPM MainAutoCheck] Main plugin is up to date.');
-                }
-            } catch (/** @type {any} */ e) { console.debug('[CPM MainAutoCheck] Silent error:', e.message || e); }
-        },
-
-        // ── Download with integrity verification ──
-
-        /**
-         * Download main plugin code with verification (retry + Content-Length check).
-         * @param {string} [expectedVersion] - Version announced by manifest/API.
-         * @returns {Promise<{ok: boolean, code?: string, error?: string}>}
-         */
-        async _downloadMainPluginCode(expectedVersion) {
-            const LOG = '[CPM Download]';
-            const MAX_RETRIES = 3;
-            const url = this.MAIN_UPDATE_URL;
-
-            // Prefer the update bundle (same source of truth as api/versions).
-            try {
-                const bundleUrl = this.UPDATE_BUNDLE_URL + '?_t=' + Date.now() + '&_r=' + Math.random().toString(36).substr(2, 6);
-                console.log(`${LOG} Trying update bundle first: ${bundleUrl}`);
-                const bundleResult = await Promise.race([
-                    Risu.risuFetch(bundleUrl, { method: 'GET', plainFetchForce: true }),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('update bundle fetch timed out (20s)')), 20000)),
-                ]);
-
-                if (bundleResult?.data && (!bundleResult.status || bundleResult.status < 400)) {
-                    const rawBundle = typeof bundleResult.data === 'string' ? JSON.parse(bundleResult.data) : bundleResult.data;
-                    const parsedBundle = validateSchema(rawBundle, schemas.updateBundle);
-                    if (!parsedBundle.ok) {
-                        throw new Error(`update bundle schema invalid: ${parsedBundle.error}`);
-                    }
-
-                    const bundle = parsedBundle.data;
-                    const mainEntry = bundle.versions?.['Cupcake Provider Manager'];
-                    const fileName = mainEntry?.file || 'provider-manager.js';
-                    const bundledCode = bundle.code?.[fileName];
-
-                    if (!mainEntry?.version) {
-                        throw new Error('main plugin version missing in update bundle');
-                    }
-                    if (expectedVersion && mainEntry.version !== expectedVersion) {
-                        throw new Error(`bundle version mismatch: expected ${expectedVersion}, got ${mainEntry.version}`);
-                    }
-                    if (!bundledCode || typeof bundledCode !== 'string') {
-                        throw new Error(`main plugin code missing in update bundle (${fileName})`);
-                    }
-                    if (!mainEntry.sha256) {
-                        throw new Error('main plugin bundle entry has no sha256 hash — refusing untrusted update');
-                    }
-                    const actualHash = await _computeSHA256(bundledCode);
-                    if (!actualHash) {
-                        throw new Error('SHA-256 computation failed for bundled main plugin code');
-                    }
-                    if (actualHash !== mainEntry.sha256) {
-                        throw new Error(`bundle sha256 mismatch: expected ${mainEntry.sha256.substring(0, 12)}…, got ${actualHash.substring(0, 12)}…`);
-                    }
-                    console.log(`${LOG} Bundle integrity OK [sha256:${mainEntry.sha256.substring(0, 12)}…]`);
-
-                    console.log(`${LOG} Bundle download OK: ${fileName} v${mainEntry.version} (${(bundledCode.length / 1024).toFixed(1)}KB)`);
-                    return { ok: true, code: bundledCode };
-                }
-                throw new Error(`update bundle fetch failed with status ${bundleResult?.status}`);
-            } catch (/** @type {any} */ bundleErr) {
-                console.warn(`${LOG} Update bundle path failed, falling back to direct JS:`, bundleErr.message || bundleErr);
-            }
-
-            // Best-effort: fetch expected SHA-256 from versions manifest for fallback integrity check
-            let _fallbackExpectedSha256 = null;
-            try {
-                const vUrl = this.VERSIONS_URL + '?_t=' + Date.now();
-                const vRes = await _withTimeout(
-                    Risu.risuFetch(vUrl, { method: 'GET', plainFetchForce: true }),
-                    10000,
-                    'versions manifest timed out (10s)'
-                );
-                if (vRes?.data) {
-                    const vData = typeof vRes.data === 'string' ? JSON.parse(vRes.data) : vRes.data;
-                    _fallbackExpectedSha256 = vData?.['Cupcake Provider Manager']?.sha256 || null;
-                    if (_fallbackExpectedSha256) {
-                        console.log(`${LOG} Fallback integrity: got expected SHA from versions manifest [${_fallbackExpectedSha256.substring(0, 12)}…]`);
-                    }
-                }
-            } catch (_) {
-                console.warn(`${LOG} Could not fetch versions manifest for fallback integrity check — proceeding without SHA verification`);
-            }
-
-            for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-                try {
-                    console.log(`${LOG} Attempt ${attempt}/${MAX_RETRIES}: ${url}`);
-                    const cacheBuster = url + '?_t=' + Date.now() + '&_r=' + Math.random().toString(36).substr(2, 6);
-
-                    let response;
-                    try {
-                        response = await _withTimeout(
-                            Risu.nativeFetch(cacheBuster, { method: 'GET' }),
-                            20000,
-                            'nativeFetch timed out (20s)'
-                        );
-                    } catch (nativeErr) {
-                        console.warn(`${LOG} nativeFetch failed, falling back to risuFetch:`, /** @type {any} */ (nativeErr).message || nativeErr);
-                        const risuResult = await _withTimeout(
-                            Risu.risuFetch(cacheBuster, { method: 'GET', plainFetchForce: true }),
-                            20000,
-                            'risuFetch fallback timed out (20s)'
-                        );
-                        if (!risuResult.data || (risuResult.status && risuResult.status >= 400)) {
-                            throw new Error(`risuFetch failed with status ${risuResult.status}`);
-                        }
-                        const code = typeof risuResult.data === 'string' ? risuResult.data : String(risuResult.data || '');
-                        // Verify SHA-256 if available
-                        if (_fallbackExpectedSha256) {
-                            const actualHash = await _computeSHA256(code);
-                            if (actualHash && actualHash !== _fallbackExpectedSha256) {
-                                throw new Error(`direct download sha256 mismatch: expected ${_fallbackExpectedSha256.substring(0, 12)}…, got ${(actualHash || '?').substring(0, 12)}…`);
-                            }
-                            if (actualHash) console.log(`${LOG} Fallback integrity OK [sha256:${actualHash.substring(0, 12)}…]`);
-                        } else {
-                            console.warn(`${LOG} ⚠️ Direct download completed WITHOUT SHA-256 verification (versions manifest unavailable)`);
-                        }
-                        return { ok: true, code };
-                    }
-
-                    if (!response.ok || response.status < 200 || response.status >= 300) {
-                        throw new Error(`HTTP ${response.status}`);
-                    }
-
-                    const text = await _withTimeout(
-                        response.text(),
-                        20000,
-                        'response body read timed out (20s)'
-                    );
-
-                    const contentLength = parseInt(response.headers?.get?.('content-length') || '0', 10);
-                    if (contentLength > 0) {
-                        const actualBytes = new TextEncoder().encode(text).byteLength;
-                        if (actualBytes < contentLength) {
-                            console.warn(`${LOG} Incomplete download (${attempt}/${MAX_RETRIES}): expected ${contentLength}B, got ${actualBytes}B`);
-                            if (attempt < MAX_RETRIES) {
-                                await new Promise(r => setTimeout(r, 1000 * attempt));
-                                continue;
-                            }
-                            return { ok: false, error: `다운로드 불완전: ${contentLength}B 중 ${actualBytes}B만 수신됨` };
-                        }
-                        console.log(`${LOG} Content-Length OK: ${actualBytes}B / ${contentLength}B`);
-                    }
-
-                    // Verify SHA-256 if available
-                    if (_fallbackExpectedSha256) {
-                        const actualHash = await _computeSHA256(text);
-                        if (actualHash && actualHash !== _fallbackExpectedSha256) {
-                            throw new Error(`direct download sha256 mismatch: expected ${_fallbackExpectedSha256.substring(0, 12)}…, got ${(actualHash || '?').substring(0, 12)}…`);
-                        }
-                        if (actualHash) console.log(`${LOG} Fallback integrity OK [sha256:${actualHash.substring(0, 12)}…]`);
-                    } else {
-                        console.warn(`${LOG} ⚠️ Direct download completed WITHOUT SHA-256 verification (versions manifest unavailable)`);
-                    }
-
-                    return { ok: true, code: text };
-                } catch (/** @type {any} */ e) {
-                    console.warn(`${LOG} Error (${attempt}/${MAX_RETRIES}):`, e.message || e);
-                    if (attempt < MAX_RETRIES) {
-                        await new Promise(r => setTimeout(r, 1000 * attempt));
-                    } else {
-                        return { ok: false, error: `다운로드 실패 (${MAX_RETRIES}회 시도): ${e.message || e}` };
-                    }
-                }
-            }
-            return { ok: false, error: '다운로드 실패 (알 수 없는 오류)' };
-        },
-
-        // ── Validate & install to RisuAI DB ──
-
-        /**
-         * Validate already-downloaded code and install to RisuAI DB.
-         * @param {string} code - Downloaded plugin code
-         * @param {string} remoteVersion - Expected remote version
-         * @param {string} [changes] - Change notes
-         * @returns {Promise<{ok: boolean, error?: string}>}
-         */
-        async _validateAndInstallMainPlugin(code, remoteVersion, changes) {
-            const LOG = '[CPM SafeUpdate]';
-            const PLUGIN_NAME = 'Cupcake_Provider_Manager';
-
-            if (!code || code.length < 100) {
-                return { ok: false, error: '다운로드된 코드가 비어있거나 너무 짧습니다' };
-            }
-
-            const lines = code.split('\n');
-            let parsedName = '', parsedDisplayName = '', parsedVersion = '', parsedUpdateURL = '', parsedApiVersion = '2.0';
-            /** @type {Record<string, 'int'|'string'>} */
-            const parsedArgs = {};
-            /** @type {Record<string, string|number>} */
-            const defaultRealArg = {};
-            /** @type {Record<string, Record<string, string>>} */
-            const parsedArgMeta = {};
-            /** @type {Array<{link: string, hoverText?: string}>} */
-            const parsedCustomLink = [];
-
-            for (const line of lines) {
-                const nameMatch = line.match(/^\/\/@name\s+(.+)/);
-                if (nameMatch) parsedName = nameMatch[1].trim();
-                const displayMatch = line.match(/^\/\/@display-name\s+(.+)/);
-                if (displayMatch) parsedDisplayName = displayMatch[1].trim();
-                const verMatch = line.match(/^\/\/@version\s+(.+)/);
-                if (verMatch) parsedVersion = verMatch[1].trim();
-                const urlMatch = line.match(/^\/\/@update-url\s+(\S+)/);
-                if (urlMatch) parsedUpdateURL = urlMatch[1];
-                if (/^\/\/@api\s/.test(line)) {
-                    const vers = line.replace(/^\/\/@api\s+/, '').trim().split(' ');
-                    for (const v of vers) { if (['2.0', '2.1', '3.0'].includes(v)) { parsedApiVersion = v; break; } }
-                }
-                if (/^\/\/@(?:arg|risu-arg)\s/.test(line)) {
-                    const parts = line.trim().split(' ');
-                    if (parts.length >= 3) {
-                        const key = parts[1];
-                        const type = parts[2];
-                        if (type === 'int' || type === 'string') {
-                            parsedArgs[key] = type;
-                            defaultRealArg[key] = type === 'int' ? 0 : '';
-                        }
-                        if (parts.length > 3) {
-                            /** @type {Record<string, string>} */
-                            const meta = {};
-                            parts.slice(3).join(' ').replace(/\{\{(.+?)(::?(.+?))?\}\}/g, (/** @type {any} */ _, /** @type {string} */ g1, /** @type {any} */ _g2, /** @type {string} */ g3) => {
-                                meta[g1] = g3 || '1';
-                                return '';
-                            });
-                            if (Object.keys(meta).length > 0) parsedArgMeta[key] = meta;
-                        }
-                    }
-                }
-                if (/^\/\/@link\s/.test(line)) {
-                    const link = line.split(' ')[1];
-                    if (link && link.startsWith('https')) {
-                        const hoverText = line.split(' ').slice(2).join(' ').trim();
-                        parsedCustomLink.push({ link, hoverText: hoverText || undefined });
-                    }
-                }
-            }
-
-            if (!parsedName) {
-                return { ok: false, error: '다운로드된 코드에서 플러그인 이름(@name)을 찾을 수 없습니다' };
-            }
-            if (parsedName !== PLUGIN_NAME) {
-                return { ok: false, error: `이름 불일치: "${parsedName}" ≠ "${PLUGIN_NAME}"` };
-            }
-            if (!parsedVersion) {
-                return { ok: false, error: '다운로드된 코드에서 버전 정보(@version)를 찾을 수 없습니다' };
-            }
-            if (parsedApiVersion !== '3.0') {
-                return { ok: false, error: `API 버전이 3.0이 아닙니다: ${parsedApiVersion}` };
-            }
-
-            console.log(`${LOG} Parsed: name=${parsedName} ver=${parsedVersion} api=${parsedApiVersion} args=${Object.keys(parsedArgs).length}`);
-
-            if (remoteVersion && parsedVersion !== remoteVersion) {
-                return { ok: false, error: `버전 불일치: 기대 ${remoteVersion}, 실제 ${parsedVersion}` };
-            }
-
-            try {
-                const db = await Risu.getDatabase();
-                if (!db) {
-                    return { ok: false, error: 'RisuAI 데이터베이스 접근 실패 (권한 거부)' };
-                }
-                if (!db.plugins || !Array.isArray(db.plugins)) {
-                    return { ok: false, error: 'RisuAI 플러그인 목록을 찾을 수 없습니다' };
-                }
-
-                const existingIdx = db.plugins.findIndex((/** @type {any} */ p) => p.name === PLUGIN_NAME);
-                if (existingIdx === -1) {
-                    return { ok: false, error: `기존 "${PLUGIN_NAME}" 플러그인을 DB에서 찾을 수 없습니다` };
-                }
-
-                const existing = db.plugins[existingIdx];
-                const currentInstalledVersion = existing.versionOfPlugin || CPM_VERSION;
-                const installDirection = this.compareVersions(currentInstalledVersion, parsedVersion);
-                if (installDirection === 0) {
-                    return { ok: false, error: `이미 같은 버전입니다: ${parsedVersion}` };
-                }
-                if (installDirection < 0) {
-                    return { ok: false, error: `다운그레이드 차단: 현재 ${currentInstalledVersion} > 다운로드 ${parsedVersion}` };
-                }
-
-                const existingScriptBytes = new TextEncoder().encode(String(existing.script || '')).byteLength;
-                const nextScriptBytes = new TextEncoder().encode(String(code || '')).byteLength;
-                if (existingScriptBytes >= (300 * 1024) && nextScriptBytes < existingScriptBytes * 0.95) {
-                    return { ok: false, error: `불완전한 다운로드 의심: 새 코드(${(nextScriptBytes / 1024).toFixed(1)}KB)가 기존(${(existingScriptBytes / 1024).toFixed(1)}KB)의 95% 미만입니다` };
-                }
-
-                const oldRealArg = existing.realArg || {};
-                /** @type {Record<string, any>} */
-                const mergedRealArg = {};
-                for (const [key, type] of Object.entries(parsedArgs)) {
-                    if (key in oldRealArg && existing.arguments && existing.arguments[key] === type) {
-                        mergedRealArg[key] = oldRealArg[key];
-                    } else {
-                        mergedRealArg[key] = defaultRealArg[key];
-                    }
-                }
-
-                /** @type {any} */
-                const updatedPlugin = {
-                    name: parsedName,
-                    displayName: parsedDisplayName || parsedName,
-                    script: code,
-                    arguments: parsedArgs,
-                    realArg: mergedRealArg,
-                    argMeta: parsedArgMeta,
-                    version: '3.0',
-                    customLink: parsedCustomLink,
-                    versionOfPlugin: parsedVersion,
-                    updateURL: parsedUpdateURL || existing.updateURL || '',
-                    enabled: existing.enabled !== false,
-                };
-
-                const nextPlugins = db.plugins.slice();
-                nextPlugins[existingIdx] = updatedPlugin;
-                await Risu.setDatabaseLite({ plugins: nextPlugins });
-
-                try {
-                    const verifyDb = await Risu.getDatabase();
-                    const verifyPlugin = verifyDb?.plugins?.find?.((/** @type {any} */ p) => p.name === PLUGIN_NAME);
-                    console.log(`${LOG} In-memory verify: version=${verifyPlugin?.versionOfPlugin || 'missing'} script=${verifyPlugin?.script ? 'present' : 'missing'}`);
-                } catch (/** @type {any} */ verifyErr) {
-                    console.warn(`${LOG} In-memory verify failed:`, verifyErr.message || verifyErr);
-                }
-
-                try {
-                    await Risu.pluginStorage.setItem('cpm_last_main_update_flush', JSON.stringify({
-                        ts: Date.now(),
-                        from: currentInstalledVersion,
-                        to: parsedVersion,
-                    }));
-                    console.log(`${LOG} Autosave flush marker written to pluginStorage.`);
-                } catch (/** @type {any} */ flushErr) {
-                    console.warn(`${LOG} Autosave flush marker write failed:`, flushErr.message || flushErr);
-                }
-
-                console.log(`${LOG} Waiting for RisuAI autosave flush before showing success...`);
-                await this._waitForMainPluginPersistence();
-
-                console.log(`${LOG} ✓ Successfully applied main plugin update: ${currentInstalledVersion} → ${parsedVersion}`);
-                console.log(`${LOG}   Settings preserved: ${Object.keys(mergedRealArg).length} args (${Object.keys(oldRealArg).length} existed, ${Object.keys(parsedArgs).length} in new version)`);
-
-                try { /** @type {any} */ (window)._cpmMainUpdateCompletedThisBoot = true; } catch (_) { }
-
-                await this._clearPendingMainUpdate();
-                await this._showMainAutoUpdateResult(currentInstalledVersion, parsedVersion, changes || '', true);
-
-                return { ok: true };
-            } catch (/** @type {any} */ e) {
-                return { ok: false, error: `DB 저장 실패: ${e.message || e}` };
-            }
-        },
-
-        /**
-         * Wait for RisuAI autosave flush.
-         * @returns {Promise<void>}
-         */
-        async _waitForMainPluginPersistence() {
-            await new Promise(resolve => setTimeout(resolve, 3500));
-        },
-
-        // ── Safe update orchestrator (dedup) ──
-
-        /**
-         * Safely update the main CPM plugin: download → validate → install.
-         * @param {string} remoteVersion
-         * @param {string} [changes]
-         * @returns {Promise<{ok: boolean, error?: string}>}
-         */
-        async safeMainPluginUpdate(remoteVersion, changes) {
-            if (/** @type {any} */ (window)._cpmMainUpdateCompletedThisBoot) {
-                console.log('[CPM SafeUpdate] Main update already completed this session — skipping.');
-                try { await this._clearPendingMainUpdate(); } catch (_) { }
-                return { ok: true };
-            }
-
-            if (this._mainUpdateInFlight) {
-                console.log('[CPM SafeUpdate] Main update already in flight — joining existing run.');
-                return await this._mainUpdateInFlight;
-            }
-
-            this._mainUpdateInFlight = (async () => {
-                try {
-                    await this._rememberPendingMainUpdate(remoteVersion, changes);
-
-                    const dl = await this._downloadMainPluginCode(remoteVersion);
-                    if (!dl.ok) {
-                        console.error(`[CPM SafeUpdate] Download failed: ${dl.error}`);
-                        if (!this._isRetriableMainUpdateError(dl.error)) {
-                            await this._clearPendingMainUpdate();
-                        }
-                        await this._showMainAutoUpdateResult(CPM_VERSION, remoteVersion, changes || '', false, dl.error);
-                        return { ok: false, error: dl.error };
-                    }
-                    const result = await this._validateAndInstallMainPlugin(dl.code, remoteVersion, changes);
-                    if (!result.ok) {
-                        console.error(`[CPM SafeUpdate] Install failed: ${result.error}`);
-                        if (!this._isRetriableMainUpdateError(result.error)) {
-                            await this._clearPendingMainUpdate();
-                        }
-                        const isSameVersionNoop = result.error && result.error.includes('이미 같은 버전');
-                        if (!isSameVersionNoop) {
-                            await this._showMainAutoUpdateResult(CPM_VERSION, remoteVersion, changes || '', false, result.error);
-                        }
-                    }
-                    return result;
-                } catch (/** @type {any} */ unexpectedErr) {
-                    console.error(`[CPM SafeUpdate] Unexpected error:`, unexpectedErr);
-                    return { ok: false, error: `예기치 않은 오류: ${unexpectedErr.message || unexpectedErr}` };
-                }
-            })();
-
-            try {
-                return await this._mainUpdateInFlight;
-            } finally {
-                this._mainUpdateInFlight = null;
-            }
-        },
-
-        // ── Single-Bundle Update System ──
-        UPDATE_BUNDLE_URL: UPDATE_BUNDLE_URL,
-
-        async checkAllUpdates() {
-            try {
-                const cacheBuster = this.UPDATE_BUNDLE_URL + '?_t=' + Date.now() + '&_r=' + Math.random().toString(36).substr(2, 8);
-                console.log(`[CPM Update] Fetching update bundle via risuFetch(plainFetchForce): ${cacheBuster}`);
-
-                const result = await Risu.risuFetch(cacheBuster, { method: 'GET', plainFetchForce: true });
-
-                if (!result.data || (result.status && result.status >= 400)) {
-                    console.error(`[CPM Update] Failed to fetch update bundle: ${result.status}`);
-                    return [];
-                }
-
-                const raw = (typeof result.data === 'string') ? JSON.parse(result.data) : result.data;
-                const bundleResult = validateSchema(raw, schemas.updateBundle);
-                if (!bundleResult.ok) {
-                    console.error(`[CPM Update] Bundle schema validation failed: ${bundleResult.error}`);
-                    return [];
-                }
-                const bundle = bundleResult.data;
-                const manifest = bundle.versions || {};
-                const codeBundle = bundle.code || {};
-                console.log(`[CPM Update] Bundle loaded: ${Object.keys(manifest).length} versions, ${Object.keys(codeBundle).length} code files`);
-
-                const results = [];
-                for (const p of this.plugins) {
-                    if (!p.updateUrl || !p.name) continue;
-                    const remote = manifest[p.name];
-                    if (!remote || !remote.version) {
-                        console.warn(`[CPM Update] ${p.name} not found in manifest, skipping.`);
-                        continue;
-                    }
-                    const cmp = this.compareVersions(p.version || '0.0.0', remote.version);
-                    console.log(`[CPM Update] ${p.name}: local=${p.version} remote=${remote.version} cmp=${cmp}`);
-                    if (cmp > 0) {
-                        const code = (remote.file && codeBundle[remote.file]) ? codeBundle[remote.file] : null;
-                        if (code) {
-                            console.log(`[CPM Update] Code ready for ${p.name} (${(code.length / 1024).toFixed(1)}KB)`);
-                            if (!remote.sha256) {
-                                console.error(`[CPM Update] ⚠️ REJECTED ${p.name}: bundle entry has no sha256 hash — refusing untrusted update`);
-                                continue;
-                            }
-                            const actualHash = await _computeSHA256(code);
-                            if (!actualHash) {
-                                console.error(`[CPM Update] ⚠️ REJECTED ${p.name}: SHA-256 computation failed (Web Crypto unavailable) — cannot verify integrity`);
-                                continue;
-                            }
-                            if (actualHash !== remote.sha256) {
-                                console.error(`[CPM Update] ⚠️ INTEGRITY MISMATCH for ${p.name}: expected ${remote.sha256.substring(0, 12)}…, got ${actualHash.substring(0, 12)}… — skipping`);
-                                continue;
-                            }
-                            console.log(`[CPM Update] ✓ Integrity OK for ${p.name} [sha256:${actualHash.substring(0, 12)}…]`);
-                        }
-                        else console.warn(`[CPM Update] ${p.name} (${remote.file}) code not found in bundle`);
-                        results.push({ plugin: p, remoteVersion: remote.version, localVersion: p.version || '0.0.0', remoteFile: remote.file, code, expectedSHA256: remote.sha256 });
-                    }
-                }
-                return results;
-            } catch (e) {
-                console.error(`[CPM Update] Failed to check updates:`, e);
-                return [];
-            }
-        },
-
-        /**
-         * @param {string} pluginId
-         * @param {string} prefetchedCode
-         * @param {string} expectedSHA256
-         */
-        async applyUpdate(pluginId, prefetchedCode, expectedSHA256) {
-            const p = /** @type {any[]} */ (this.plugins).find((/** @type {any} */ x) => x.id === pluginId);
-            if (!p) return false;
-            if (!prefetchedCode) {
-                console.error(`[CPM Update] No pre-fetched code available for ${p.name}. Re-run update check.`);
-                return false;
-            }
-            try {
-                if (!expectedSHA256) {
-                    console.error(`[CPM Update] BLOCKED: No SHA-256 hash provided for ${p.name}. Refusing to apply unverified code.`);
-                    return false;
-                }
-                const actualHash = await _computeSHA256(prefetchedCode);
-                if (!actualHash) {
-                    console.error(`[CPM Update] BLOCKED: SHA-256 computation failed for ${p.name} (Web Crypto unavailable).`);
-                    return false;
-                }
-                if (actualHash !== expectedSHA256) {
-                    console.error(`[CPM Update] BLOCKED: Integrity mismatch for ${p.name}. Expected sha256:${expectedSHA256.substring(0, 12)}…, got ${actualHash.substring(0, 12)}…`);
-                    return false;
-                }
-                console.log(`[CPM Update] ✓ Apply-time integrity OK for ${p.name}`);
-                console.log(`[CPM Update] Applying update for ${p.name} (${(prefetchedCode.length / 1024).toFixed(1)}KB)`);
-                const meta = this.extractMetadata(prefetchedCode);
-                if (meta.name && p.name && meta.name !== p.name) {
-                    console.error(`[CPM Update] BLOCKED: Tried to apply "${meta.name}" code to plugin "${p.name}". Names don't match.`);
-                    return false;
-                }
-                p.code = prefetchedCode;
-                p.name = meta.name || p.name;
-                p.version = meta.version;
-                p.description = meta.description;
-                p.icon = meta.icon;
-                p.updateUrl = meta.updateUrl || p.updateUrl;
-                await this.saveRegistry();
-                console.log(`[CPM Update] Successfully applied update for ${p.name} → v${meta.version}`);
-                return true;
-            } catch (e) {
-                console.error(`[CPM Update] Failed to apply update for ${p.name}:`, e);
-                return false;
-            }
-        },
-    };
-
-    // @ts-check
-    /**
-     * update-toast.js — Toast notification UI for auto-update system.
-     *
-     * Extracted from sub-plugin-manager.js for maintainability.
-     * Methods are spread into SubPluginManager.
-     */
-
-    /**
-     * Toast methods to be spread into SubPluginManager.
-     * @type {{[K: string]: any}}
-     */
-    const updateToastMethods = {
-        /** @param {any[]} updates */
         async showUpdateToast(updates) {
             try {
                 const doc = await Risu.getRootDocument();
@@ -5374,8 +3779,8 @@ var CupcakeProviderManager = (function (exports) {
                 const showMax = Math.min(count, 3);
                 for (let i = 0; i < showMax; i++) {
                     const u = updates[i];
-                    const changeText = u.changes ? ` — ${escHtml(u.changes)}` : '';
-                    detailLines += `<div style="font-size:11px;color:#9ca3af;margin-top:2px">${escHtml(u.icon)} ${escHtml(u.name)} <span style="color:#6ee7b7">${escHtml(u.localVersion)} → ${escHtml(u.remoteVersion)}</span>${changeText}</div>`;
+                    const changeText = u.changes ? ` — ${u.changes}` : '';
+                    detailLines += `<div style="font-size:11px;color:#9ca3af;margin-top:2px">${u.icon} ${u.name} <span style="color:#6ee7b7">${u.localVersion} → ${u.remoteVersion}</span>${changeText}</div>`;
                 }
                 if (count > showMax) {
                     detailLines += `<div style="font-size:11px;color:#6b7280;margin-top:2px">...외 ${count - showMax}개</div>`;
@@ -5415,18 +3820,61 @@ var CupcakeProviderManager = (function (exports) {
                         setTimeout(async () => { try { await toast.remove(); } catch (_) { } }, 350);
                     } catch (_) { }
                 }, 8000);
-            } catch (/** @type {any} */ e) { console.debug('[CPM Toast] Failed to show toast:', e.message); }
+            } catch (e) { console.debug('[CPM Toast] Failed to show toast:', e.message); }
         },
 
-        /**
-         * Show main plugin auto-update result toast.
-         * @param {string} localVersion
-         * @param {string} remoteVersion
-         * @param {string} changes
-         * @param {boolean} success
-         * @param {string} [error]
-         */
-        async _showMainAutoUpdateResult(localVersion, remoteVersion, changes, success, error) {
+        async checkMainPluginVersionQuiet() {
+            try {
+                if (/** @type {any} */ (window)._cpmMainVersionFromManifest) {
+                    console.log('[CPM MainAutoCheck] Already checked via manifest, skipping JS fallback.');
+                    return;
+                }
+                if (/** @type {any} */ (window)._cpmMainVersionChecked) return;
+                /** @type {any} */ (window)._cpmMainVersionChecked = true;
+
+                try {
+                    const lastCheck = await Risu.pluginStorage.getItem(this._MAIN_VERSION_CHECK_STORAGE_KEY);
+                    if (lastCheck) {
+                        const elapsed = Date.now() - parseInt(lastCheck, 10);
+                        if (elapsed < this._VERSION_CHECK_COOLDOWN) {
+                            console.log(`[CPM MainAutoCheck] Skipped — last check ${Math.round(elapsed / 60000)}min ago`);
+                            return;
+                        }
+                    }
+                } catch (_) { /* ignore */ }
+
+                const cacheBuster = this.MAIN_UPDATE_URL + '?_t=' + Date.now();
+                console.log('[CPM MainAutoCheck] Fallback: fetching remote provider-manager.js...');
+
+                const result = await Risu.risuFetch(cacheBuster, { method: 'GET', plainFetchForce: true });
+
+                if (!result.data || (result.status && result.status >= 400)) {
+                    console.debug(`[CPM MainAutoCheck] Fetch failed (${result.status}), silently skipped.`);
+                    return;
+                }
+
+                const code = typeof result.data === 'string' ? result.data : String(result.data || '');
+                const verMatch = code.match(/\/\/\s*@version\s+([^\r\n]+)/i);
+                if (!verMatch) { console.debug('[CPM MainAutoCheck] Remote version tag not found, skipped.'); return; }
+                const changesMatch = code.match(/\/\/\s*@changes\s+(.+)/i);
+                const changes = changesMatch ? changesMatch[1].trim() : '';
+
+                const remoteVersion = (verMatch[1] || '').trim();
+                const localVersion = CPM_VERSION;
+                const cmp = this.compareVersions(localVersion, remoteVersion);
+
+                try { await Risu.pluginStorage.setItem(this._MAIN_VERSION_CHECK_STORAGE_KEY, String(Date.now())); } catch (_) { /* ignore */ }
+
+                if (cmp > 0) {
+                    console.log(`[CPM MainAutoCheck] Main update available: ${localVersion}→${remoteVersion}`);
+                    await this.showMainUpdateToast(localVersion, remoteVersion, changes);
+                } else {
+                    console.log('[CPM MainAutoCheck] Main plugin is up to date.');
+                }
+            } catch (e) { console.debug('[CPM MainAutoCheck] Silent error:', e.message || e); }
+        },
+
+        async showMainUpdateToast(localVersion, remoteVersion, changes) {
             try {
                 const doc = await Risu.getRootDocument();
                 if (!doc) { console.debug('[CPM MainToast] getRootDocument returned null'); return; }
@@ -5439,10 +3887,9 @@ var CupcakeProviderManager = (function (exports) {
 
                 const toast = await doc.createElement('div');
                 await toast.setAttribute('x-cpm-main-toast', '1');
-                const borderColor = success ? '#6ee7b7' : '#f87171';
                 const styles = {
                     position: 'fixed', bottom: bottomPos, right: '20px', zIndex: '99999',
-                    background: '#1f2937', border: '1px solid #374151', borderLeft: `3px solid ${borderColor}`,
+                    background: '#1f2937', border: '1px solid #374151', borderLeft: '3px solid #f59e0b',
                     borderRadius: '10px', padding: '12px 14px', maxWidth: '380px', minWidth: '280px',
                     boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
                     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
@@ -5451,252 +3898,127 @@ var CupcakeProviderManager = (function (exports) {
                 };
                 for (const [k, v] of Object.entries(styles)) await toast.setStyle(k, v);
 
-                const changesHtml = changes ? ` — ${escHtml(changes)}` : '';
-                let html;
-                if (success) {
-                    html = `
-                    <div style="display:flex;align-items:flex-start;gap:10px">
-                        <div style="font-size:20px;line-height:1;flex-shrink:0">🧁</div>
-                        <div style="flex:1;min-width:0">
-                            <div style="font-size:13px;font-weight:600;color:#6ee7b7">✓ 메인 플러그인 자동 업데이트 완료</div>
-                            <div style="font-size:11px;color:#9ca3af;margin-top:2px">Cupcake PM <span style="color:#6ee7b7">${escHtml(localVersion)} → ${escHtml(remoteVersion)}</span>${changesHtml}</div>
-                            <div style="font-size:11px;color:#fcd34d;margin-top:4px;font-weight:500">⚡ 3~4초 정도 기다린 뒤 새로고침하면 적용됩니다</div>
-                        </div>
-                    </div>`;
-                } else {
-                    html = `
-                    <div style="display:flex;align-items:flex-start;gap:10px">
-                        <div style="font-size:20px;line-height:1;flex-shrink:0">🧁</div>
-                        <div style="flex:1;min-width:0">
-                            <div style="font-size:13px;font-weight:600;color:#f87171">⚠️ 자동 업데이트 실패</div>
-                            <div style="font-size:11px;color:#9ca3af;margin-top:2px">Cupcake PM ${escHtml(localVersion)} → ${escHtml(remoteVersion)}</div>
-                            <div style="font-size:10px;color:#f87171;margin-top:2px">${escHtml(error || '알 수 없는 오류')}</div>
-                            <div style="font-size:10px;color:#6b7280;margin-top:4px">리스 설정 → 플러그인 탭 → + 버튼으로 수동 업데이트하세요</div>
-                        </div>
-                    </div>`;
-                }
-                await toast.setInnerHTML(html);
+                const changesHtml = changes ? ` — ${changes}` : '';
+                await toast.setInnerHTML(`
+                <div style="display:flex;align-items:flex-start;gap:10px">
+                    <div style="font-size:20px;line-height:1;flex-shrink:0">🧁</div>
+                    <div style="flex:1;min-width:0">
+                        <div style="font-size:13px;font-weight:600;color:#fef3c7">⭐ 메인 플러그인 업데이트 있음</div>
+                        <div style="font-size:11px;color:#9ca3af;margin-top:2px">🧁 Cupcake PM <span style="color:#fcd34d">${localVersion} → ${remoteVersion}</span>${changesHtml}</div>
+                        <div style="font-size:11px;color:#6b7280;margin-top:4px">리스 설정 → 플러그인 탭 → + 버튼으로 업데이트</div>
+                    </div>
+                </div>
+            `);
 
                 const body = await doc.querySelector('body');
                 if (!body) { console.debug('[CPM MainToast] body not found'); return; }
                 await body.appendChild(toast);
+                console.log('[CPM MainToast] Main update toast appended to root body');
 
                 setTimeout(async () => { try { await toast.setStyle('opacity', '1'); await toast.setStyle('transform', 'translateY(0)'); } catch (_) { } }, 50);
-                const dismissDelay = success ? 10000 : 15000;
                 setTimeout(async () => {
                     try { await toast.setStyle('opacity', '0'); await toast.setStyle('transform', 'translateY(12px)');
                         setTimeout(async () => { try { await toast.remove(); } catch (_) { } }, 350);
                     } catch (_) { }
-                }, dismissDelay);
-            } catch (e) { console.debug('[CPM MainToast] Failed to show toast:', /** @type {Error} */ (e).message || e); }
+                }, 10000);
+            } catch (e) { console.debug('[CPM MainToast] Failed to show toast:', e.message || e); }
         },
-    };
 
-    // @ts-check
-    /**
-     * sub-plugin-manager.js — Dynamic sub-plugin lifecycle management.
-     * Handles install, remove, toggle, execute, hot-reload, and auto-update.
-     *
-     * Auto-update logic is defined in auto-updater.js and update-toast.js,
-     * then spread into SubPluginManager to keep this file focused on core CRUD
-     * and hot-reload infrastructure.
-     */
+        // ── Single-Bundle Update System ──
+        UPDATE_BUNDLE_URL: 'https://cupcake-plugin-manager.vercel.app/api/update-bundle',
 
-    // DI: _exposeScopeToWindow is injected by init.js to avoid circular dependency.
-    let _exposeScopeToWindow$1 = () => {};
-    /** @param {() => void} fn */
-    function setExposeScopeFunction(fn) { _exposeScopeToWindow$1 = fn; }
-
-    const SubPluginManager = {
-        STORAGE_KEY: 'cpm_installed_subplugins',
-        /** @type {any[]} */
-        plugins: [],
-
-        async loadRegistry() {
+        async checkAllUpdates() {
             try {
-                const data = await Risu.pluginStorage.getItem(this.STORAGE_KEY);
-                if (!data) { this.plugins = []; return; }
-                const result = parseAndValidate(data, schemas.subPluginRegistry);
-                if (!result.ok) {
-                    console.warn('[CPM Loader] Registry schema validation failed:', result.error);
-                    this.plugins = result.fallback;
-                } else {
-                    this.plugins = result.data;
-                }
-            } catch (e) {
-                console.error('[CPM Loader] Failed to load registry', e);
-                this.plugins = [];
-            }
-        },
+                const cacheBuster = this.UPDATE_BUNDLE_URL + '?_t=' + Date.now() + '_r=' + Math.random().toString(36).substr(2, 8);
+                console.log(`[CPM Update] Fetching update bundle via risuFetch(plainFetchForce): ${cacheBuster}`);
 
-        async saveRegistry() {
-            await Risu.pluginStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.plugins));
-        },
+                const result = await Risu.risuFetch(cacheBuster, { method: 'GET', plainFetchForce: true });
 
-        /** @param {string} code */
-        extractMetadata(code) {
-            const meta = { name: 'Unnamed Sub-Plugin', version: '', description: '', icon: '📦', updateUrl: '' };
-            const lines = code.split(/\r?\n/);
-            let parsedName = '';
-            let parsedDisplayName = '';
-            for (const line of lines) {
-                const trimmed = line.trim();
-                if (!trimmed) continue;
-                if (!trimmed.startsWith('//')) break;
-
-                const nameMatch = trimmed.match(/^\/\/\s*@name\s+(.+)$/i);
-                if (nameMatch && !parsedName) {
-                    parsedName = nameMatch[1].trim();
-                    continue;
+                if (!result.data || (result.status && result.status >= 400)) {
+                    console.error(`[CPM Update] Failed to fetch update bundle: ${result.status}`);
+                    return [];
                 }
 
-                const displayNameMatch = trimmed.match(/^\/\/\s*@display-name\s+(.+)$/i);
-                if (displayNameMatch && !parsedDisplayName) {
-                    parsedDisplayName = displayNameMatch[1].trim();
-                    continue;
-                }
+                const bundle = (typeof result.data === 'string') ? JSON.parse(result.data) : result.data;
+                const manifest = bundle.versions || {};
+                const codeBundle = bundle.code || {};
+                console.log(`[CPM Update] Bundle loaded: ${Object.keys(manifest).length} versions, ${Object.keys(codeBundle).length} code files`);
 
-                const verMatch = trimmed.match(/^\/\/\s*@version\s+(.+)$/i);
-                if (verMatch && !meta.version) {
-                    meta.version = verMatch[1].trim();
-                    continue;
-                }
-
-                const descMatch = trimmed.match(/^\/\/\s*@description\s+(.+)$/i);
-                if (descMatch && !meta.description) {
-                    meta.description = descMatch[1].trim();
-                    continue;
-                }
-
-                const iconMatch = trimmed.match(/^\/\/\s*@icon\s+(.+)$/i);
-                if (iconMatch && meta.icon === '📦') {
-                    meta.icon = iconMatch[1].trim();
-                    continue;
-                }
-
-                const updateMatch = trimmed.match(/^\/\/\s*@update-url\s+(.+)$/i);
-                if (updateMatch && !meta.updateUrl) {
-                    meta.updateUrl = updateMatch[1].trim();
-                }
-            }
-
-            meta.name = parsedName || parsedDisplayName || meta.name;
-            return meta;
-        },
-
-        /** Names that must never be installed as a sub-plugin (main plugin identifiers). */
-        BLOCKED_NAMES: ['Cupcake_Provider_Manager', 'Cupcake Provider Manager'],
-        MAX_INSTALL_BYTES: 300 * 1024,
-
-        /** @param {string} code */
-        getCodeSizeBytes(code) {
-            try {
-                if (typeof TextEncoder !== 'undefined') {
-                    return new TextEncoder().encode(code || '').length;
-                }
-            } catch (_) {}
-            return String(code || '').length;
-        },
-
-        /** @param {string} code */
-        async install(code) {
-            const meta = this.extractMetadata(code);
-            const codeSizeBytes = this.getCodeSizeBytes(code);
-
-            if (codeSizeBytes > this.MAX_INSTALL_BYTES) {
-                throw new Error(
-                    `서브 플러그인 용량이 너무 큽니다. ` +
-                    `최대 ${(this.MAX_INSTALL_BYTES / 1024).toFixed(0)}KB까지만 설치할 수 있습니다.`
-                );
-            }
-
-            // Block installing the main provider-manager plugin as a sub-plugin
-            if (this.BLOCKED_NAMES.some(n => n.toLowerCase() === meta.name.toLowerCase())) {
-                throw new Error(
-                    `'${meta.name}'은(는) 메인 프로바이더 매니저 플러그인입니다. ` +
-                    `서브 플러그인으로 설치할 수 없습니다.`
-                );
-            }
-
-            const existing = this.plugins.find(p => p.name === meta.name);
-            if (existing) {
-                existing.code = code;
-                existing.version = meta.version;
-                existing.description = meta.description;
-                existing.icon = meta.icon;
-                existing.updateUrl = meta.updateUrl;
-                await this.saveRegistry();
-                return meta.name;
-            }
-            const id = 'subplugin_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
-            this.plugins.push({ id, code, enabled: true, ...meta });
-            await this.saveRegistry();
-            return meta.name;
-        },
-
-        /** @param {string} id */
-        async remove(id) {
-            this.plugins = this.plugins.filter(p => p.id !== id);
-            await this.saveRegistry();
-        },
-
-        /**
-         * @param {string} id
-         * @param {boolean} enabled
-         */
-        async toggle(id, enabled) {
-            const p = this.plugins.find(p => p.id === id);
-            if (p) {
-                p.enabled = enabled;
-                await this.saveRegistry();
-            }
-        },
-
-        async executeEnabled() {
-            _exposeScopeToWindow$1();
-            /** @type {any} */ (window).CupcakePM_SubPlugins = /** @type {any} */ (window).CupcakePM_SubPlugins || [];
-            for (const p of this.plugins) {
-                if (p.enabled) {
-                    try {
-                        state._currentExecutingPluginId = p.id;
-                        if (!_pluginRegistrations[p.id]) _pluginRegistrations[p.id] = { providerNames: [], tabObjects: [], fetcherEntries: [] };
-                        await _executeViaScriptTag(p.code, p.name);
-                        console.log(`[CPM Loader] Loaded Sub-Plugin: ${p.name}`);
-                    } catch (e) {
-                        console.error(`[CPM Loader] Failed to load ${p.name}`, e);
-                    } finally {
-                        state._currentExecutingPluginId = null;
+                const results = [];
+                for (const p of this.plugins) {
+                    if (!p.updateUrl || !p.name) continue;
+                    const remote = manifest[p.name];
+                    if (!remote || !remote.version) {
+                        console.warn(`[CPM Update] ${p.name} not found in manifest, skipping.`);
+                        continue;
+                    }
+                    const cmp = this.compareVersions(p.version || '0.0.0', remote.version);
+                    console.log(`[CPM Update] ${p.name}: local=${p.version} remote=${remote.version} cmp=${cmp}`);
+                    if (cmp > 0) {
+                        const code = (remote.file && codeBundle[remote.file]) ? codeBundle[remote.file] : null;
+                        if (code) {
+                            console.log(`[CPM Update] Code ready for ${p.name} (${(code.length / 1024).toFixed(1)}KB)`);
+                            // Integrity check: verify SHA-256 if manifest provides it
+                            if (remote.sha256) {
+                                const actualHash = await _computeSHA256(code);
+                                if (actualHash && actualHash !== remote.sha256) {
+                                    console.error(`[CPM Update] ⚠️ INTEGRITY MISMATCH for ${p.name}: expected ${remote.sha256.substring(0, 12)}…, got ${actualHash.substring(0, 12)}… — skipping`);
+                                    continue;
+                                }
+                                if (actualHash) console.log(`[CPM Update] ✓ Integrity OK for ${p.name} [sha256:${actualHash.substring(0, 12)}…]`);
+                            }
+                        }
+                        else console.warn(`[CPM Update] ${p.name} (${remote.file}) code not found in bundle`);
+                        results.push({ plugin: p, remoteVersion: remote.version, localVersion: p.version || '0.0.0', remoteFile: remote.file, code, expectedSHA256: remote.sha256 || '' });
                     }
                 }
+                return results;
+            } catch (e) {
+                console.error(`[CPM Update] Failed to check updates:`, e);
+                return [];
             }
         },
 
-        /**
-         * @param {string} a
-         * @param {string} b
-         */
-        compareVersions(a, b) {
-            const sa = (a || '0.0.0').replace(/[^0-9.]/g, '') || '0.0.0';
-            const sb = (b || '0.0.0').replace(/[^0-9.]/g, '') || '0.0.0';
-            const pa = sa.split('.').map(Number);
-            const pb = sb.split('.').map(Number);
-            for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-                const na = pa[i] || 0, nb = pb[i] || 0;
-                if (nb > na) return 1;
-                if (na > nb) return -1;
+        async applyUpdate(pluginId, prefetchedCode, expectedSHA256) {
+            const p = this.plugins.find(x => x.id === pluginId);
+            if (!p) return false;
+            if (!prefetchedCode) {
+                console.error(`[CPM Update] No pre-fetched code available for ${p.name}. Re-run update check.`);
+                return false;
             }
-            return 0;
+            try {
+                // Integrity verification at apply-time (defense-in-depth)
+                if (expectedSHA256) {
+                    const actualHash = await _computeSHA256(prefetchedCode);
+                    if (actualHash && actualHash !== expectedSHA256) {
+                        console.error(`[CPM Update] BLOCKED: Integrity mismatch for ${p.name}. Expected sha256:${expectedSHA256.substring(0, 12)}…, got ${actualHash.substring(0, 12)}…`);
+                        return false;
+                    }
+                    if (actualHash) console.log(`[CPM Update] ✓ Apply-time integrity OK for ${p.name}`);
+                }
+                console.log(`[CPM Update] Applying update for ${p.name} (${(prefetchedCode.length / 1024).toFixed(1)}KB)`);
+                const meta = this.extractMetadata(prefetchedCode);
+                if (meta.name && p.name && meta.name !== p.name) {
+                    console.error(`[CPM Update] BLOCKED: Tried to apply "${meta.name}" code to plugin "${p.name}". Names don't match.`);
+                    return false;
+                }
+                p.code = prefetchedCode;
+                p.name = meta.name || p.name;
+                p.version = meta.version;
+                p.description = meta.description;
+                p.icon = meta.icon;
+                p.updateUrl = meta.updateUrl || p.updateUrl;
+                await this.saveRegistry();
+                console.log(`[CPM Update] Successfully applied update for ${p.name} → v${meta.version}`);
+                return true;
+            } catch (e) {
+                console.error(`[CPM Update] Failed to apply update for ${p.name}:`, e);
+                return false;
+            }
         },
-
-        // ── Auto-update system (from auto-updater.js) ──
-        ...autoUpdaterMethods,
-
-        // ── Toast UI (from update-toast.js) ──
-        ...updateToastMethods,
 
         // ── Hot-Reload Infrastructure ──
 
-        /** @param {string} pluginId */
         unloadPlugin(pluginId) {
             const reg = _pluginRegistrations[pluginId];
             if (!reg) return;
@@ -5707,47 +4029,46 @@ var CupcakeProviderManager = (function (exports) {
                     try {
                         const result = hook();
                         if (result && typeof result.then === 'function') {
-                            result.catch((/** @type {any} */ e) => console.warn(`[CPM Loader] Async cleanup hook error for ${pluginId}:`, e.message));
+                            result.catch(e => console.warn(`[CPM Loader] Async cleanup hook error for ${pluginId}:`, e.message));
                         }
-                    } catch (/** @type {any} */ e) { console.warn(`[CPM Loader] Cleanup hook error for ${pluginId}:`, e.message); }
+                    } catch (e) { console.warn(`[CPM Loader] Cleanup hook error for ${pluginId}:`, e.message); }
                 }
                 delete _pluginCleanupHooks[pluginId];
             }
 
             for (const key of Object.keys(window)) {
-                if (key.startsWith('_cpm') && key.endsWith('Cleanup') && typeof /** @type {any} */ (window)[key] === 'function') {
+                if (key.startsWith('_cpm') && key.endsWith('Cleanup') && typeof window[key] === 'function') {
                     const providerNames = reg.providerNames.map(n => n.toLowerCase());
                     const keyLower = key.toLowerCase();
                     const isRelated = providerNames.some(name => keyLower.includes(name.replace(/\s+/g, '').toLowerCase()));
                     if (isRelated) {
                         try {
                             console.log(`[CPM Loader] Calling window.${key}() for plugin ${pluginId}`);
-                            const result = /** @type {any} */ (window)[key]();
+                            const result = window[key]();
                             if (result && typeof result.then === 'function') {
-                                result.catch((/** @type {any} */ e) => console.warn(`[CPM Loader] window.${key}() error:`, e.message));
+                                result.catch(e => console.warn(`[CPM Loader] window.${key}() error:`, e.message));
                             }
-                        } catch (/** @type {any} */ e) { console.warn(`[CPM Loader] window.${key}() error:`, e.message); }
+                        } catch (e) { console.warn(`[CPM Loader] window.${key}() error:`, e.message); }
                     }
                 }
             }
 
             for (const name of reg.providerNames) {
                 delete customFetchers[name];
-                state.ALL_DEFINED_MODELS = state.ALL_DEFINED_MODELS.filter((/** @type {any} */ m) => m.provider !== name);
+                state.ALL_DEFINED_MODELS = state.ALL_DEFINED_MODELS.filter(m => m.provider !== name);
             }
             for (const tab of reg.tabObjects) {
                 const idx = registeredProviderTabs.indexOf(tab);
                 if (idx !== -1) registeredProviderTabs.splice(idx, 1);
             }
             for (const entry of reg.fetcherEntries) {
-                const idx = pendingDynamicFetchers.findIndex((/** @type {any} */ f) => f.name === entry.name);
+                const idx = pendingDynamicFetchers.findIndex(f => f.name === entry.name);
                 if (idx !== -1) pendingDynamicFetchers.splice(idx, 1);
             }
             _pluginRegistrations[pluginId] = { providerNames: [], tabObjects: [], fetcherEntries: [] };
             console.log(`[CPM Loader] Unloaded registrations for plugin ${pluginId}`);
         },
 
-        /** @param {any} plugin */
         async executeOne(plugin) {
             if (!plugin || !plugin.enabled) return;
             _exposeScopeToWindow$1();
@@ -5763,7 +4084,6 @@ var CupcakeProviderManager = (function (exports) {
             }
         },
 
-        /** @param {string} pluginId */
         async hotReload(pluginId) {
             const plugin = this.plugins.find(p => p.id === pluginId);
             if (!plugin) return false;
@@ -5774,9 +4094,7 @@ var CupcakeProviderManager = (function (exports) {
                 await this.executeOne(plugin);
 
                 const newProviderNames = (_pluginRegistrations[pluginId] || {}).providerNames || [];
-                for (const _entry of [...pendingDynamicFetchers]) {
-                    /** @type {any} */
-                    const { name, fetchDynamicModels } = _entry;
+                for (const { name, fetchDynamicModels } of [...pendingDynamicFetchers]) {
                     if (newProviderNames.includes(name)) {
                         try {
                             const enabled = await isDynamicFetchEnabled(name);
@@ -5784,11 +4102,11 @@ var CupcakeProviderManager = (function (exports) {
                             console.log(`[CupcakePM] Hot-reload: Fetching dynamic models for ${name}...`);
                             const dynamicModels = await fetchDynamicModels();
                             if (dynamicModels && Array.isArray(dynamicModels) && dynamicModels.length > 0) {
-                                state.ALL_DEFINED_MODELS = state.ALL_DEFINED_MODELS.filter((/** @type {any} */ m) => m.provider !== name);
+                                state.ALL_DEFINED_MODELS = state.ALL_DEFINED_MODELS.filter(m => m.provider !== name);
                                 for (const m of dynamicModels) state.ALL_DEFINED_MODELS.push({ ...m, provider: name });
-                                console.log(`[CupcakePM] \u2713 Hot-reload dynamic models for ${name}: ${dynamicModels.length} models`);
+                                console.log(`[CupcakePM] ✓ Hot-reload dynamic models for ${name}: ${dynamicModels.length} models`);
                             }
-                        } catch (/** @type {any} */ e) { console.warn(`[CupcakePM] Hot-reload dynamic fetch failed for ${name}:`, e.message || e); }
+                        } catch (e) { console.warn(`[CupcakePM] Hot-reload dynamic fetch failed for ${name}:`, e.message || e); }
                     }
                 }
             }
@@ -5799,110 +4117,58 @@ var CupcakeProviderManager = (function (exports) {
         async hotReloadAll() {
             for (const p of this.plugins) this.unloadPlugin(p.id);
             await this.executeEnabled();
-            for (const _entry of [...pendingDynamicFetchers]) {
-                /** @type {any} */
-                const { name, fetchDynamicModels } = _entry;
+            for (const { name, fetchDynamicModels } of [...pendingDynamicFetchers]) {
                 try {
                     const enabled = await isDynamicFetchEnabled(name);
                     if (!enabled) continue;
                     const dynamicModels = await fetchDynamicModels();
                     if (dynamicModels && Array.isArray(dynamicModels) && dynamicModels.length > 0) {
-                        state.ALL_DEFINED_MODELS = state.ALL_DEFINED_MODELS.filter((/** @type {any} */ m) => m.provider !== name);
+                        state.ALL_DEFINED_MODELS = state.ALL_DEFINED_MODELS.filter(m => m.provider !== name);
                         for (const m of dynamicModels) state.ALL_DEFINED_MODELS.push({ ...m, provider: name });
                     }
-                } catch (/** @type {any} */ e) { console.warn(`[CupcakePM] Hot-reload dynamic fetch failed for ${name}:`, e.message || e); }
+                } catch (e) { console.warn(`[CupcakePM] Hot-reload dynamic fetch failed for ${name}:`, e.message || e); }
             }
             console.log('[CPM Loader] Hot-reload all complete.');
-        },
-
-        // ── Purge All CPM Data ──
-        // Storage keys used by CPM in pluginStorage
-        _PLUGIN_STORAGE_KEYS: [
-            'cpm_installed_subplugins',
-            'cpm_settings_backup',
-            'cpm_last_version_check',
-            'cpm_last_main_version_check',
-            'cpm_pending_main_update',
-            'cpm_last_boot_status',
-        ],
-
-        /**
-         * Completely purge ALL data stored by Cupcake Provider Manager.
-         * This includes: pluginStorage items, all @arg setting keys,
-         * sub-plugin registry, settings backup, and version check timestamps.
-         *
-         * WARNING: This is irreversible. Caller must confirm with the user first.
-         * @returns {Promise<{pluginStorageCleared: number, argsCleared: number}>}
-         */
-        async purgeAllCpmData() {
-            let pluginStorageCleared = 0;
-            let argsCleared = 0;
-
-            // 1. Clear all known pluginStorage keys
-            for (const key of this._PLUGIN_STORAGE_KEYS) {
-                try {
-                    await Risu.pluginStorage.removeItem(key);
-                    pluginStorageCleared++;
-                } catch (/** @type {any} */ e) {
-                    console.warn(`[CPM Purge] Failed to remove pluginStorage key '${key}':`, e.message || e);
-                }
-            }
-
-            // 2. Also try to find and remove any sub-plugin specific pluginStorage keys
-            try {
-                const allKeys = await Risu.pluginStorage.keys();
-                for (const key of allKeys) {
-                    if (key.startsWith('cpm_') || key.startsWith('cpm-')) {
-                        try {
-                            await Risu.pluginStorage.removeItem(key);
-                            pluginStorageCleared++;
-                        } catch (_) { /* ignore */ }
-                    }
-                }
-            } catch (_) {
-                // pluginStorage.keys() may not be available in all environments
-            }
-
-            // 3. Clear all managed @arg setting keys
-            const managedKeys = getManagedSettingKeys();
-            for (const key of managedKeys) {
-                try {
-                    Risu.setArgument(key, '');
-                    argsCleared++;
-                } catch (/** @type {any} */ e) {
-                    console.warn(`[CPM Purge] Failed to clear arg '${key}':`, e.message || e);
-                }
-            }
-
-            // 4. Clear legacy custom model keys (cpm_c1..cpm_c10)
-            const legacyFields = ['url', 'model', 'key', 'name', 'format', 'sysfirst', 'altrole', 'mustuser', 'maxout', 'mergesys', 'decoupled', 'thought', 'reasoning', 'verbosity', 'thinking', 'tok'];
-            for (let i = 1; i <= 10; i++) {
-                for (const field of legacyFields) {
-                    try {
-                        Risu.setArgument(`cpm_c${i}_${field}`, '');
-                        argsCleared++;
-                    } catch (_) { /* ignore */ }
-                }
-            }
-
-            // 5. Clear in-memory state
-            this.plugins = [];
-            state.ALL_DEFINED_MODELS = [];
-            state.CUSTOM_MODELS_CACHE = [];
-            state.vertexTokenCache = { token: null, expiry: 0 };
-
-            // 6. Clear sensitive window globals (in-memory tokens / session IDs)
-            if (typeof window !== 'undefined') {
-                const cpmGlobalKeys = Object.keys(window).filter(k => k.startsWith('_cpm') || k === 'CupcakePM' || k === 'CPM_VERSION' || k === 'cpmShortcutRegistered');
-                for (const k of cpmGlobalKeys) {
-                    try { delete /** @type {any} */ (window)[k]; } catch (_) { /* ignore */ }
-                }
-            }
-
-            console.log(`[CPM Purge] Complete. pluginStorage: ${pluginStorageCleared} keys, args: ${argsCleared} keys cleared.`);
-            return { pluginStorageCleared, argsCleared };
         }
     };
+
+    // @ts-check
+    /**
+     * copilot-headers.js — Copilot API emulation header constants.
+     *
+     * Extracted from fetch-custom.js so that version bumps (e.g. when GitHub
+     * updates the Copilot Chat extension) can be done in a single place
+     * without touching the core fetch logic.
+     */
+
+    /** Copilot Chat extension version emulated by CPM. */
+    const COPILOT_CHAT_VERSION = '0.37.4';
+
+    /** VS Code editor version emulated by CPM. */
+    const VSCODE_VERSION = '1.109.2';
+
+    /** GitHub API version header value. */
+    const GITHUB_API_VERSION = '2025-10-01';
+
+    /**
+     * Build the static Copilot emulation headers.
+     * Dynamic per-request headers (machine-id, session-id, interaction-id, etc.)
+     * are NOT included here — they are set by the caller.
+     *
+     * @returns {Record<string, string>}
+     */
+    function getCopilotStaticHeaders() {
+        return {
+            'Copilot-Integration-Id': 'vscode-chat',
+            'Editor-Plugin-Version': `copilot-chat/${COPILOT_CHAT_VERSION}`,
+            'Editor-Version': `vscode/${VSCODE_VERSION}`,
+            'User-Agent': `GitHubCopilotChat/${COPILOT_CHAT_VERSION}`,
+            'X-Github-Api-Version': GITHUB_API_VERSION,
+            'X-Initiator': 'user',
+            'X-Interaction-Type': 'conversation-panel',
+            'X-Vscode-User-Agent-Library-Version': 'electron-fetch',
+        };
+    }
 
     // @ts-check
     /**
@@ -5912,37 +4178,6 @@ var CupcakeProviderManager = (function (exports) {
      * and Responses API support.
      */
 
-    /** @param {number} ms */
-    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-    /** @param {any} headers */
-    function _parseRetryAfterMs(headers) {
-        const raw = headers?.get?.('retry-after');
-        if (!raw) return 0;
-        const seconds = Number(raw);
-        if (Number.isFinite(seconds) && seconds >= 0) {
-            return Math.max(0, Math.floor(seconds * 1000));
-        }
-        const retryAt = Date.parse(raw);
-        if (Number.isNaN(retryAt)) return 0;
-        return Math.max(0, retryAt - Date.now());
-    }
-
-    /** @param {number} status */
-    function _isRetriableHttpStatus(status) {
-        // 524 = Cloudflare timeout — retrying immediately won't help, skip it
-        return status === 408 || status === 429 || (status >= 500 && status !== 524);
-    }
-
-    /**
-     * @param {Record<string, any>} config
-     * @param {any[]} messagesRaw
-     * @param {number} temp
-     * @param {number} maxTokens
-     * @param {Record<string, any>} [args]
-     * @param {AbortSignal} [abortSignal]
-     * @param {string} [_reqId]
-     */
     async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {}, abortSignal, _reqId) {
         if (!config.url || !config.url.trim()) {
             return { success: false, content: '[Cupcake PM] Base URL is required. Configure it in PM settings.' };
@@ -5970,7 +4205,7 @@ var CupcakeProviderManager = (function (exports) {
         }
 
         const _rawKeys = (config.key || '').trim();
-        const _allKeys = _rawKeys.split(/\s+/).filter((/** @type {string} */ k) => k.length > 0);
+        const _allKeys = _rawKeys.split(/\s+/).filter(k => k.length > 0);
         const _useKeyRotation = _allKeys.length > 1;
         const _keyPool = [..._allKeys];
 
@@ -5986,16 +4221,9 @@ var CupcakeProviderManager = (function (exports) {
             }
         }
 
-        // Safety: clamp maxTokens if custom model has maxOutputLimit set
-        if (config.maxOutputLimit && config.maxOutputLimit > 0 && typeof maxTokens === 'number' && maxTokens > config.maxOutputLimit) {
-            console.warn(`[CPM-Custom] max_tokens ${maxTokens} → clamped to ${config.maxOutputLimit} for ${config.model} (user limit)`);
-            maxTokens = config.maxOutputLimit;
-        }
-
-        /** @type {any} */
         const body = { model: config.model, temperature: temp };
 
-        const _needsMCT = (/** @type {string} */ model) => { if (!model) return false; return /(?:^|\/)(?:gpt-(?:4\.5|5)|o[1-9])/i.test(model); };
+        const _needsMCT = (model) => { if (!model) return false; return /(?:^|\/)(?:gpt-(?:4\.5|5)|o[1-9])/i.test(model); };
         if (format === 'openai' && _needsMCT(config.model)) {
             body.max_completion_tokens = maxTokens;
         } else {
@@ -6019,24 +4247,16 @@ var CupcakeProviderManager = (function (exports) {
 
             const effortRaw = String(config.effort || '').trim().toLowerCase();
             const thinkingMode = String(config.thinking || config.thinking_level || '').trim().toLowerCase();
-            const adaptiveToggle = !!config.adaptiveThinking;
-            const VALID_EFFORTS = ['low', 'medium', 'high', 'max'];
-
-            // Adaptive thinking: only when the explicit toggle is ON (or legacy thinkingMode === 'adaptive')
-            const useAdaptiveThinking = adaptiveToggle || thinkingMode === 'adaptive';
+            const useAdaptiveThinking = (effortRaw && effortRaw !== 'none') || thinkingMode === 'adaptive';
             if (useAdaptiveThinking) {
                 body.thinking = { type: 'adaptive' };
-                const adaptiveEffort = VALID_EFFORTS.includes(effortRaw) ? effortRaw : 'high';
-                body.output_config = { effort: adaptiveEffort };
+                let adaptiveEffort = '';
+                if (['low', 'medium', 'high', 'max'].includes(effortRaw)) adaptiveEffort = effortRaw;
+                else if (thinkingMode === 'adaptive') adaptiveEffort = 'high';
+                if (adaptiveEffort) body.output_config = { effort: adaptiveEffort };
                 body.max_tokens = Math.max(body.max_tokens || 0, 16000);
                 delete body.temperature; delete body.top_k; delete body.top_p;
-            } else if (VALID_EFFORTS.includes(effortRaw)) {
-                // Effort WITHOUT adaptive thinking — set output_config only (no thinking block)
-                body.output_config = { effort: effortRaw };
-            }
-
-            // Budget-based thinking (type: 'enabled') — independent of adaptive/effort
-            if (!useAdaptiveThinking) {
+            } else {
                 const explicitBudget = config.thinkingBudget || 0;
                 const legacyBudget = parseInt(config.thinking_level) || 0;
                 const budget = explicitBudget > 0 ? explicitBudget : legacyBudget;
@@ -6072,9 +4292,9 @@ var CupcakeProviderManager = (function (exports) {
 
         // ── Final safety: deep-clone + filter ──
         if (body.messages) {
-            try { body.messages = JSON.parse(JSON.stringify(body.messages)); } catch (e) { console.error('[Cupcake PM] Deep-clone of messages failed:', /** @type {Error} */ (e).message); }
+            try { body.messages = JSON.parse(JSON.stringify(body.messages)); } catch (e) { console.error('[Cupcake PM] Deep-clone of messages failed:', e.message); }
             const before = body.messages.length;
-            body.messages = body.messages.filter((/** @type {any} */ m) => {
+            body.messages = body.messages.filter(m => {
                 if (m == null || typeof m !== 'object') return false;
                 if (!hasNonEmptyMessageContent(m.content) && !hasAttachedMultimodals(m)) return false;
                 if (typeof m.role !== 'string' || !m.role) return false;
@@ -6084,9 +4304,9 @@ var CupcakeProviderManager = (function (exports) {
             if (body.messages.length === 0) return { success: false, content: '[Cupcake PM] messages must be non-empty (all messages became empty after sanitization)' };
         }
         if (body.contents) {
-            try { body.contents = JSON.parse(JSON.stringify(body.contents)); } catch (e) { console.error('[Cupcake PM] ⚠️ Deep-clone of contents failed:', /** @type {Error} */ (e).message); }
+            try { body.contents = JSON.parse(JSON.stringify(body.contents)); } catch (e) { console.error('[Cupcake PM] ⚠️ Deep-clone of contents failed:', e.message); }
             const before = body.contents.length;
-            body.contents = body.contents.filter((/** @type {any} */ m) => m != null && typeof m === 'object');
+            body.contents = body.contents.filter(m => m != null && typeof m === 'object');
             if (body.contents.length < before) console.warn(`[Cupcake PM] ⚠️ Removed ${before - body.contents.length} null/invalid entries from contents array`);
         }
 
@@ -6123,46 +4343,9 @@ var CupcakeProviderManager = (function (exports) {
         if (config.customParams && config.customParams.trim() !== '') {
             try {
                 const extra = JSON.parse(config.customParams);
-                if (typeof extra === 'object' && extra !== null && !Array.isArray(extra)) {
+                if (typeof extra === 'object' && extra !== null) {
                     const safeExtra = { ...extra };
-
-                    // ── Blocklist: structural/security-critical fields that must not be overridden via customParams ──
-                    // These fields control conversation content, streaming behaviour, model identity, or tool definitions.
-                    // Allowing them to be overridden could silently break the request or create security issues.
-                    /** @type {string[]} */
-                    const BLOCKED_FIELDS = [
-                        // conversation content — replacing these would discard the user's actual chat
-                        'messages', 'contents', 'input', 'prompt',
-                        // streaming control — CPM sets this based on caller intent; override would break the SSE parser
-                        'stream', 'stream_options',
-                        // model identity — the model is chosen in the provider tab UI; overriding here is almost always a mistake
-                        'model',
-                        // tool / function injection — could execute arbitrary tool definitions the user didn't intend
-                        'tools', 'functions', 'function_call', 'tool_choice', 'tool_config',
-                        // system-level overrides (both snake_case and camelCase variants)
-                        'system', 'system_instruction', 'systemInstruction',
-                    ];
-                    /** @type {string[]} */
-                    const stripped = [];
-                    for (const key of BLOCKED_FIELDS) {
-                        if (key in safeExtra) {
-                            stripped.push(key);
-                            delete safeExtra[key];
-                        }
-                    }
-                    if (stripped.length > 0) {
-                        console.warn(`[Cupcake PM] customParams: blocked field(s) stripped: ${stripped.join(', ')}. Use the main UI settings instead.`);
-                    }
-
-                    // ── Type guard: only merge primitive values and plain objects/arrays ──
-                    for (const [key, value] of Object.entries(safeExtra)) {
-                        if (value !== null && typeof value === 'object' && typeof value.then === 'function') {
-                            // Reject thenables (Promise-like objects) — not valid JSON values
-                            delete safeExtra[key];
-                            console.warn(`[Cupcake PM] customParams: rejected non-serializable value for key "${key}"`);
-                        }
-                    }
-
+                    delete safeExtra.messages; delete safeExtra.contents; delete safeExtra.stream;
                     Object.assign(body, safeExtra);
                 }
             } catch (e) { console.error('[Cupcake PM] Failed to parse customParams JSON for Custom Model:', e); }
@@ -6193,10 +4376,7 @@ var CupcakeProviderManager = (function (exports) {
             if (body.messages) {
                 // Response API does not accept 'name' field on input items (e.g. example_assistant, example_user).
                 // Sending it causes 400: "Unknown parameter: 'input[N].name'"
-                body.input = body.messages.map((/** @type {any} */ msg) => {
-                    const { name: _name, ...rest } = msg;
-                    return rest;
-                });
+                body.input = body.messages.map(({ name: _name, ...rest }) => rest);
                 delete body.messages;
             }
             if (body.max_completion_tokens) { body.max_output_tokens = body.max_completion_tokens; delete body.max_completion_tokens; }
@@ -6214,140 +4394,49 @@ var CupcakeProviderManager = (function (exports) {
         }
         const _isResponsesEndpoint = _useResponsesAPI || (effectiveUrl && /\/responses(?:\?|$)/.test(effectiveUrl));
 
-        // ── CORS Proxy: proxyUrl이 설정되어 있으면 도메인을 프록시로 교체 ──
-        // Responses API URL 재작성 후에 적용해야 올바른 경로를 프록시로 보냄
-        const _proxyUrl = (config.proxyUrl || '').replace(/\/+$/, '');
-        const _isProxied = !!_proxyUrl;
-        if (_proxyUrl && effectiveUrl) {
-            try {
-                const _origUrl = new URL(effectiveUrl);
-                const _proxyBase = new URL(_proxyUrl);
-                effectiveUrl = _proxyBase.origin + _proxyBase.pathname.replace(/\/+$/, '') + _origUrl.pathname + _origUrl.search;
-                console.log(`[Cupcake PM] CORS Proxy active → ${effectiveUrl}`);
-            } catch (_e) {
-                console.warn(`[Cupcake PM] Invalid proxyUrl: ${_proxyUrl}`, _e);
-            }
-        }
-
         // ── Core fetch logic (wrapped for key rotation) ──
-        const _doCustomFetch = async (/** @type {string} */ _apiKey) => {
-            const _parseNonStreamingData = (/** @type {any} */ data) => {
-                if (format === 'anthropic') return parseClaudeNonStreamingResponse(data, {}, _reqId);
-                if (format === 'google') return parseGeminiNonStreamingResponse(data, config, _reqId);
-                if (_isResponsesEndpoint) return parseResponsesAPINonStreamingResponse(data, _reqId);
-                return parseOpenAINonStreamingResponse(data, _reqId);
-            };
-
-            const _executeRequest = async (/** @type {() => Promise<any>} */ requestFactory, /** @type {string} */ label, maxAttempts = 3) => {
-                let attempt = 0;
-                let response;
-
-                while (attempt < maxAttempts) {
-                    response = await requestFactory();
-                    if (response?.ok) return response;
-
-                    const status = response?.status || 0;
-                    if (!_isRetriableHttpStatus(status) || attempt >= maxAttempts - 1 || abortSignal?.aborted) {
-                        return response;
-                    }
-
-                    response?.body?.cancel?.();
-                    attempt++;
-                    const retryAfterMs = _parseRetryAfterMs(response?.headers);
-                    const exponentialDelay = Math.min(1000 * Math.pow(2, attempt - 1), 16000);
-                    const retryDelay = retryAfterMs || exponentialDelay;
-                    console.warn(`[Cupcake PM] ${label} retry ${attempt}/${maxAttempts - 1} after HTTP ${status} (delay: ${retryDelay}ms)`);
-                    await sleep(retryDelay);
-                }
-
-                return response;
-            };
-
-            const _toNonStreamingUrl = (/** @type {string} */ urlValue) => {
-                let nextUrl = String(urlValue || effectiveUrl || '');
-                if (format === 'google') {
-                    nextUrl = nextUrl.replace(':streamGenerateContent', ':generateContent');
-                    nextUrl = nextUrl.replace(/([?&])alt=sse(&)?/i, (/** @type {string} */ _m, /** @type {string} */ sep, /** @type {string} */ tail) => (tail ? sep : ''));
-                    nextUrl = nextUrl.replace(/\?&/, '?').replace(/[?&]$/, '');
-                }
-                return nextUrl;
-            };
-
-            const _initialApiKey = String(_apiKey || '').trim();
-            /** @type {Record<string, string>} */
-            const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_initialApiKey}` };
+        const _doCustomFetch = async (_apiKey) => {
+            const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_apiKey}` };
             /** @type {Window & typeof globalThis & { _cpmCopilotMachineId?: string, _cpmCopilotSessionId?: string }} */
             const _win = /** @type {any} */ (window);
 
             // Direct Anthropic API: x-api-key header
             if (format === 'anthropic' && effectiveUrl && effectiveUrl.includes('api.anthropic.com')) {
                 delete headers['Authorization'];
-                headers['x-api-key'] = _initialApiKey;
+                headers['x-api-key'] = _apiKey;
             }
 
-            // Copilot via CORS proxy still needs the raw GitHub OAuth token so the worker can
-            // exchange it for a Copilot API token server-side.
-            if (_isProxied && _isCopilotDomain) {
-                let proxiedCopilotToken = _initialApiKey;
-                if (!proxiedCopilotToken) {
-                    const _githubToken = await safeGetArg('tools_githubCopilotToken');
-                    proxiedCopilotToken = String(_githubToken || '').replace(/[^\x20-\x7E]/g, '').trim();
-                }
-
-                if (!proxiedCopilotToken) {
-                    return {
-                        success: false,
-                        content: '[Cupcake PM] CORS Proxy 사용 시 GitHub Copilot OAuth 토큰이 필요합니다. Copilot Manager 토큰 또는 커스텀 모델 API Key에 OAuth 토큰을 넣어 주세요.'
-                    };
-                }
-
-                headers['Authorization'] = `Bearer ${proxiedCopilotToken}`;
-            }
-
-            // Copilot headers — skip when using CORS proxy (proxy handles token exchange + headers)
-            if (!_isProxied && effectiveUrl && effectiveUrl.includes('githubcopilot.com')) {
-                const copilotNodelessMode = normalizeCopilotNodelessMode(await safeGetArg('cpm_copilot_nodeless_mode'));
-                const useLegacyHeaders = shouldUseLegacyCopilotRequestHeaders(copilotNodelessMode);
+            // Copilot headers
+            if (effectiveUrl && effectiveUrl.includes('githubcopilot.com')) {
                 let copilotApiToken = config.copilotToken || '';
                 if (!copilotApiToken) copilotApiToken = await ensureCopilotApiToken();
-                if (copilotApiToken) {
-                    headers['Authorization'] = `Bearer ${copilotApiToken}`;
-                } else {
-                    // Do NOT proceed with the raw OAuth token — the Copilot completions
-                    // API rejects it with "Authorization header is badly formatted".
-                    console.error('[Cupcake PM] Copilot: Token exchange failed — cannot authenticate.');
-                    return { success: false, content: '[Cupcake PM] Copilot API 토큰 교환 실패. GitHub Copilot OAuth 토큰이 유효한지 확인하세요. (Token exchange failed — check your Copilot OAuth token.)' };
-                }
+                if (copilotApiToken) headers['Authorization'] = `Bearer ${copilotApiToken}`;
+                else console.warn('[Cupcake PM] Copilot: No API token available.');
 
                 if (!_win._cpmCopilotMachineId) {
                     _win._cpmCopilotMachineId = Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
                 }
                 if (!_win._cpmCopilotSessionId) _win._cpmCopilotSessionId = safeUUID() + Date.now().toString();
 
-                Object.assign(headers, getCopilotStaticHeaders(copilotNodelessMode));
-                if (!useLegacyHeaders) {
-                    headers['Vscode-Machineid'] = _win._cpmCopilotMachineId;
-                    headers['Vscode-Sessionid'] = _win._cpmCopilotSessionId;
-                    headers['X-Interaction-Id'] = safeUUID();
-                    headers['X-Request-Id'] = safeUUID();
-                }
+                Object.assign(headers, getCopilotStaticHeaders());
+                headers['Vscode-Machineid'] = _win._cpmCopilotMachineId;
+                headers['Vscode-Sessionid'] = _win._cpmCopilotSessionId;
+                headers['X-Interaction-Id'] = safeUUID();
+                headers['X-Request-Id'] = safeUUID();
 
                 if (format === 'anthropic') headers['anthropic-version'] = '2023-06-01';
 
                 const _visionMsgArr = body.messages || body.input || [];
-                const hasVisionContent = _visionMsgArr.some((/** @type {any} */ m) =>
-                    Array.isArray(m?.content) && m.content.some((/** @type {any} */ p) => p.type === 'image_url' || p.type === 'image')
+                const hasVisionContent = _visionMsgArr.some(m =>
+                    Array.isArray(m?.content) && m.content.some(p => p.type === 'image_url' || p.type === 'image')
                 );
                 if (hasVisionContent) headers['Copilot-Vision-Request'] = 'true';
             }
 
             // Anthropic beta headers (non-Copilot)
             if (format === 'anthropic') {
-                const _isCopilotAnthropic = _isCopilotDomain || _isProxied;
-                if (_isCopilotAnthropic && _isProxied) {
-                    // Copilot via CORS proxy — only anthropic-version needed (proxy handles the rest)
-                    headers['anthropic-version'] = '2023-06-01';
-                } else if (!_isCopilotAnthropic) {
+                const _isCopilotAnthropic = !!(effectiveUrl && effectiveUrl.includes('githubcopilot.com'));
+                if (!_isCopilotAnthropic) {
                     const _anthropicBetas = [];
                     const _effectiveMaxTokens = body.max_tokens || maxTokens || 0;
                     if (_effectiveMaxTokens > 8192) _anthropicBetas.push('output-128k-2025-02-19');
@@ -6360,15 +4449,8 @@ var CupcakeProviderManager = (function (exports) {
             // ── Streaming ──
             const streamingEnabled = await safeGetBoolArg('cpm_streaming_enabled', false);
             const perModelStreamingEnabled = (config.streaming === true) || (config.streaming !== false && !config.decoupled);
-            const _compatActive = await safeGetBoolArg('cpm_compatibility_mode', false);
-            // Copilot MUST stream — non-streaming causes guaranteed 524 (CF proxy timeout).
-            // SSE parsing happens inside the plugin iframe; ReadableStream does NOT cross the bridge.
-            const _isCopilotStreamUrl = !!(effectiveUrl && effectiveUrl.includes('githubcopilot.com'));
-            const useStreaming = streamingEnabled && perModelStreamingEnabled && (!_compatActive || _isCopilotStreamUrl);
-            if (streamingEnabled && _compatActive && !_isCopilotStreamUrl) {
-                console.log(`[Cupcake PM] Compatibility mode active — forcing non-streaming (manual toggle).`);
-            }
-            if (!useStreaming && _isCopilotStreamUrl) {
+            const useStreaming = streamingEnabled && perModelStreamingEnabled;
+            if (!useStreaming && effectiveUrl && effectiveUrl.includes('githubcopilot.com')) {
                 console.warn(`[Cupcake PM] Copilot request in non-stream mode. Long responses may return 524 via proxy.`);
             }
 
@@ -6397,10 +4479,7 @@ var CupcakeProviderManager = (function (exports) {
                     requestBody: (() => { try { return JSON.parse(finalBody); } catch { return finalBody; } })()
                 });
 
-                const res = await _executeRequest(
-                    () => smartNativeFetch(streamUrl, { method: 'POST', headers, body: finalBody, signal: abortSignal }),
-                    `${format} stream request`
-                );
+                const res = await smartNativeFetch(streamUrl, { method: 'POST', headers, body: finalBody, signal: abortSignal });
                 if (_reqId) updateApiRequest(_reqId, { status: res.status });
 
                 if (!res.ok) {
@@ -6409,51 +4488,14 @@ var CupcakeProviderManager = (function (exports) {
                     return { success: false, content: `[Custom API Error ${res.status}] ${errBody}`, _status: res.status };
                 }
 
-                const _hasReadableStreamBody = !!(res?.body && typeof res.body.getReader === 'function');
-                if (!_hasReadableStreamBody) {
-                    // Copilot: non-streaming fallback causes 524 — return error immediately
-                    if (_isCopilotStreamUrl) {
-                        console.error(`[Cupcake PM] Copilot streaming response body unavailable (no ReadableStream). Cannot fall back to non-streaming (would cause 524).`);
-                        return { success: false, content: `[Cupcake PM] Copilot 스트리밍 응답 본문을 읽을 수 없습니다. ReadableStream이 지원되지 않는 환경입니다. 호환성 모드를 확인하거나 브라우저를 업데이트해 주세요.`, _status: 0 };
-                    }
-                    console.warn(`[Cupcake PM] Streaming response body unavailable for ${format}; retrying as non-streaming.`);
-                    const fallbackUrl = _toNonStreamingUrl(streamUrl);
-                    const fallbackBodyObj = { ...body };
-                    delete fallbackBodyObj.stream_options;
-                    if (format !== 'google') fallbackBodyObj.stream = false;
-                    const fallbackBody = sanitizeBodyJSON(safeStringify(fallbackBodyObj));
-                    const fallbackRes = await _executeRequest(
-                        () => smartNativeFetch(fallbackUrl, { method: 'POST', headers, body: fallbackBody, signal: abortSignal }),
-                        `${format} non-stream fallback`
-                    );
-                    if (_reqId) updateApiRequest(_reqId, { status: fallbackRes.status });
-                    if (!fallbackRes.ok) {
-                        const errBody = await fallbackRes.text();
-                        if (_reqId) updateApiRequest(_reqId, { response: errBody.substring(0, 2000) });
-                        return { success: false, content: `[Custom API Error ${fallbackRes.status}] ${errBody}`, _status: fallbackRes.status };
-                    }
-                    const fallbackText = await fallbackRes.text();
-                    let fallbackData;
-                    try {
-                        fallbackData = JSON.parse(fallbackText);
-                    } catch (_jsonErr) {
-                        const contentType = fallbackRes.headers?.get?.('content-type') || 'unknown';
-                        if (_reqId) updateApiRequest(_reqId, { response: `[Parse Error: content-type=${contentType}]\n${fallbackText.substring(0, 4000)}` });
-                        return { success: false, content: `[Custom API Error] Response is not JSON (${contentType}): ${fallbackText.substring(0, 1000)}`, _status: fallbackRes.status };
-                    }
-                    if (_reqId) updateApiRequest(_reqId, { response: fallbackData });
-                    return _parseNonStreamingData(fallbackData);
-                }
-
                 if (_reqId) updateApiRequest(_reqId, { response: '(streaming…)' });
 
                 if (format === 'anthropic') {
-                    const _showThinkingInStream = await safeGetBoolArg('cpm_streaming_show_thinking', true);
-                    return { success: true, content: createAnthropicSSEStream(res, abortSignal, _reqId, { showThinking: _showThinkingInStream }) };
+                    return { success: true, content: createAnthropicSSEStream(res, abortSignal, _reqId) };
                 } else if (format === 'google') {
                     config._tokenUsageReqId = _reqId;
                     const _onComplete = () => saveThoughtSignatureFromStream(config, _reqId);
-                    return { success: true, content: createSSEStream(res, (/** @type {string} */ line) => parseGeminiSSELine(line, config), abortSignal, _onComplete, _reqId) };
+                    return { success: true, content: createSSEStream(res, (line) => parseGeminiSSELine(line, config), abortSignal, _onComplete, _reqId) };
                 } else if (_isResponsesEndpoint) {
                     return { success: true, content: createResponsesAPISSEStream(res, abortSignal, _reqId) };
                 } else {
@@ -6469,10 +4511,7 @@ var CupcakeProviderManager = (function (exports) {
                 requestBody: (() => { try { return JSON.parse(_nonStreamBody); } catch { return _nonStreamBody; } })()
             });
 
-            const res = await _executeRequest(
-                () => smartNativeFetch(effectiveUrl, { method: 'POST', headers, body: _nonStreamBody, signal: abortSignal }),
-                `${format} request`
-            );
+            const res = await smartNativeFetch(effectiveUrl, { method: 'POST', headers, body: _nonStreamBody, signal: abortSignal });
             if (_reqId) updateApiRequest(_reqId, { status: res.status });
 
             if (!res.ok) {
@@ -6494,13 +4533,16 @@ var CupcakeProviderManager = (function (exports) {
             }
             if (_reqId) updateApiRequest(_reqId, { response: data });
 
-            return _parseNonStreamingData(data);
+            if (format === 'anthropic') return parseClaudeNonStreamingResponse(data, {}, _reqId);
+            else if (format === 'google') return parseGeminiNonStreamingResponse(data, config, _reqId);
+            else if (_isResponsesEndpoint) return parseResponsesAPINonStreamingResponse(data, _reqId);
+            else return parseOpenAINonStreamingResponse(data, _reqId);
         };
 
         // ── Key Rotation dispatch ──
         if (_useKeyRotation) {
             const _rotationPoolName = `_cpm_custom_inline_${config.model || 'unknown'}`;
-            /** @type {Record<string, any>} */ (KeyPool._pools)[_rotationPoolName] = { lastRaw: _rawKeys, keys: [..._keyPool], _inline: true };
+            KeyPool._pools[_rotationPoolName] = { lastRaw: _rawKeys, keys: [..._keyPool], _inline: true };
             return KeyPool.withRotation(_rotationPoolName, _doCustomFetch);
         }
         return _doCustomFetch(_allKeys[0] || '');
@@ -6554,7 +4596,7 @@ var CupcakeProviderManager = (function (exports) {
     /**
      * Dispatch request to the correct provider fetcher.
      * @param {ModelDef} modelDef
-     * @param {Record<string, any>} args - Request arguments from RisuAI
+     * @param {Object} args - Request arguments from RisuAI
      * @param {AbortSignal} [abortSignal]
      * @param {string} [_reqId] - Request ID for logging
      * @returns {Promise<RequestResult>}
@@ -6592,11 +4634,11 @@ var CupcakeProviderManager = (function (exports) {
             if (fetcher) return await fetcher(modelDef, messages, temp, maxTokens, args, abortSignal, _reqId);
 
             if (modelDef.provider.startsWith('Custom')) {
-                const cDef = /** @type {Record<string, any>|undefined} */ (state.CUSTOM_MODELS_CACHE.find((/** @type {any} */ m) => m.uniqueId === modelDef.uniqueId));
+                const cDef = state.CUSTOM_MODELS_CACHE.find(m => m.uniqueId === modelDef.uniqueId);
                 if (!cDef) return { success: false, content: `[Cupcake PM] Custom model config not found.` };
 
                 return await fetchCustom({
-                    url: cDef.url, key: cDef.key, model: cDef.model, proxyUrl: cDef.proxyUrl || '',
+                    url: cDef.url, key: cDef.key, model: cDef.model,
                     format: cDef.format || 'openai',
                     sysfirst: !!cDef.sysfirst, altrole: !!cDef.altrole,
                     mustuser: !!cDef.mustuser, maxout: !!cDef.maxout, mergesys: !!cDef.mergesys,
@@ -6604,19 +4646,16 @@ var CupcakeProviderManager = (function (exports) {
                     responsesMode: cDef.responsesMode || 'auto',
                     thinking_level: cDef.thinking || 'none', tok: cDef.tok || 'o200k_base',
                     thinkingBudget: parseInt(cDef.thinkingBudget) || 0,
-                    maxOutputLimit: parseInt(cDef.maxOutputLimit) || 0,
                     promptCacheRetention: cDef.promptCacheRetention || 'none',
                     decoupled: !!cDef.decoupled, thought: !!cDef.thought,
                     streaming: (cDef.streaming === true) || (cDef.streaming !== false && !cDef.decoupled),
                     showThoughtsToken: !!cDef.thought, useThoughtSignature: !!cDef.thought,
                     customParams: cDef.customParams || '', copilotToken: '',
-                    effort: cDef.effort || 'none',
-                    adaptiveThinking: !!cDef.adaptiveThinking
+                    effort: cDef.effort || 'none'
                 }, messages, temp, maxTokens, args, abortSignal, _reqId);
             }
             return { success: false, content: `[Cupcake PM] Unknown provider selected: ${modelDef.provider}` };
-        } catch (_e) {
-            const e = /** @type {Error} */ (_e);
+        } catch (e) {
             return { success: false, content: `[Cupcake PM Crash] ${e.message}` };
         }
     }
@@ -6626,7 +4665,7 @@ var CupcakeProviderManager = (function (exports) {
     /**
      * Main request router — entry point called by RisuAI for every API request.
      * Handles slot inference, parameter overrides, logging, and streaming.
-     * @param {Record<string, any>} args - Request arguments from RisuAI
+     * @param {Object} args - Request arguments from RisuAI
      * @param {ModelDef} activeModelDef - Currently selected model definition
      * @param {AbortSignal} [abortSignal]
      * @returns {Promise<RequestResult>}
@@ -6685,8 +4724,7 @@ var CupcakeProviderManager = (function (exports) {
         let result;
         try {
             result = await fetchByProviderId(targetDef, args, abortSignal, _reqId);
-        } catch (_e) {
-            const e = /** @type {Error} */ (_e);
+        } catch (e) {
             updateApiRequest(_reqId, { duration: Date.now() - _startTime, status: 'crash', response: `[CRASH] ${e.message}` });
             console.error(`[CupcakePM] 💥 Request crashed (${_displayName}):`, e);
             try { Risu.log(`💥 CRASH (${_displayName}): ${e.message}`); } catch {}
@@ -6707,7 +4745,7 @@ var CupcakeProviderManager = (function (exports) {
 
         const _nonStreamTokenUsage = _takeTokenUsage(_reqId, false);
         const _showTokens = await safeGetBoolArg('cpm_show_token_usage', false);
-        const _logResponse = (/** @type {any} */ contentStr, prefix = '📥 Response') => {
+        const _logResponse = (contentStr, prefix = '📥 Response') => {
             const safeContent = typeof contentStr === 'string' ? contentStr : (contentStr == null ? '' : String(contentStr));
             updateApiRequest(_reqId, { response: safeContent.substring(0, 4000) });
             console.log(`[CupcakePM] ${prefix} (${_displayName}):`, safeContent.substring(0, 2000));
@@ -6721,28 +4759,13 @@ var CupcakeProviderManager = (function (exports) {
             if (streamEnabled) {
                 const bridgeCapable = await checkStreamCapability();
                 if (bridgeCapable) {
-                    /** @type {any[]} */
                     const _chunks = [];
-                    let _chunksTotalBytes = 0;
-                    let _chunksOverflow = false;
-                    const _STREAM_LOG_MAX_BYTES = 512 * 1024; // 512 KB cap for logging buffer
                     const _streamDecoder = new TextDecoder();
                     const _streamStartTime = _startTime;
                     const _streamModelName = _displayName;
                     const _streamShowTokens = _showTokens;
                     result.content = result.content.pipeThrough(new TransformStream({
-                        transform(chunk, controller) {
-                            controller.enqueue(chunk);
-                            if (!_chunksOverflow) {
-                                const _sz = chunk.byteLength || chunk.length || 0;
-                                if (_chunksTotalBytes + _sz <= _STREAM_LOG_MAX_BYTES) {
-                                    _chunks.push(chunk);
-                                    _chunksTotalBytes += _sz;
-                                } else {
-                                    _chunksOverflow = true;
-                                }
-                            }
-                        },
+                        transform(chunk, controller) { _chunks.push(chunk); controller.enqueue(chunk); },
                         flush() {
                             const full = _chunks.map((c) => {
                                 if (typeof c === 'string') return c;
@@ -6750,7 +4773,7 @@ var CupcakeProviderManager = (function (exports) {
                                 if (c instanceof ArrayBuffer) return _streamDecoder.decode(new Uint8Array(c), { stream: true });
                                 return String(c ?? '');
                             }).join('') + _streamDecoder.decode();
-                            _logResponse(_chunksOverflow ? full + '\n[...truncated for logging]' : full, '📥 Streamed Response');
+                            _logResponse(full, '📥 Streamed Response');
                             const streamUsage = _takeTokenUsage(_reqId, true);
                             if (_streamShowTokens && streamUsage) showTokenUsageToast(_streamModelName, streamUsage, Date.now() - _streamStartTime);
                         }
@@ -6780,41 +4803,20 @@ var CupcakeProviderManager = (function (exports) {
         return result;
     }
 
-    // @ts-check
     /**
      * cupcake-api.js — window.CupcakePM global API surface.
      * Public API that sub-plugins use to register providers and access CPM internals.
      */
-
-    /** @typedef {Window & typeof globalThis & { CupcakePM?: any }} CupcakeWindow */
 
     /**
      * Initialize the window.CupcakePM global object.
      * Must be called after all modules are loaded.
      */
     function setupCupcakeAPI() {
-        /** @type {CupcakeWindow} */
-        const cupcakeWindow = window;
-        cupcakeWindow.CupcakePM = {
+        window.CupcakePM = {
             customFetchers,
             registeredProviderTabs,
-            /** @param {{ name: string, models: any[], fetcher: any, settingsTab: any, fetchDynamicModels: any }} _opts */
             registerProvider({ name, models, fetcher, settingsTab, fetchDynamicModels }) {
-                // ── Duplicate guard: remove previous registration for same provider name ──
-                // customFetchers[name] is object-keyed so natural overwrite is fine.
-                // Models, tabs, and dynamic fetchers are arrays — deduplicate.
-                state.ALL_DEFINED_MODELS = state.ALL_DEFINED_MODELS.filter(
-                    (/** @type {any} */ m) => m.provider !== name
-                );
-                const existingTabIdx = registeredProviderTabs.findIndex(
-                    (/** @type {any} */ t) => t && t.providerName === name
-                );
-                if (existingTabIdx !== -1) registeredProviderTabs.splice(existingTabIdx, 1);
-                const existingFetcherIdx = pendingDynamicFetchers.findIndex(
-                    (/** @type {any} */ f) => f.name === name
-                );
-                if (existingFetcherIdx !== -1) pendingDynamicFetchers.splice(existingFetcherIdx, 1);
-
                 if (state._currentExecutingPluginId) {
                     if (!_pluginRegistrations[state._currentExecutingPluginId]) {
                         _pluginRegistrations[state._currentExecutingPluginId] = { providerNames: [], tabObjects: [], fetcherEntries: [] };
@@ -6826,9 +4828,7 @@ var CupcakeProviderManager = (function (exports) {
                 }
                 if (fetcher) customFetchers[name] = fetcher;
                 if (models && Array.isArray(models)) {
-                    for (const m of models) {
-                        state.ALL_DEFINED_MODELS.push({ ...m, provider: name });
-                    }
+                    for (const m of models) state.ALL_DEFINED_MODELS.push({ ...m, provider: name });
                 }
                 if (settingsTab) registeredProviderTabs.push(settingsTab);
                 if (typeof fetchDynamicModels === 'function') {
@@ -6866,23 +4866,23 @@ var CupcakeProviderManager = (function (exports) {
             },
             safeGetArg,
             safeGetBoolArg,
-            setArg: (/** @type {string} */ k, /** @type {any} */ v) => Risu.setArgument(k, String(v)),
+            setArg: (k, v) => Risu.setArgument(k, String(v)),
             // Key Rotation API
-            pickKey: (/** @type {string} */ argName) => KeyPool.pick(argName),
-            drainKey: (/** @type {string} */ argName, /** @type {string} */ failedKey) => KeyPool.drain(argName, failedKey),
-            keyPoolRemaining: (/** @type {string} */ argName) => KeyPool.remaining(argName),
-            resetKeyPool: (/** @type {string} */ argName) => KeyPool.reset(argName),
-            withKeyRotation: (/** @type {string} */ argName, /** @type {(key: string) => Promise<any>} */ fetchFn, /** @type {any} */ opts) => KeyPool.withRotation(argName, fetchFn, opts),
+            pickKey: (argName) => KeyPool.pick(argName),
+            drainKey: (argName, failedKey) => KeyPool.drain(argName, failedKey),
+            keyPoolRemaining: (argName) => KeyPool.remaining(argName),
+            resetKeyPool: (argName) => KeyPool.reset(argName),
+            withKeyRotation: (argName, fetchFn, opts) => KeyPool.withRotation(argName, fetchFn, opts),
             // JSON Credential Rotation API
-            pickJsonKey: (/** @type {string} */ argName) => KeyPool.pickJson(argName),
-            withJsonKeyRotation: (/** @type {string} */ argName, /** @type {(key: string) => Promise<any>} */ fetchFn, /** @type {any} */ opts) => KeyPool.withJsonRotation(argName, fetchFn, opts),
+            pickJsonKey: (argName) => KeyPool.pickJson(argName),
+            withJsonKeyRotation: (argName, fetchFn, opts) => KeyPool.withJsonRotation(argName, fetchFn, opts),
             get vertexTokenCache() { return state.vertexTokenCache; },
             set vertexTokenCache(v) { state.vertexTokenCache = v; },
             AwsV4Signer,
             checkStreamCapability,
-            hotReload: (/** @type {string} */ pluginId) => SubPluginManager.hotReload(pluginId),
+            hotReload: (pluginId) => SubPluginManager.hotReload(pluginId),
             hotReloadAll: () => SubPluginManager.hotReloadAll(),
-            registerCleanup(/** @type {Function} */ cleanupFn) {
+            registerCleanup(cleanupFn) {
                 if (typeof cleanupFn !== 'function') return;
                 const pluginId = state._currentExecutingPluginId;
                 if (!pluginId) {
@@ -6893,17 +4893,16 @@ var CupcakeProviderManager = (function (exports) {
                 _pluginCleanupHooks[pluginId].push(cleanupFn);
                 console.log(`[CupcakePM] Cleanup hook registered for plugin ${pluginId}`);
             },
-            addCustomModel(/** @type {Record<string, any>} */ modelDef, tag = '') {
+            addCustomModel(modelDef, tag = '') {
                 try {
                     let existingIdx = -1;
-                    if (tag) existingIdx = state.CUSTOM_MODELS_CACHE.findIndex(m => /** @type {Record<string, any>} */ (m)._tag === tag);
+                    if (tag) existingIdx = state.CUSTOM_MODELS_CACHE.findIndex(m => m._tag === tag);
                     if (existingIdx !== -1) {
                         state.CUSTOM_MODELS_CACHE[existingIdx] = { ...state.CUSTOM_MODELS_CACHE[existingIdx], ...modelDef, _tag: tag };
                         Risu.setArgument('cpm_custom_models', JSON.stringify(state.CUSTOM_MODELS_CACHE));
-                        return { success: true, created: false, uniqueId: /** @type {Record<string, any>} */ (state.CUSTOM_MODELS_CACHE[existingIdx]).uniqueId };
+                        return { success: true, created: false, uniqueId: state.CUSTOM_MODELS_CACHE[existingIdx].uniqueId };
                     } else {
                         const uniqueId = 'custom_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
-                        /** @type {Record<string, any>} */
                         const entry = { ...modelDef, uniqueId, _tag: tag || undefined };
                         state.CUSTOM_MODELS_CACHE.push(entry);
                         state.ALL_DEFINED_MODELS.push({ uniqueId, id: entry.model, name: entry.name || uniqueId, provider: 'Custom' });
@@ -6911,187 +4910,23 @@ var CupcakeProviderManager = (function (exports) {
                         return { success: true, created: true, uniqueId };
                     }
                 } catch (e) {
-                    return { success: false, created: false, uniqueId: '', error: /** @type {Error} */ (e).message };
+                    return { success: false, created: false, uniqueId: '', error: e.message };
                 }
             },
-            smartFetch: async (/** @type {string} */ url, /** @type {Record<string, any>} */ options = {}) => smartNativeFetch(url, options),
-            smartNativeFetch: async (/** @type {string} */ url, /** @type {Record<string, any>} */ options = {}) => smartNativeFetch(url, options),
+            smartFetch: async (url, options = {}) => smartNativeFetch(url, options),
+            smartNativeFetch: async (url, options = {}) => smartNativeFetch(url, options),
             ensureCopilotApiToken: () => ensureCopilotApiToken(),
             _normalizeTokenUsage,
         };
     }
 
-    // @ts-check
-
-    const CUSTOM_MODEL_DEFAULTS = {
-        streaming: false,
-    };
-
-    /** @param {any} value */
-    function toText(value) {
-        return value == null ? '' : String(value);
-    }
-
-    /** @param {any} value */
-    function toInteger(value) {
-        const parsed = typeof value === 'number' ? value : parseInt(String(value ?? ''), 10);
-        return Number.isFinite(parsed) ? parsed : 0;
-    }
-
-    /** @param {any} value */
-    function toBool(value) {
-        if (typeof value === 'boolean') return value;
-        if (typeof value === 'number') return value !== 0;
-        if (typeof value === 'string') {
-            const normalized = value.trim().toLowerCase();
-            return normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on';
-        }
-        return false;
-    }
-
-    /**
-     * @param {any} value
-     * @returns {Array<Record<string, any>>}
-     */
-    function parseCustomModelsValue(value) {
-        if (Array.isArray(value)) return value.filter(entry => entry && typeof entry === 'object');
-        if (typeof value === 'string') {
-            try {
-                const parsed = JSON.parse(value);
-                return Array.isArray(parsed) ? parsed.filter(entry => entry && typeof entry === 'object') : [];
-            } catch {
-                return [];
-            }
-        }
-        return [];
-    }
-
-    /**
-     * @param {Record<string, any>} raw
-     * @param {{ includeKey?: boolean, includeUniqueId?: boolean, includeTag?: boolean, includeExportMarker?: boolean }} [options]
-     */
-    function normalizeCustomModel(raw, options = {}) {
-        const {
-            includeKey = true,
-            includeUniqueId = true,
-            includeTag = true,
-            includeExportMarker = false,
-        } = options;
-
-        const hasStreaming = raw && Object.prototype.hasOwnProperty.call(raw, 'streaming');
-        const hasDecoupled = raw && Object.prototype.hasOwnProperty.call(raw, 'decoupled');
-        const streaming = hasStreaming ? toBool(raw.streaming) : (hasDecoupled ? !toBool(raw.decoupled) : CUSTOM_MODEL_DEFAULTS.streaming);
-        const decoupled = hasDecoupled ? toBool(raw.decoupled) : !streaming;
-
-        /** @type {Record<string, any>} */
-        const normalized = {
-            name: toText(raw?.name),
-            model: toText(raw?.model),
-            url: toText(raw?.url),
-            proxyUrl: toText(raw?.proxyUrl).trim(),
-            format: toText(raw?.format || 'openai') || 'openai',
-            tok: toText(raw?.tok || 'o200k_base') || 'o200k_base',
-            responsesMode: toText(raw?.responsesMode || 'auto') || 'auto',
-            thinking: toText(raw?.thinking || 'none') || 'none',
-            thinkingBudget: toInteger(raw?.thinkingBudget),
-            maxOutputLimit: toInteger(raw?.maxOutputLimit),
-            promptCacheRetention: toText(raw?.promptCacheRetention || 'none') || 'none',
-            reasoning: toText(raw?.reasoning || 'none') || 'none',
-            verbosity: toText(raw?.verbosity || 'none') || 'none',
-            effort: toText(raw?.effort || 'none') || 'none',
-            sysfirst: toBool(raw?.sysfirst),
-            mergesys: toBool(raw?.mergesys),
-            altrole: toBool(raw?.altrole),
-            mustuser: toBool(raw?.mustuser),
-            maxout: toBool(raw?.maxout),
-            streaming,
-            decoupled,
-            thought: toBool(raw?.thought),
-            adaptiveThinking: toBool(raw?.adaptiveThinking),
-            customParams: toText(raw?.customParams),
-        };
-
-        if (includeKey) normalized.key = toText(raw?.key);
-        if (includeUniqueId && raw?.uniqueId) normalized.uniqueId = toText(raw.uniqueId);
-        if (includeTag && raw?._tag) normalized._tag = raw._tag;
-        if (includeExportMarker) normalized._cpmModelExport = true;
-
-        return normalized;
-    }
-
-    /** @param {Record<string, any>} raw */
-    function serializeCustomModelExport(raw) {
-        return normalizeCustomModel(raw, {
-            includeKey: false,
-            includeUniqueId: false,
-            includeTag: false,
-            includeExportMarker: true,
-        });
-    }
-
-    /**
-     * @param {any} value
-     * @param {{ includeKey?: boolean }} [options]
-     */
-    function serializeCustomModelsSetting(value, options = {}) {
-        const { includeKey = false } = options;
-        return JSON.stringify(parseCustomModelsValue(value).map(model => normalizeCustomModel(model, { includeKey })));
-    }
-
-    // @ts-check
     /**
      * settings-ui-custom-models.js — Custom Models Manager UI.
      * Extracted from settings-ui.js for modularity.
      * Handles the custom model editor form, CRUD, import/export of model definitions.
      */
 
-    /** @typedef {HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement} FormField */
-
-    /** @param {string} id */
-    function getElement$1(id) {
-        const el = document.getElementById(id);
-        if (!el) throw new Error(`[CPM] Missing element: ${id}`);
-        return el;
-    }
-
-    /** @param {string} id */
-    function getField(id) {
-        return /** @type {FormField} */ (getElement$1(id));
-    }
-
-    /** @param {string} id */
-    function getCheckbox(id) {
-        return /** @type {HTMLInputElement} */ (getElement$1(id));
-    }
-
-    /** @param {string} id */
-    function getContainer(id) {
-        return /** @type {HTMLElement} */ (getElement$1(id));
-    }
-
-    /** @param {string} id */
-    function getButton(id) {
-        return /** @type {HTMLButtonElement} */ (getElement$1(id));
-    }
-
-    /** @param {EventTarget|null} eventTarget */
-    function getFileInputFiles(eventTarget) {
-        return Array.from((/** @type {HTMLInputElement} */ (eventTarget)).files || []);
-    }
-
-    /** @param {EventTarget|null} eventTarget */
-    function getDatasetIndex(eventTarget) {
-        const idx = (/** @type {HTMLElement} */ (eventTarget)).dataset.idx;
-        return typeof idx === 'string' ? parseInt(idx, 10) : -1;
-    }
-
     // ── Helper: Custom model editor HTML ──
-    /**
-     * @param {Array<{value: string, text: string}>} thinkingList
-     * @param {Array<{value: string, text: string}>} reasoningList
-     * @param {Array<{value: string, text: string}>} verbosityList
-     * @param {Array<{value: string, text: string}>} effortList
-     */
     function renderCustomModelEditor(thinkingList, reasoningList, verbosityList, effortList) {
         return `
         <div id="cpm-cm-editor" class="hidden mt-6 bg-gray-900 border border-gray-700 rounded-lg p-6 relative">
@@ -7103,14 +4938,12 @@ var CupcakeProviderManager = (function (exports) {
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">Model Name</label><input type="text" id="cpm-cm-model" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"></div>
                 <div class="md:col-span-2"><label class="block text-sm font-medium text-gray-400 mb-1">Base URL</label><input type="text" id="cpm-cm-url" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"></div>
                 <div class="md:col-span-2"><label class="block text-sm font-medium text-gray-400 mb-1">API Key (여러 개 → 공백/줄바꿈 구분 → 자동 키회전)</label><textarea id="cpm-cm-key" rows="2" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white font-mono text-sm" spellcheck="false" placeholder="sk-xxxx"></textarea></div>
-                <div class="md:col-span-2"><label class="block text-sm font-medium text-gray-400 mb-1">CORS Proxy URL <span class="text-xs text-yellow-400">(선택사항 — Copilot 노드리스 CORS 우회용)</span></label><input type="text" id="cpm-cm-proxy-url" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white font-mono text-sm" placeholder="https://my-proxy.workers.dev (비워두면 직접 요청)"></div>
                 <div class="md:col-span-2 mt-4 border-t border-gray-800 pt-4"><h5 class="text-sm font-bold text-gray-300 mb-3">Model Parameters</h5></div>
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">API Format</label><select id="cpm-cm-format" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"><option value="openai">OpenAI</option><option value="anthropic">Anthropic Claude</option><option value="google">Google Gemini</option></select></div>
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">Tokenizer</label><select id="cpm-cm-tok" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"><option value="o200k_base">o200k_base</option><option value="llama3">llama3</option><option value="claude">Claude</option><option value="gemma">Gemma</option></select></div>
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">Responses API Mode</label><select id="cpm-cm-responses-mode" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"><option value="auto">Auto</option><option value="on">On</option><option value="off">Off</option></select></div>
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">Thinking Level</label><select id="cpm-cm-thinking" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white">${thinkingList.map(o => `<option value="${o.value}">${o.text}</option>`).join('')}</select></div>
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">Thinking Budget Tokens (0=끄기)</label><input type="number" id="cpm-cm-thinking-budget" min="0" step="1024" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white" placeholder="0"></div>
-                <div><label class="block text-sm font-medium text-gray-400 mb-1">Max Output Tokens (0=제한없음)</label><input type="number" id="cpm-cm-max-output" min="0" step="1024" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white" placeholder="0"></div>
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">Prompt Cache Retention</label><select id="cpm-cm-prompt-cache-retention" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"><option value="none">None</option><option value="in_memory">In-Memory</option><option value="24h">24h Extended</option></select></div>
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">Reasoning Effort</label><select id="cpm-cm-reasoning" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white">${reasoningList.map(o => `<option value="${o.value}">${o.text}</option>`).join('')}</select></div>
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">Response Verbosity</label><select id="cpm-cm-verbosity" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white">${verbosityList.map(o => `<option value="${o.value}">${o.text}</option>`).join('')}</select></div>
@@ -7125,11 +4958,10 @@ var CupcakeProviderManager = (function (exports) {
                         <label class="flex items-center space-x-2 text-sm text-gray-300"><input type="checkbox" id="cpm-cm-maxout" class="form-checkbox bg-gray-800"> <span>useMaxOutputTokensInstead</span></label>
                         <label class="flex items-center space-x-2 text-sm text-gray-300"><input type="checkbox" id="cpm-cm-streaming" class="form-checkbox bg-gray-800"> <span>Use Streaming</span></label>
                         <label class="flex items-center space-x-2 text-sm text-gray-300"><input type="checkbox" id="cpm-cm-thought" class="form-checkbox bg-gray-800"> <span>useThoughtSignature</span></label>
-                        <label class="flex items-center space-x-2 text-sm text-gray-300"><input type="checkbox" id="cpm-cm-adaptive-thinking" class="form-checkbox bg-gray-800"> <span>useAdaptiveThinking (적응형 사고)</span></label>
                     </div>
                 </div>
                 <div class="md:col-span-2 mt-4 border-t border-gray-800 pt-4">
-                    <h5 class="text-sm font-bold text-gray-300 mb-3">Custom Parameters JSON (파일 경로 아님)</h5>
+                    <h5 class="text-sm font-bold text-gray-300 mb-3">Custom Parameters JSON</h5>
                     <textarea id="cpm-cm-custom-params" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white h-24 font-mono text-sm" spellcheck="false" placeholder="{}"></textarea>
                 </div>
             </div>
@@ -7142,106 +4974,93 @@ var CupcakeProviderManager = (function (exports) {
     }
 
     // ── Populate editor from model data ──
-    /** @param {Record<string, any>} m */
     function populateEditor(m) {
-        getField('cpm-cm-id').value = m.uniqueId;
-        getField('cpm-cm-name').value = m.name || '';
-        getField('cpm-cm-model').value = m.model || '';
-        getField('cpm-cm-url').value = m.url || '';
-        getField('cpm-cm-key').value = m.key || '';
-        getField('cpm-cm-proxy-url').value = m.proxyUrl || '';
-        getField('cpm-cm-format').value = m.format || 'openai';
-        getField('cpm-cm-tok').value = m.tok || 'o200k_base';
-        getField('cpm-cm-responses-mode').value = m.responsesMode || 'auto';
-        getField('cpm-cm-thinking').value = m.thinking || 'none';
-        getField('cpm-cm-thinking-budget').value = String(m.thinkingBudget || 0);
-        getField('cpm-cm-max-output').value = String(m.maxOutputLimit || 0);
-        getField('cpm-cm-prompt-cache-retention').value = m.promptCacheRetention || 'none';
-        getField('cpm-cm-reasoning').value = m.reasoning || 'none';
-        getField('cpm-cm-verbosity').value = m.verbosity || 'none';
-        getField('cpm-cm-effort').value = m.effort || 'none';
-        getCheckbox('cpm-cm-sysfirst').checked = !!m.sysfirst;
-        getCheckbox('cpm-cm-mergesys').checked = !!m.mergesys;
-        getCheckbox('cpm-cm-altrole').checked = !!m.altrole;
-        getCheckbox('cpm-cm-mustuser').checked = !!m.mustuser;
-        getCheckbox('cpm-cm-maxout').checked = !!m.maxout;
-        getCheckbox('cpm-cm-streaming').checked = (m.streaming === true) || (m.streaming !== false && !m.decoupled);
-        getCheckbox('cpm-cm-thought').checked = !!m.thought;
-        getCheckbox('cpm-cm-adaptive-thinking').checked = !!m.adaptiveThinking;
-        getField('cpm-cm-custom-params').value = m.customParams || '';
+        document.getElementById('cpm-cm-id').value = m.uniqueId;
+        document.getElementById('cpm-cm-name').value = m.name || '';
+        document.getElementById('cpm-cm-model').value = m.model || '';
+        document.getElementById('cpm-cm-url').value = m.url || '';
+        document.getElementById('cpm-cm-key').value = m.key || '';
+        document.getElementById('cpm-cm-format').value = m.format || 'openai';
+        document.getElementById('cpm-cm-tok').value = m.tok || 'o200k_base';
+        document.getElementById('cpm-cm-responses-mode').value = m.responsesMode || 'auto';
+        document.getElementById('cpm-cm-thinking').value = m.thinking || 'none';
+        document.getElementById('cpm-cm-thinking-budget').value = m.thinkingBudget || 0;
+        document.getElementById('cpm-cm-prompt-cache-retention').value = m.promptCacheRetention || 'none';
+        document.getElementById('cpm-cm-reasoning').value = m.reasoning || 'none';
+        document.getElementById('cpm-cm-verbosity').value = m.verbosity || 'none';
+        document.getElementById('cpm-cm-effort').value = m.effort || 'none';
+        document.getElementById('cpm-cm-sysfirst').checked = !!m.sysfirst;
+        document.getElementById('cpm-cm-mergesys').checked = !!m.mergesys;
+        document.getElementById('cpm-cm-altrole').checked = !!m.altrole;
+        document.getElementById('cpm-cm-mustuser').checked = !!m.mustuser;
+        document.getElementById('cpm-cm-maxout').checked = !!m.maxout;
+        document.getElementById('cpm-cm-streaming').checked = (m.streaming === true) || (m.streaming !== false && !m.decoupled);
+        document.getElementById('cpm-cm-thought').checked = !!m.thought;
+        document.getElementById('cpm-cm-custom-params').value = m.customParams || '';
     }
 
     // ── Clear all editor fields ──
     function clearEditor() {
-        ['name', 'model', 'url', 'key', 'proxy-url'].forEach(f => { getField(`cpm-cm-${f}`).value = ''; });
-        getField('cpm-cm-format').value = 'openai';
-        getField('cpm-cm-tok').value = 'o200k_base';
-        getField('cpm-cm-responses-mode').value = 'auto';
-        getField('cpm-cm-thinking').value = 'none';
-        getField('cpm-cm-thinking-budget').value = '0';
-        getField('cpm-cm-max-output').value = '0';
-        getField('cpm-cm-prompt-cache-retention').value = 'none';
-        getField('cpm-cm-reasoning').value = 'none';
-        getField('cpm-cm-verbosity').value = 'none';
-        getField('cpm-cm-effort').value = 'none';
-        ['sysfirst', 'mergesys', 'altrole', 'mustuser', 'maxout', 'thought', 'streaming', 'adaptive-thinking'].forEach(id => { getCheckbox(`cpm-cm-${id}`).checked = false; });
-        getField('cpm-cm-custom-params').value = '';
+        ['name', 'model', 'url', 'key'].forEach(f => document.getElementById(`cpm-cm-${f}`).value = '');
+        document.getElementById('cpm-cm-format').value = 'openai';
+        document.getElementById('cpm-cm-tok').value = 'o200k_base';
+        document.getElementById('cpm-cm-responses-mode').value = 'auto';
+        document.getElementById('cpm-cm-thinking').value = 'none';
+        document.getElementById('cpm-cm-thinking-budget').value = 0;
+        document.getElementById('cpm-cm-prompt-cache-retention').value = 'none';
+        document.getElementById('cpm-cm-reasoning').value = 'none';
+        document.getElementById('cpm-cm-verbosity').value = 'none';
+        document.getElementById('cpm-cm-effort').value = 'none';
+        ['sysfirst', 'mergesys', 'altrole', 'mustuser', 'maxout', 'thought', 'streaming'].forEach(id => document.getElementById(`cpm-cm-${id}`).checked = false);
+        document.getElementById('cpm-cm-custom-params').value = '';
     }
 
     // ── Read all editor values into a model object ──
-    /** @param {string} uid */
     function readEditorValues(uid) {
-        return normalizeCustomModel({
+        return {
             uniqueId: uid,
-            name: getField('cpm-cm-name').value,
-            model: getField('cpm-cm-model').value,
-            url: getField('cpm-cm-url').value,
-            key: getField('cpm-cm-key').value,
-            proxyUrl: getField('cpm-cm-proxy-url').value.trim(),
-            format: getField('cpm-cm-format').value,
-            tok: getField('cpm-cm-tok').value,
-            responsesMode: getField('cpm-cm-responses-mode').value || 'auto',
-            thinking: getField('cpm-cm-thinking').value,
-            thinkingBudget: parseInt(getField('cpm-cm-thinking-budget').value, 10) || 0,
-            maxOutputLimit: parseInt(getField('cpm-cm-max-output').value, 10) || 0,
-            promptCacheRetention: getField('cpm-cm-prompt-cache-retention').value || 'none',
-            reasoning: getField('cpm-cm-reasoning').value,
-            verbosity: getField('cpm-cm-verbosity').value,
-            effort: getField('cpm-cm-effort').value,
-            sysfirst: getCheckbox('cpm-cm-sysfirst').checked,
-            mergesys: getCheckbox('cpm-cm-mergesys').checked,
-            altrole: getCheckbox('cpm-cm-altrole').checked,
-            mustuser: getCheckbox('cpm-cm-mustuser').checked,
-            maxout: getCheckbox('cpm-cm-maxout').checked,
-            streaming: getCheckbox('cpm-cm-streaming').checked,
-            decoupled: !getCheckbox('cpm-cm-streaming').checked,
-            thought: getCheckbox('cpm-cm-thought').checked,
-            adaptiveThinking: getCheckbox('cpm-cm-adaptive-thinking').checked,
-            customParams: getField('cpm-cm-custom-params').value,
-        });
+            name: document.getElementById('cpm-cm-name').value,
+            model: document.getElementById('cpm-cm-model').value,
+            url: document.getElementById('cpm-cm-url').value,
+            key: document.getElementById('cpm-cm-key').value,
+            format: document.getElementById('cpm-cm-format').value,
+            tok: document.getElementById('cpm-cm-tok').value,
+            responsesMode: document.getElementById('cpm-cm-responses-mode').value || 'auto',
+            thinking: document.getElementById('cpm-cm-thinking').value,
+            thinkingBudget: parseInt(document.getElementById('cpm-cm-thinking-budget').value) || 0,
+            promptCacheRetention: document.getElementById('cpm-cm-prompt-cache-retention').value || 'none',
+            reasoning: document.getElementById('cpm-cm-reasoning').value,
+            verbosity: document.getElementById('cpm-cm-verbosity').value,
+            effort: document.getElementById('cpm-cm-effort').value,
+            sysfirst: document.getElementById('cpm-cm-sysfirst').checked,
+            mergesys: document.getElementById('cpm-cm-mergesys').checked,
+            altrole: document.getElementById('cpm-cm-altrole').checked,
+            mustuser: document.getElementById('cpm-cm-mustuser').checked,
+            maxout: document.getElementById('cpm-cm-maxout').checked,
+            streaming: document.getElementById('cpm-cm-streaming').checked,
+            decoupled: !document.getElementById('cpm-cm-streaming').checked,
+            thought: document.getElementById('cpm-cm-thought').checked,
+            customParams: document.getElementById('cpm-cm-custom-params').value,
+        };
     }
 
     // ── Custom Models Manager logic ──
-    /**
-     * @param {any} _setVal
-     * @param {any} _openCpmSettings
-     */
     function initCustomModelsManager(_setVal, _openCpmSettings) {
-        const cmList = getContainer('cpm-cm-list');
-        const cmEditor = getContainer('cpm-cm-editor');
-        const cmCount = getContainer('cpm-cm-count');
+        const cmList = document.getElementById('cpm-cm-list');
+        const cmEditor = document.getElementById('cpm-cm-editor');
+        const cmCount = document.getElementById('cpm-cm-count');
 
         const refreshCmList = () => {
-            if (cmList.contains(cmEditor)) { getContainer('tab-customs').appendChild(cmEditor); cmEditor.classList.add('hidden'); }
-            cmCount.innerText = String(state.CUSTOM_MODELS_CACHE.length);
+            if (cmList.contains(cmEditor)) { document.getElementById('tab-customs').appendChild(cmEditor); cmEditor.classList.add('hidden'); }
+            cmCount.innerText = state.CUSTOM_MODELS_CACHE.length;
             if (state.CUSTOM_MODELS_CACHE.length === 0) {
                 cmList.innerHTML = '<div class="text-center text-gray-500 py-4 border border-dashed border-gray-700 rounded">No custom models defined.</div>';
                 return;
             }
-            cmList.innerHTML = state.CUSTOM_MODELS_CACHE.map((/** @type {Record<string, any>} */ m, i) => `
+            cmList.innerHTML = state.CUSTOM_MODELS_CACHE.map((m, i) => `
             <div class="bg-gray-800 border border-gray-700 rounded p-4 flex justify-between items-center group hover:border-gray-500 transition-colors">
                 <div>
-                    <div class="font-bold text-white text-lg">${escHtml(m.name) || 'Unnamed Model'}${((m.key || '').trim().split(/\s+/).filter((/** @type {string} */ k) => k.length > 0).length > 1) ? ' <span class="text-xs text-blue-400 font-normal ml-2">🔄 키회전</span>' : ''}</div>
+                    <div class="font-bold text-white text-lg">${escHtml(m.name) || 'Unnamed Model'}${((m.key || '').trim().split(/\s+/).filter(k => k.length > 0).length > 1) ? ' <span class="text-xs text-blue-400 font-normal ml-2">🔄 키회전</span>' : ''}</div>
                     <div class="text-xs text-gray-400 font-mono mt-1">${escHtml(m.model) || 'No model ID'} | ${escHtml(m.url) || 'No URL'}</div>
                 </div>
                 <div class="flex space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -7254,10 +5073,9 @@ var CupcakeProviderManager = (function (exports) {
 
             // Export
             cmList.querySelectorAll('.cpm-cm-export-btn').forEach(btn => btn.addEventListener('click', (e) => {
-                const idx = getDatasetIndex(e.target);
-                const m = /** @type {Record<string, any>} */ (state.CUSTOM_MODELS_CACHE[idx]);
+                const m = state.CUSTOM_MODELS_CACHE[parseInt(e.target.dataset.idx)];
                 if (!m) return;
-                const exportModel = serializeCustomModelExport(m);
+                const exportModel = { ...m }; delete exportModel.key; exportModel._cpmModelExport = true;
                 const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(exportModel, null, 2));
                 const a = document.createElement('a'); a.href = dataStr;
                 a.download = `${(m.name || 'custom_model').replace(/[^a-zA-Z0-9가-힣_-]/g, '_')}.cpm-model.json`;
@@ -7267,7 +5085,7 @@ var CupcakeProviderManager = (function (exports) {
             // Delete
             cmList.querySelectorAll('.cpm-cm-del-btn').forEach(btn => btn.addEventListener('click', (e) => {
                 if (confirm('Delete this model?')) {
-                    state.CUSTOM_MODELS_CACHE.splice(getDatasetIndex(e.target), 1);
+                    state.CUSTOM_MODELS_CACHE.splice(parseInt(e.target.dataset.idx), 1);
                     Risu.setArgument('cpm_custom_models', JSON.stringify(state.CUSTOM_MODELS_CACHE));
                     SettingsBackup.updateKey('cpm_custom_models', JSON.stringify(state.CUSTOM_MODELS_CACHE));
                     refreshCmList();
@@ -7276,28 +5094,28 @@ var CupcakeProviderManager = (function (exports) {
 
             // Edit
             cmList.querySelectorAll('.cpm-cm-edit-btn').forEach(btn => btn.addEventListener('click', (e) => {
-                const m = state.CUSTOM_MODELS_CACHE[getDatasetIndex(e.target)];
+                const m = state.CUSTOM_MODELS_CACHE[parseInt(e.target.dataset.idx)];
                 populateEditor(m);
-                getContainer('cpm-cm-editor-title').innerText = 'Edit Custom Model';
-                const itemDiv = /** @type {HTMLElement} */ (e.target).closest('.group');
+                document.getElementById('cpm-cm-editor-title').innerText = 'Edit Custom Model';
+                const itemDiv = e.target.closest('.group');
                 if (itemDiv) itemDiv.after(cmEditor);
                 cmEditor.classList.remove('hidden');
             }));
         };
 
         // Import model
-        getButton('cpm-import-model-btn').addEventListener('click', () => {
+        document.getElementById('cpm-import-model-btn').addEventListener('click', () => {
             const input = document.createElement('input'); input.type = 'file'; input.accept = '.json'; input.multiple = true;
             input.onchange = async (e) => {
-                const files = getFileInputFiles(e.target);
+                const files = Array.from(e.target.files);
                 let importedCount = 0, errorCount = 0;
                 for (const file of files) {
                     try {
                         const data = JSON.parse(await file.text());
                         if (!data._cpmModelExport || !data.name) { errorCount++; continue; }
-                        const normalized = normalizeCustomModel(data, { includeKey: true, includeUniqueId: false, includeTag: false });
-                        normalized.uniqueId = 'custom_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
-                        state.CUSTOM_MODELS_CACHE.push(normalized); importedCount++;
+                        data.uniqueId = 'custom_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+                        delete data._cpmModelExport; if (!data.key) data.key = '';
+                        state.CUSTOM_MODELS_CACHE.push(data); importedCount++;
                     } catch { errorCount++; }
                 }
                 if (importedCount > 0) {
@@ -7311,23 +5129,23 @@ var CupcakeProviderManager = (function (exports) {
         });
 
         // Add new model
-        getButton('cpm-add-custom-btn').addEventListener('click', () => {
+        document.getElementById('cpm-add-custom-btn').addEventListener('click', () => {
             clearEditor();
-            getField('cpm-cm-id').value = 'custom_' + Date.now();
-            getContainer('cpm-cm-editor-title').innerText = 'Add New Model';
+            document.getElementById('cpm-cm-id').value = 'custom_' + Date.now();
+            document.getElementById('cpm-cm-editor-title').innerText = 'Add New Model';
             cmList.prepend(cmEditor);
             cmEditor.classList.remove('hidden');
         });
 
-        getButton('cpm-cm-cancel').addEventListener('click', () => {
-            getContainer('tab-customs').appendChild(cmEditor);
+        document.getElementById('cpm-cm-cancel').addEventListener('click', () => {
+            document.getElementById('tab-customs').appendChild(cmEditor);
             cmEditor.classList.add('hidden');
         });
 
-        getButton('cpm-cm-save').addEventListener('click', () => {
-            const uid = getField('cpm-cm-id').value;
+        document.getElementById('cpm-cm-save').addEventListener('click', () => {
+            const uid = document.getElementById('cpm-cm-id').value;
             const newModel = readEditorValues(uid);
-            const existingIdx = state.CUSTOM_MODELS_CACHE.findIndex((/** @type {Record<string, any>} */ x) => x.uniqueId === uid);
+            const existingIdx = state.CUSTOM_MODELS_CACHE.findIndex(x => x.uniqueId === uid);
             if (existingIdx !== -1) state.CUSTOM_MODELS_CACHE[existingIdx] = { ...state.CUSTOM_MODELS_CACHE[existingIdx], ...newModel };
             else state.CUSTOM_MODELS_CACHE.push(newModel);
             Risu.setArgument('cpm_custom_models', JSON.stringify(state.CUSTOM_MODELS_CACHE));
@@ -7339,39 +5157,14 @@ var CupcakeProviderManager = (function (exports) {
         refreshCmList();
     }
 
-    // @ts-check
     /**
      * settings-ui-plugins.js — Sub-Plugins tab UI.
      * Extracted from settings-ui.js for modularity.
      * Handles plugin listing, upload, toggle, delete, and update checking.
      */
 
-    /** @typedef {Window & typeof globalThis & { CupcakePM_SubPlugins?: Array<any> }} CupcakePluginWindow */
-
-    /** @param {string} id @returns {HTMLElement} */
-    function getElement(id) {
-        const el = document.getElementById(id);
-        if (!el) throw new Error(`[CPM] Missing element: ${id}`);
-        return el;
-    }
-
-    /** @param {any} el @returns {HTMLButtonElement} */
-    function asButton(el) {
-        return /** @type {HTMLButtonElement} */ (el);
-    }
-
-    /** @param {any} el @returns {HTMLInputElement} */
-    function asInput(el) {
-        return /** @type {HTMLInputElement} */ (el);
-    }
-
-    /** @param {any} el @returns {HTMLElement} */
-    function asContainer(el) {
-        return /** @type {HTMLElement} */ (el);
-    }
-
     // ── Helper: Sub-Plugins tab renderer ──
-    function buildPluginsTabRenderer(/** @type {any} */ setVal) {
+    function buildPluginsTabRenderer(setVal) {
         const renderPluginsTab = () => {
             const listContainer = document.getElementById('cpm-plugins-list');
             if (!listContainer) return;
@@ -7414,32 +5207,6 @@ var CupcakeProviderManager = (function (exports) {
                 }
                 html += '</div><style>.cpm-plugin-toggle:checked ~ .custom-toggle-bg{background-color:#3b82f6;} .cpm-plugin-toggle:checked ~ .dot{transform:translateX(100%);}</style>';
             }
-
-            // ── Purge All CPM Data Section ──
-            html += `
-            <div class="mt-8 pt-6 border-t border-gray-700">
-                <div class="bg-red-900/20 border border-red-700/50 rounded-lg p-5">
-                    <h4 class="text-lg font-bold text-red-400 mb-2">⚠️ CPM 데이터 전체 삭제 (Danger Zone)</h4>
-                    <p class="text-xs text-gray-400 mb-1">
-                        Cupcake Provider Manager 플러그인이 리스AI 저장소에 저장한 <strong class="text-red-300">모든 데이터</strong>를 삭제합니다.
-                    </p>
-                    <ul class="text-xs text-gray-500 mb-3 list-disc list-inside space-y-0.5">
-                        <li>서브 플러그인 목록 및 코드</li>
-                        <li>모든 프로바이더 API 키 (OpenAI, Anthropic, Gemini, Vertex, AWS, OpenRouter, DeepSeek 등)</li>
-                        <li>슬롯 설정 (번역, 감정, 하이파, 트리거)</li>
-                        <li>커스텀 모델 설정</li>
-                        <li>글로벌 기본값, 스트리밍 설정, 설정 백업 등</li>
-                    </ul>
-                    <p class="text-xs text-yellow-400 font-semibold mb-3">
-                        💡 플러그인을 삭제/재설치해도 데이터는 남아있습니다. 이 버튼을 눌러야만 완전히 제거됩니다.
-                    </p>
-                    <button id="cpm-purge-all-btn" class="bg-red-700 hover:bg-red-600 text-white font-bold py-2 px-6 rounded transition-colors text-sm shadow-lg shadow-red-900/50">
-                        🗑️ CPM 저장 데이터 모두 지우기
-                    </button>
-                </div>
-            </div>
-        `;
-
             listContainer.innerHTML = html;
 
             // Upload handler
@@ -7448,28 +5215,15 @@ var CupcakeProviderManager = (function (exports) {
             if (btnUpload && pFileInput) {
                 btnUpload.addEventListener('click', () => pFileInput.click());
                 pFileInput.addEventListener('change', async (e) => {
-                    const file = asInput(e.target).files?.[0];
+                    const file = e.target.files[0];
                     if (!file) return;
-                    if (file.size > SubPluginManager.MAX_INSTALL_BYTES) {
-                        alert(
-                            `⚠️ 설치 실패: 파일 용량이 너무 큽니다. ` +
-                            `최대 ${(SubPluginManager.MAX_INSTALL_BYTES / 1024).toFixed(0)}KB까지만 설치할 수 있습니다.`
-                        );
-                        renderPluginsTab();
-                        return;
-                    }
                     const reader = new FileReader();
                     reader.onload = async (ev) => {
-                        const code = /** @type {string} */ ((/** @type {FileReader} */ (ev.target)).result);
-                        try {
-                            const name = await SubPluginManager.install(code);
-                            const installed = SubPluginManager.plugins.find(p => p.name === name);
-                            if (installed) await SubPluginManager.hotReload(installed.id);
-                            alert(`서브 플러그인 '${name}' 설치 완료!`);
-                        } catch (installErr) {
-                            const message = installErr instanceof Error ? installErr.message : String(installErr || '알 수 없는 오류');
-                            alert(`⚠️ 설치 실패: ${message}`);
-                        }
+                        const code = ev.target.result;
+                        const name = await SubPluginManager.install(code);
+                        const installed = SubPluginManager.plugins.find(p => p.name === name);
+                        if (installed) await SubPluginManager.hotReload(installed.id);
+                        alert(`서브 플러그인 '${name}' 설치 완료!`);
                         renderPluginsTab();
                     };
                     reader.readAsText(file);
@@ -7479,18 +5233,16 @@ var CupcakeProviderManager = (function (exports) {
             // Toggle/delete handlers
             listContainer.querySelectorAll('.cpm-plugin-toggle').forEach(t => {
                 t.addEventListener('change', async (e) => {
-                    const toggle = asInput(e.target);
-                    const pluginId = toggle.getAttribute('data-id') || '';
-                    await SubPluginManager.toggle(pluginId, toggle.checked);
-                    await SubPluginManager.hotReload(pluginId);
+                    await SubPluginManager.toggle(e.target.getAttribute('data-id'), e.target.checked);
+                    await SubPluginManager.hotReload(e.target.getAttribute('data-id'));
                 });
             });
             listContainer.querySelectorAll('.cpm-plugin-delete').forEach(btn => {
                 btn.addEventListener('click', async (e) => {
-                    const id = asButton(e.target).getAttribute('data-id') || '';
+                    const id = e.target.getAttribute('data-id');
                     if (confirm('정말로 이 플러그인을 삭제하시겠습니까?')) {
-                        SubPluginManager.unloadPlugin(/** @type {string} */ (id));
-                        await SubPluginManager.remove(/** @type {string} */ (id));
+                        SubPluginManager.unloadPlugin(id);
+                        await SubPluginManager.remove(id);
                         renderPluginsTab();
                     }
                 });
@@ -7499,57 +5251,9 @@ var CupcakeProviderManager = (function (exports) {
             // Update check button
             initUpdateCheckButton();
 
-            // ── Purge All CPM Data handler (double confirmation) ──
-            const purgeBtn = document.getElementById('cpm-purge-all-btn');
-            if (purgeBtn) {
-                purgeBtn.addEventListener('click', async () => {
-                    const purgeButton = asButton(purgeBtn);
-                    // 1st confirmation
-                    const first = confirm(
-                        '⚠️ 정말로 Cupcake Provider Manager의 모든 저장 데이터를 삭제하시겠습니까?\n\n' +
-                        '삭제 대상:\n' +
-                        '• 서브 플러그인 목록 및 코드\n' +
-                        '• 모든 API 키 (OpenAI, Anthropic, Gemini 등)\n' +
-                        '• 슬롯/커스텀 모델/글로벌 설정\n' +
-                        '• 설정 백업 데이터\n\n' +
-                        '이 작업은 되돌릴 수 없습니다!'
-                    );
-                    if (!first) return;
-
-                    // 2nd confirmation
-                    const second = confirm(
-                        '🚨 최종 확인: 정말 삭제하시겠습니까?\n\n' +
-                        'CPM의 모든 API 키, 서브 플러그인, 설정이 영구 삭제됩니다.\n' +
-                        '확인을 누르면 즉시 삭제가 실행됩니다.'
-                    );
-                    if (!second) return;
-
-                    purgeButton.disabled = true;
-                    purgeButton.textContent = '⏳ 삭제 중...';
-
-                    try {
-                        const result = await SubPluginManager.purgeAllCpmData();
-                        alert(
-                            `✅ CPM 데이터가 모두 삭제되었습니다.\n\n` +
-                            `• pluginStorage: ${result.pluginStorageCleared}개 항목 삭제\n` +
-                            `• 설정 키: ${result.argsCleared}개 항목 초기화\n\n` +
-                            `변경사항을 완전히 적용하려면 페이지를 새로고침(F5)하세요.`
-                        );
-                        renderPluginsTab();
-                    } catch (err) {
-                        console.error('[CPM Purge] Error:', err);
-                        alert('❌ 삭제 중 오류가 발생했습니다: ' + (/** @type {Error} */ (err).message || err));
-                        purgeButton.disabled = false;
-                        purgeButton.textContent = '🗑️ CPM 저장 데이터 모두 지우기';
-                    }
-                });
-            }
-
             // Render sub-plugin dynamic UIs
-            /** @type {CupcakePluginWindow} */
-            const cupcakeWindow = window;
-            cupcakeWindow.CupcakePM_SubPlugins = cupcakeWindow.CupcakePM_SubPlugins || [];
-            for (const p of cupcakeWindow.CupcakePM_SubPlugins) {
+            window.CupcakePM_SubPlugins = window.CupcakePM_SubPlugins || [];
+            for (const p of window.CupcakePM_SubPlugins) {
                 const uiContainer = document.getElementById(`plugin-ui-${p.id}`);
                 if (uiContainer) {
                     try {
@@ -7562,13 +5266,13 @@ var CupcakeProviderManager = (function (exports) {
         return renderPluginsTab;
     }
 
-    function initUpdateCheckButton(/** @type {any} */ _renderPluginsTab, /** @type {Record<string, any>} */ deps = {}) {
+    function initUpdateCheckButton(_renderPluginsTab, deps = {}) {
         const subPluginManager = deps.subPluginManager || SubPluginManager;
-        const updateBtn = /** @type {HTMLButtonElement | null} */ (document.getElementById('cpm-check-updates-btn'));
+        const updateBtn = document.getElementById('cpm-check-updates-btn');
         if (!updateBtn || updateBtn.dataset.cpmBound === 'true') return;
         updateBtn.dataset.cpmBound = 'true';
         updateBtn.addEventListener('click', async () => {
-            const statusDiv = asContainer(getElement('cpm-update-status'));
+            const statusDiv = document.getElementById('cpm-update-status');
             updateBtn.disabled = true; updateBtn.textContent = '⏳ 확인 중...';
             statusDiv.classList.remove('hidden');
             statusDiv.innerHTML = '<p class="text-gray-400 text-sm">업데이트를 확인하고 있습니다...</p>';
@@ -7591,14 +5295,13 @@ var CupcakeProviderManager = (function (exports) {
                     statusDiv.innerHTML = html;
                     statusDiv.querySelectorAll('.cpm-apply-update').forEach(btn => {
                         btn.addEventListener('click', async (e) => {
-                            const applyBtn = asButton(e.target);
-                            const id = applyBtn.getAttribute('data-id') || '';
+                            const id = e.target.getAttribute('data-id');
                             const updateData = pendingUpdates.get(id);
-                            if (!updateData || !updateData.code) { applyBtn.textContent = '❌ 코드 없음'; return; }
-                            applyBtn.disabled = true; applyBtn.textContent = '⏳ 적용 중...';
+                            if (!updateData || !updateData.code) { e.target.textContent = '❌ 코드 없음'; return; }
+                            e.target.disabled = true; e.target.textContent = '⏳ 적용 중...';
                             const ok = await subPluginManager.applyUpdate(id, updateData.code, updateData.expectedSHA256);
-                            if (ok) { await subPluginManager.hotReload(id); applyBtn.textContent = '✅ 완료'; pendingUpdates.delete(id); }
-                            else applyBtn.textContent = '❌ 실패';
+                            if (ok) { await subPluginManager.hotReload(id); e.target.textContent = '✅ 완료'; pendingUpdates.delete(id); }
+                            else e.target.textContent = '❌ 실패';
                         });
                     });
                 }
@@ -7610,96 +5313,18 @@ var CupcakeProviderManager = (function (exports) {
         });
     }
 
-    // @ts-check
     /**
      * settings-ui-panels.js — API View panel + Export/Import.
      * Extracted from settings-ui.js for modularity.
      */
 
-    const CPM_EXPORT_VERSION = 2;
-    const CPM_PLUGIN_STORAGE_KEY_PATTERN = /^cpm[_-]/;
-    const KNOWN_CPM_PLUGIN_STORAGE_KEYS = [
-        'cpm_installed_subplugins',
-        'cpm_settings_backup',
-        'cpm_last_version_check',
-        'cpm_last_main_version_check',
-        'cpm_pending_main_update',
-        'cpm_last_boot_status',
-        'cpm_last_main_update_flush',
-    ];
-
-    /**
-     * @param {string} key
-     * @param {any} value
-     */
-    function normalizeManagedSettingValue(key, value) {
-        return key === 'cpm_custom_models'
-            ? serializeCustomModelsSetting(value, { includeKey: true })
-            : (value ?? '');
-    }
-
-    async function getCpmPluginStorageKeys() {
-        const keySet = new Set(KNOWN_CPM_PLUGIN_STORAGE_KEYS);
-        try {
-            if (typeof Risu?.pluginStorage?.keys === 'function') {
-                const dynamicKeys = await Risu.pluginStorage.keys();
-                for (const key of dynamicKeys || []) {
-                    if (CPM_PLUGIN_STORAGE_KEY_PATTERN.test(String(key))) keySet.add(String(key));
-                }
-            }
-        } catch (_) { /* ignore */ }
-        return [...keySet];
-    }
-
-    async function exportPluginStorageSnapshot() {
-        const snapshot = /** @type {Record<string, any>} */ ({});
-        for (const key of await getCpmPluginStorageKeys()) {
-            try {
-                const value = await Risu.pluginStorage.getItem(key);
-                if (value !== undefined && value !== null) snapshot[key] = value;
-            } catch (_) { /* ignore */ }
-        }
-        return snapshot;
-    }
-
-    /** @param {Record<string, any>} snapshot */
-    async function importPluginStorageSnapshot(snapshot) {
-        const existingKeys = await getCpmPluginStorageKeys();
-        for (const key of existingKeys) {
-            if (Object.prototype.hasOwnProperty.call(snapshot, key)) continue;
-            try {
-                if (typeof Risu.pluginStorage.removeItem === 'function') await Risu.pluginStorage.removeItem(key);
-                else await Risu.pluginStorage.setItem(key, '');
-            } catch (_) { /* ignore */ }
-        }
-
-        for (const [key, value] of Object.entries(snapshot)) {
-            if (!CPM_PLUGIN_STORAGE_KEY_PATTERN.test(key)) continue;
-            await Risu.pluginStorage.setItem(key, String(value ?? ''));
-        }
-    }
-
-    /** @param {any} importedData */
-    function normalizeImportEnvelope(importedData) {
-        if (!importedData || typeof importedData !== 'object' || Array.isArray(importedData)) {
-            throw new Error('설정 파일 형식이 올바르지 않습니다.');
-        }
-        if ('settings' in importedData || 'pluginStorage' in importedData || '_cpmExportVersion' in importedData) {
-            return {
-                settings: importedData.settings && typeof importedData.settings === 'object' ? importedData.settings : {},
-                pluginStorage: importedData.pluginStorage && typeof importedData.pluginStorage === 'object' ? importedData.pluginStorage : {},
-            };
-        }
-        return { settings: importedData, pluginStorage: {} };
-    }
-
     // ── API View Panel ──
     function initApiViewPanel() {
-        const _renderApiViewEntry = (/** @type {any} */ r) => {
+        const _renderApiViewEntry = (r) => {
             if (!r) return '<div class="text-gray-500 text-center py-8">선택한 요청 데이터가 없습니다.</div>';
-            const redactKey = (/** @type {any} */ v) => { if (!v || typeof v !== 'string') return v; if (v.length <= 8) return '***'; return v.slice(0, 4) + '...' + v.slice(-4); };
-            const redactHeaders = (/** @type {any} */ headers) => { const h = { ...headers }; for (const k of Object.keys(h)) { if (/auth|key|token|secret|bearer/i.test(k)) h[k] = redactKey(h[k]); } return h; };
-            const formatJson = (/** @type {any} */ obj) => { try { return JSON.stringify(obj, null, 2); } catch { return String(obj); } };
+            const redactKey = (v) => { if (!v || typeof v !== 'string') return v; if (v.length <= 8) return '***'; return v.slice(0, 4) + '...' + v.slice(-4); };
+            const redactHeaders = (headers) => { const h = { ...headers }; for (const k of Object.keys(h)) { if (/auth|key|token|secret|bearer/i.test(k)) h[k] = redactKey(h[k]); } return h; };
+            const formatJson = (obj) => { try { return JSON.stringify(obj, null, 2); } catch { return String(obj); } };
             const statusColor = r.status >= 200 && r.status < 300 ? 'text-green-400' : (typeof r.status === 'number' ? 'text-red-400' : 'text-yellow-400');
             const hasHttpDetails = !!r.url;
             return `<div class="space-y-3">
@@ -7736,14 +5361,14 @@ var CupcakeProviderManager = (function (exports) {
             contentEl.innerHTML = _renderApiViewEntry(getApiRequestById(selector.value));
         };
 
-        document.getElementById('cpm-api-view-btn')?.addEventListener('click', () => {
+        document.getElementById('cpm-api-view-btn').addEventListener('click', () => {
             /** @type {HTMLDivElement | null} */
             const panel = /** @type {HTMLDivElement | null} */ (document.getElementById('cpm-api-view-panel'));
             if (!panel) return;
             if (!panel.classList.contains('hidden')) { panel.classList.add('hidden'); return; }
             _refreshApiViewPanel(); panel.classList.remove('hidden');
         });
-        document.getElementById('cpm-api-view-selector')?.addEventListener('change', (e) => {
+        document.getElementById('cpm-api-view-selector').addEventListener('change', (e) => {
             /** @type {HTMLSelectElement | null} */
             const selector = /** @type {HTMLSelectElement | null} */ (e.target);
             /** @type {HTMLDivElement | null} */
@@ -7751,7 +5376,7 @@ var CupcakeProviderManager = (function (exports) {
             if (!selector || !contentEl) return;
             contentEl.innerHTML = _renderApiViewEntry(getApiRequestById(selector.value));
         });
-        document.getElementById('cpm-api-view-close')?.addEventListener('click', () => {
+        document.getElementById('cpm-api-view-close').addEventListener('click', () => {
             /** @type {HTMLDivElement | null} */
             const panel = /** @type {HTMLDivElement | null} */ (document.getElementById('cpm-api-view-panel'));
             if (panel) panel.classList.add('hidden');
@@ -7759,25 +5384,19 @@ var CupcakeProviderManager = (function (exports) {
     }
 
     // ── Export/Import ──
-    function initExportImport(/** @type {any} */ setVal, /** @type {any} */ openCpmSettings) {
-        document.getElementById('cpm-export-btn')?.addEventListener('click', async () => {
-            const exportSettings = /** @type {Record<string, any>} */ ({});
+    function initExportImport(setVal, openCpmSettings) {
+        document.getElementById('cpm-export-btn').addEventListener('click', async () => {
+            const exportData = {};
             for (const key of getManagedSettingKeys()) {
                 const val = await safeGetArg(key);
-                exportSettings[key] = normalizeManagedSettingValue(key, val);
+                if (val !== undefined && val !== '') exportData[key] = val;
             }
-            const exportData = {
-                _cpmExportVersion: CPM_EXPORT_VERSION,
-                exportedAt: new Date().toISOString(),
-                settings: exportSettings,
-                pluginStorage: await exportPluginStorageSnapshot(),
-            };
             const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(exportData, null, 2));
             const a = document.createElement('a'); a.href = dataStr; a.download = 'cupcake_pm_settings.json';
             document.body.appendChild(a); a.click(); a.remove();
         });
 
-        document.getElementById('cpm-import-btn')?.addEventListener('click', () => {
+        document.getElementById('cpm-import-btn').addEventListener('click', () => {
             const input = document.createElement('input'); input.type = 'file'; input.accept = '.json';
             input.onchange = e => {
                 /** @type {HTMLInputElement | null} */
@@ -7789,31 +5408,18 @@ var CupcakeProviderManager = (function (exports) {
                         const rawText = event.target?.result;
                         if (typeof rawText !== 'string') throw new Error('설정 파일 형식이 올바르지 않습니다.');
                         const importedData = JSON.parse(rawText);
-                        const envelope = normalizeImportEnvelope(importedData);
-                        for (const [key, value] of Object.entries(envelope.settings)) {
-                            const normalizedValue = normalizeManagedSettingValue(key, value);
-                            await setVal(key, normalizedValue);
+                        for (const [key, value] of Object.entries(importedData)) {
+                            setVal(key, value);
                             /** @type {HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null} */
                             const el = /** @type {HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null} */ (document.getElementById(key));
                             if (el) {
-                                if ('type' in el && el.type === 'checkbox') /** @type {HTMLInputElement} */ (el).checked = (normalizedValue === true || String(normalizedValue).toLowerCase() === 'true');
-                                else el.value = String(normalizedValue ?? '');
+                                if ('type' in el && el.type === 'checkbox') /** @type {HTMLInputElement} */ (el).checked = (value === true || String(value).toLowerCase() === 'true');
+                                else el.value = String(value ?? '');
                             }
-                        }
-                        const prevPluginIds = Array.isArray(SubPluginManager.plugins) ? SubPluginManager.plugins.map(p => p.id) : [];
-                        await importPluginStorageSnapshot(envelope.pluginStorage || {});
-                        for (const pluginId of prevPluginIds) {
-                            try { SubPluginManager.unloadPlugin(pluginId); } catch (_) { /* ignore */ }
-                        }
-                        if (Object.prototype.hasOwnProperty.call(envelope.pluginStorage || {}, 'cpm_installed_subplugins')) {
-                            try {
-                                await SubPluginManager.loadRegistry();
-                                if (typeof SubPluginManager.executeEnabled === 'function') await SubPluginManager.executeEnabled();
-                            } catch (_) { /* ignore */ }
                         }
                         alert('설정을 성공적으로 불러왔습니다!');
                         openCpmSettings();
-                    } catch (err) { alert('설정 파일 읽기 오류: ' + /** @type {Error} */ (err).message); }
+                    } catch (err) { alert('설정 파일 읽기 오류: ' + err.message); }
                 };
                 reader.readAsText(file);
             };
@@ -7821,13 +5427,6 @@ var CupcakeProviderManager = (function (exports) {
         });
     }
 
-    // @generated — Do not edit manually.
-    // Built by scripts/build-tailwind.cjs from styles/tailwind-input.css
-    // Size: 38.6 KB (minified)
-    const TAILWIND_CSS = `/*! tailwindcss v4.2.1 | MIT License | https://tailwindcss.com */
-@layer properties{@supports (((-webkit-hyphens:none)) and (not (margin-trim:inline))) or ((-moz-orient:inline) and (not (color:rgb(from red r g b)))){*,:before,:after,::backdrop{--tw-translate-x:0;--tw-translate-y:0;--tw-translate-z:0;--tw-rotate-x:initial;--tw-rotate-y:initial;--tw-rotate-z:initial;--tw-skew-x:initial;--tw-skew-y:initial;--tw-space-y-reverse:0;--tw-space-x-reverse:0;--tw-border-style:solid;--tw-gradient-position:initial;--tw-gradient-from:#0000;--tw-gradient-via:#0000;--tw-gradient-to:#0000;--tw-gradient-stops:initial;--tw-gradient-via-stops:initial;--tw-gradient-from-position:0%;--tw-gradient-via-position:50%;--tw-gradient-to-position:100%;--tw-leading:initial;--tw-font-weight:initial;--tw-tracking:initial;--tw-shadow:0 0 #0000;--tw-shadow-color:initial;--tw-shadow-alpha:100%;--tw-inset-shadow:0 0 #0000;--tw-inset-shadow-color:initial;--tw-inset-shadow-alpha:100%;--tw-ring-color:initial;--tw-ring-shadow:0 0 #0000;--tw-inset-ring-color:initial;--tw-inset-ring-shadow:0 0 #0000;--tw-ring-inset:initial;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-offset-shadow:0 0 #0000;--tw-blur:initial;--tw-brightness:initial;--tw-contrast:initial;--tw-grayscale:initial;--tw-hue-rotate:initial;--tw-invert:initial;--tw-opacity:initial;--tw-saturate:initial;--tw-sepia:initial;--tw-drop-shadow:initial;--tw-drop-shadow-color:initial;--tw-drop-shadow-alpha:100%;--tw-drop-shadow-size:initial;--tw-backdrop-blur:initial;--tw-backdrop-brightness:initial;--tw-backdrop-contrast:initial;--tw-backdrop-grayscale:initial;--tw-backdrop-hue-rotate:initial;--tw-backdrop-invert:initial;--tw-backdrop-opacity:initial;--tw-backdrop-saturate:initial;--tw-backdrop-sepia:initial;--tw-ease:initial}}}@layer theme{:root,:host{--font-sans:ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";--font-mono:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;--color-red-300:oklch(80.8% .114 19.571);--color-red-400:oklch(70.4% .191 22.216);--color-red-500:oklch(63.7% .237 25.331);--color-red-600:oklch(57.7% .245 27.325);--color-red-700:oklch(50.5% .213 27.518);--color-red-800:oklch(44.4% .177 26.899);--color-red-900:oklch(39.6% .141 25.723);--color-red-950:oklch(25.8% .092 26.042);--color-orange-400:oklch(75% .183 55.934);--color-orange-500:oklch(70.5% .213 47.604);--color-orange-600:oklch(64.6% .222 41.116);--color-amber-200:oklch(92.4% .12 95.746);--color-amber-300:oklch(87.9% .169 91.605);--color-amber-400:oklch(82.8% .189 84.429);--color-amber-600:oklch(66.6% .179 58.318);--color-amber-700:oklch(55.5% .163 48.998);--color-amber-900:oklch(41.4% .112 45.904);--color-yellow-200:oklch(94.5% .129 101.54);--color-yellow-300:oklch(90.5% .182 98.111);--color-yellow-400:oklch(85.2% .199 91.936);--color-yellow-500:oklch(79.5% .184 86.047);--color-yellow-600:oklch(68.1% .162 75.834);--color-yellow-700:oklch(55.4% .135 66.442);--color-yellow-800:oklch(47.6% .114 61.907);--color-yellow-900:oklch(42.1% .095 57.708);--color-yellow-950:oklch(28.6% .066 53.813);--color-green-300:oklch(87.1% .15 154.449);--color-green-400:oklch(79.2% .209 151.711);--color-green-500:oklch(72.3% .219 149.579);--color-green-600:oklch(62.7% .194 149.214);--color-green-700:oklch(52.7% .154 150.069);--color-green-800:oklch(44.8% .119 151.328);--color-green-900:oklch(39.3% .095 152.535);--color-green-950:oklch(26.6% .065 152.934);--color-emerald-300:oklch(84.5% .143 164.978);--color-emerald-400:oklch(76.5% .177 163.223);--color-emerald-700:oklch(50.8% .118 165.612);--color-emerald-900:oklch(37.8% .077 168.94);--color-teal-400:oklch(77.7% .152 181.912);--color-cyan-300:oklch(86.5% .127 207.078);--color-cyan-400:oklch(78.9% .154 211.53);--color-cyan-500:oklch(71.5% .143 215.221);--color-cyan-600:oklch(60.9% .126 221.723);--color-blue-300:oklch(80.9% .105 251.813);--color-blue-400:oklch(70.7% .165 254.624);--color-blue-500:oklch(62.3% .214 259.815);--color-blue-600:oklch(54.6% .245 262.881);--color-blue-900:oklch(37.9% .146 265.522);--color-indigo-300:oklch(78.5% .115 274.713);--color-indigo-400:oklch(67.3% .182 276.935);--color-indigo-500:oklch(58.5% .233 277.117);--color-indigo-600:oklch(51.1% .262 276.966);--color-indigo-700:oklch(45.7% .24 277.023);--color-indigo-900:oklch(35.9% .144 278.697);--color-purple-300:oklch(82.7% .119 306.383);--color-purple-400:oklch(71.4% .203 305.504);--color-purple-500:oklch(62.7% .265 303.9);--color-purple-600:oklch(55.8% .288 302.321);--color-purple-700:oklch(49.6% .265 301.924);--color-purple-900:oklch(38.1% .176 304.987);--color-pink-300:oklch(82.3% .12 346.018);--color-pink-500:oklch(65.6% .241 354.308);--color-gray-200:oklch(92.8% .006 264.531);--color-gray-300:oklch(87.2% .01 258.338);--color-gray-400:oklch(70.7% .022 261.325);--color-gray-500:oklch(55.1% .027 264.364);--color-gray-600:oklch(44.6% .03 256.802);--color-gray-700:oklch(37.3% .034 259.733);--color-gray-800:oklch(27.8% .033 256.848);--color-gray-900:oklch(21% .034 264.665);--color-white:#fff;--spacing:.25rem;--container-xs:20rem;--container-md:28rem;--text-xs:.75rem;--text-xs--line-height:calc(1 / .75);--text-sm:.875rem;--text-sm--line-height:calc(1.25 / .875);--text-lg:1.125rem;--text-lg--line-height:calc(1.75 / 1.125);--text-xl:1.25rem;--text-xl--line-height:calc(1.75 / 1.25);--text-2xl:1.5rem;--text-2xl--line-height:calc(2 / 1.5);--text-3xl:1.875rem;--text-3xl--line-height:calc(2.25 / 1.875);--text-4xl:2.25rem;--text-4xl--line-height:calc(2.5 / 2.25);--font-weight-normal:400;--font-weight-medium:500;--font-weight-semibold:600;--font-weight-bold:700;--font-weight-extrabold:800;--tracking-wider:.05em;--tracking-widest:.1em;--leading-relaxed:1.625;--radius-md:.375rem;--radius-lg:.5rem;--radius-xl:.75rem;--ease-out:cubic-bezier(0, 0, .2, 1);--default-transition-duration:.15s;--default-transition-timing-function:cubic-bezier(.4, 0, .2, 1);--default-font-family:var(--font-sans);--default-mono-font-family:var(--font-mono)}}@layer base{*,:after,:before,::backdrop{box-sizing:border-box;border:0 solid;margin:0;padding:0}::file-selector-button{box-sizing:border-box;border:0 solid;margin:0;padding:0}html,:host{-webkit-text-size-adjust:100%;tab-size:4;line-height:1.5;font-family:var(--default-font-family,ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji");font-feature-settings:var(--default-font-feature-settings,normal);font-variation-settings:var(--default-font-variation-settings,normal);-webkit-tap-highlight-color:transparent}hr{height:0;color:inherit;border-top-width:1px}abbr:where([title]){-webkit-text-decoration:underline dotted;text-decoration:underline dotted}h1,h2,h3,h4,h5,h6{font-size:inherit;font-weight:inherit}a{color:inherit;-webkit-text-decoration:inherit;-webkit-text-decoration:inherit;-webkit-text-decoration:inherit;text-decoration:inherit}b,strong{font-weight:bolder}code,kbd,samp,pre{font-family:var(--default-mono-font-family,ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace);font-feature-settings:var(--default-mono-font-feature-settings,normal);font-variation-settings:var(--default-mono-font-variation-settings,normal);font-size:1em}small{font-size:80%}sub,sup{vertical-align:baseline;font-size:75%;line-height:0;position:relative}sub{bottom:-.25em}sup{top:-.5em}table{text-indent:0;border-color:inherit;border-collapse:collapse}:-moz-focusring{outline:auto}progress{vertical-align:baseline}summary{display:list-item}ol,ul,menu{list-style:none}img,svg,video,canvas,audio,iframe,embed,object{vertical-align:middle;display:block}img,video{max-width:100%;height:auto}button,input,select,optgroup,textarea{font:inherit;font-feature-settings:inherit;font-variation-settings:inherit;letter-spacing:inherit;color:inherit;opacity:1;background-color:#0000;border-radius:0}::file-selector-button{font:inherit;font-feature-settings:inherit;font-variation-settings:inherit;letter-spacing:inherit;color:inherit;opacity:1;background-color:#0000;border-radius:0}:where(select:is([multiple],[size])) optgroup{font-weight:bolder}:where(select:is([multiple],[size])) optgroup option{padding-inline-start:20px}::file-selector-button{margin-inline-end:4px}::placeholder{opacity:1}@supports (not ((-webkit-appearance:-apple-pay-button))) or (contain-intrinsic-size:1px){::placeholder{color:currentColor}@supports (color:color-mix(in lab, red, red)){::placeholder{color:color-mix(in oklab, currentcolor 50%, transparent)}}}textarea{resize:vertical}::-webkit-search-decoration{-webkit-appearance:none}::-webkit-date-and-time-value{min-height:1lh;text-align:inherit}::-webkit-datetime-edit{display:inline-flex}::-webkit-datetime-edit-fields-wrapper{padding:0}::-webkit-datetime-edit{padding-block:0}::-webkit-datetime-edit-year-field{padding-block:0}::-webkit-datetime-edit-month-field{padding-block:0}::-webkit-datetime-edit-day-field{padding-block:0}::-webkit-datetime-edit-hour-field{padding-block:0}::-webkit-datetime-edit-minute-field{padding-block:0}::-webkit-datetime-edit-second-field{padding-block:0}::-webkit-datetime-edit-millisecond-field{padding-block:0}::-webkit-datetime-edit-meridiem-field{padding-block:0}::-webkit-calendar-picker-indicator{line-height:1}:-moz-ui-invalid{box-shadow:none}button,input:where([type=button],[type=reset],[type=submit]){appearance:button}::file-selector-button{appearance:button}::-webkit-inner-spin-button{height:auto}::-webkit-outer-spin-button{height:auto}[hidden]:where(:not([hidden=until-found])){display:none!important}}@layer components;@layer utilities{.invisible{visibility:hidden}.visible{visibility:visible}.sr-only{clip-path:inset(50%);white-space:nowrap;border-width:0;width:1px;height:1px;margin:-1px;padding:0;position:absolute;overflow:hidden}.absolute{position:absolute}.fixed{position:fixed}.relative{position:relative}.static{position:static}.inset-0{inset:calc(var(--spacing) * 0)}.start{inset-inline-start:var(--spacing)}.end{inset-inline-end:var(--spacing)}.top-0{top:calc(var(--spacing) * 0)}.top-1{top:calc(var(--spacing) * 1)}.top-1\\/2{top:50%}.top-full{top:100%}.right-2{right:calc(var(--spacing) * 2)}.left-0{left:calc(var(--spacing) * 0)}.left-1{left:calc(var(--spacing) * 1)}.z-10{z-index:10}.z-50{z-index:50}.z-\\[100\\]{z-index:100}.container{width:100%}@media (min-width:40rem){.container{max-width:40rem}}@media (min-width:48rem){.container{max-width:48rem}}@media (min-width:64rem){.container{max-width:64rem}}@media (min-width:80rem){.container{max-width:80rem}}@media (min-width:96rem){.container{max-width:96rem}}.my-4{margin-block:calc(var(--spacing) * 4)}.mt-1{margin-top:calc(var(--spacing) * 1)}.mt-2{margin-top:calc(var(--spacing) * 2)}.mt-3{margin-top:calc(var(--spacing) * 3)}.mt-4{margin-top:calc(var(--spacing) * 4)}.mt-5{margin-top:calc(var(--spacing) * 5)}.mt-6{margin-top:calc(var(--spacing) * 6)}.mt-8{margin-top:calc(var(--spacing) * 8)}.mt-10{margin-top:calc(var(--spacing) * 10)}.mr-1{margin-right:calc(var(--spacing) * 1)}.mr-2{margin-right:calc(var(--spacing) * 2)}.mr-3{margin-right:calc(var(--spacing) * 3)}.mb-1{margin-bottom:calc(var(--spacing) * 1)}.mb-2{margin-bottom:calc(var(--spacing) * 2)}.mb-3{margin-bottom:calc(var(--spacing) * 3)}.mb-4{margin-bottom:calc(var(--spacing) * 4)}.mb-6{margin-bottom:calc(var(--spacing) * 6)}.ml-2{margin-left:calc(var(--spacing) * 2)}.ml-auto{margin-left:auto}.block{display:block}.contents{display:contents}.flex{display:flex}.grid{display:grid}.hidden{display:none}.inline{display:inline}.table{display:table}.h-1{height:calc(var(--spacing) * 1)}.h-1\\.5{height:calc(var(--spacing) * 1.5)}.h-2{height:calc(var(--spacing) * 2)}.h-3{height:calc(var(--spacing) * 3)}.h-4{height:calc(var(--spacing) * 4)}.h-5{height:calc(var(--spacing) * 5)}.h-6{height:calc(var(--spacing) * 6)}.h-14{height:calc(var(--spacing) * 14)}.h-24{height:calc(var(--spacing) * 24)}.h-auto{height:auto}.h-full{height:100%}.max-h-24{max-height:calc(var(--spacing) * 24)}.max-h-40{max-height:calc(var(--spacing) * 40)}.max-h-48{max-height:calc(var(--spacing) * 48)}.max-h-60{max-height:calc(var(--spacing) * 60)}.max-h-72{max-height:calc(var(--spacing) * 72)}.max-h-96{max-height:calc(var(--spacing) * 96)}.max-h-\\[70vh\\]{max-height:70vh}.w-4{width:calc(var(--spacing) * 4)}.w-5{width:calc(var(--spacing) * 5)}.w-6{width:calc(var(--spacing) * 6)}.w-10{width:calc(var(--spacing) * 10)}.w-full{width:100%}.max-w-md{max-width:var(--container-md)}.max-w-xs{max-width:var(--container-xs)}.min-w-0{min-width:calc(var(--spacing) * 0)}.flex-1{flex:1}.flex-shrink{flex-shrink:1}.shrink-0{flex-shrink:0}.-translate-y-1{--tw-translate-y:calc(var(--spacing) * -1);translate:var(--tw-translate-x) var(--tw-translate-y)}.-translate-y-1\\/2{--tw-translate-y:calc(calc(1 / 2 * 100%) * -1);translate:var(--tw-translate-x) var(--tw-translate-y)}.transform{transform:var(--tw-rotate-x,) var(--tw-rotate-y,) var(--tw-rotate-z,) var(--tw-skew-x,) var(--tw-skew-y,)}.cursor-pointer{cursor:pointer}.resize{resize:both}.resize-y{resize:vertical}.list-inside{list-style-position:inside}.list-disc{list-style-type:disc}.grid-cols-1{grid-template-columns:repeat(1,minmax(0,1fr))}.grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.flex-col{flex-direction:column}.flex-col-reverse{flex-direction:column-reverse}.flex-row{flex-direction:row}.flex-wrap{flex-wrap:wrap}.items-baseline{align-items:baseline}.items-center{align-items:center}.items-end{align-items:flex-end}.items-start{align-items:flex-start}.justify-between{justify-content:space-between}.justify-center{justify-content:center}.justify-end{justify-content:flex-end}.gap-1{gap:calc(var(--spacing) * 1)}.gap-2{gap:calc(var(--spacing) * 2)}.gap-3{gap:calc(var(--spacing) * 3)}.gap-4{gap:calc(var(--spacing) * 4)}:where(.space-y-0>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(calc(var(--spacing) * 0) * var(--tw-space-y-reverse));margin-block-end:calc(calc(var(--spacing) * 0) * calc(1 - var(--tw-space-y-reverse)))}:where(.space-y-0\\.5>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(calc(var(--spacing) * .5) * var(--tw-space-y-reverse));margin-block-end:calc(calc(var(--spacing) * .5) * calc(1 - var(--tw-space-y-reverse)))}:where(.space-y-1>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(calc(var(--spacing) * 1) * var(--tw-space-y-reverse));margin-block-end:calc(calc(var(--spacing) * 1) * calc(1 - var(--tw-space-y-reverse)))}:where(.space-y-2>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(calc(var(--spacing) * 2) * var(--tw-space-y-reverse));margin-block-end:calc(calc(var(--spacing) * 2) * calc(1 - var(--tw-space-y-reverse)))}:where(.space-y-3>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(calc(var(--spacing) * 3) * var(--tw-space-y-reverse));margin-block-end:calc(calc(var(--spacing) * 3) * calc(1 - var(--tw-space-y-reverse)))}:where(.space-y-4>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(calc(var(--spacing) * 4) * var(--tw-space-y-reverse));margin-block-end:calc(calc(var(--spacing) * 4) * calc(1 - var(--tw-space-y-reverse)))}.gap-x-4{column-gap:calc(var(--spacing) * 4)}:where(.space-x-2>:not(:last-child)){--tw-space-x-reverse:0;margin-inline-start:calc(calc(var(--spacing) * 2) * var(--tw-space-x-reverse));margin-inline-end:calc(calc(var(--spacing) * 2) * calc(1 - var(--tw-space-x-reverse)))}:where(.space-x-3>:not(:last-child)){--tw-space-x-reverse:0;margin-inline-start:calc(calc(var(--spacing) * 3) * var(--tw-space-x-reverse));margin-inline-end:calc(calc(var(--spacing) * 3) * calc(1 - var(--tw-space-x-reverse)))}.gap-y-1{row-gap:calc(var(--spacing) * 1)}.truncate{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.overflow-auto{overflow:auto}.overflow-hidden{overflow:hidden}.overflow-y-auto{overflow-y:auto}.rounded{border-radius:.25rem}.rounded-full{border-radius:3.40282e38px}.rounded-lg{border-radius:var(--radius-lg)}.rounded-md{border-radius:var(--radius-md)}.rounded-xl{border-radius:var(--radius-xl)}.border{border-style:var(--tw-border-style);border-width:1px}.border-2{border-style:var(--tw-border-style);border-width:2px}.border-t{border-top-style:var(--tw-border-style);border-top-width:1px}.border-b{border-bottom-style:var(--tw-border-style);border-bottom-width:1px}.border-l-2{border-left-style:var(--tw-border-style);border-left-width:2px}.border-l-4{border-left-style:var(--tw-border-style);border-left-width:4px}.border-dashed{--tw-border-style:dashed;border-style:dashed}.border-amber-600{border-color:var(--color-amber-600)}.border-amber-600\\/50{border-color:#dd740080}@supports (color:color-mix(in lab, red, red)){.border-amber-600\\/50{border-color:color-mix(in oklab, var(--color-amber-600) 50%, transparent)}}.border-amber-700{border-color:var(--color-amber-700)}.border-amber-900{border-color:var(--color-amber-900)}.border-amber-900\\/50{border-color:#7b330680}@supports (color:color-mix(in lab, red, red)){.border-amber-900\\/50{border-color:color-mix(in oklab, var(--color-amber-900) 50%, transparent)}}.border-blue-500{border-color:var(--color-blue-500)}.border-cyan-500{border-color:var(--color-cyan-500)}.border-emerald-700{border-color:var(--color-emerald-700)}.border-emerald-900{border-color:var(--color-emerald-900)}.border-emerald-900\\/50{border-color:#004e3b80}@supports (color:color-mix(in lab, red, red)){.border-emerald-900\\/50{border-color:color-mix(in oklab, var(--color-emerald-900) 50%, transparent)}}.border-gray-600{border-color:var(--color-gray-600)}.border-gray-700{border-color:var(--color-gray-700)}.border-gray-700\\/50{border-color:#36415380}@supports (color:color-mix(in lab, red, red)){.border-gray-700\\/50{border-color:color-mix(in oklab, var(--color-gray-700) 50%, transparent)}}.border-gray-800{border-color:var(--color-gray-800)}.border-green-500{border-color:var(--color-green-500)}.border-green-600{border-color:var(--color-green-600)}.border-green-800{border-color:var(--color-green-800)}.border-indigo-700{border-color:var(--color-indigo-700)}.border-pink-500{border-color:var(--color-pink-500)}.border-purple-700{border-color:var(--color-purple-700)}.border-purple-700\\/50{border-color:#8200da80}@supports (color:color-mix(in lab, red, red)){.border-purple-700\\/50{border-color:color-mix(in oklab, var(--color-purple-700) 50%, transparent)}}.border-purple-900{border-color:var(--color-purple-900)}.border-purple-900\\/50{border-color:#59168b80}@supports (color:color-mix(in lab, red, red)){.border-purple-900\\/50{border-color:color-mix(in oklab, var(--color-purple-900) 50%, transparent)}}.border-red-500{border-color:var(--color-red-500)}.border-red-700{border-color:var(--color-red-700)}.border-red-700\\/50{border-color:#bf000f80}@supports (color:color-mix(in lab, red, red)){.border-red-700\\/50{border-color:color-mix(in oklab, var(--color-red-700) 50%, transparent)}}.border-red-800{border-color:var(--color-red-800)}.border-yellow-500{border-color:var(--color-yellow-500)}.border-yellow-600{border-color:var(--color-yellow-600)}.border-yellow-600\\/50{border-color:#cd890080}@supports (color:color-mix(in lab, red, red)){.border-yellow-600\\/50{border-color:color-mix(in oklab, var(--color-yellow-600) 50%, transparent)}}.border-yellow-700{border-color:var(--color-yellow-700)}.border-yellow-700\\/50{border-color:#a3610080}@supports (color:color-mix(in lab, red, red)){.border-yellow-700\\/50{border-color:color-mix(in oklab, var(--color-yellow-700) 50%, transparent)}}.border-yellow-800{border-color:var(--color-yellow-800)}.bg-\\[\\#121214\\]{background-color:#121214}.bg-amber-900{background-color:var(--color-amber-900)}.bg-amber-900\\/30{background-color:#7b33064d}@supports (color:color-mix(in lab, red, red)){.bg-amber-900\\/30{background-color:color-mix(in oklab, var(--color-amber-900) 30%, transparent)}}.bg-blue-600{background-color:var(--color-blue-600)}.bg-blue-600\\/90{background-color:#155dfce6}@supports (color:color-mix(in lab, red, red)){.bg-blue-600\\/90{background-color:color-mix(in oklab, var(--color-blue-600) 90%, transparent)}}.bg-blue-900{background-color:var(--color-blue-900)}.bg-blue-900\\/10{background-color:#1c398e1a}@supports (color:color-mix(in lab, red, red)){.bg-blue-900\\/10{background-color:color-mix(in oklab, var(--color-blue-900) 10%, transparent)}}.bg-cyan-600{background-color:var(--color-cyan-600)}.bg-gray-600{background-color:var(--color-gray-600)}.bg-gray-700{background-color:var(--color-gray-700)}.bg-gray-800{background-color:var(--color-gray-800)}.bg-gray-800\\/70{background-color:#1e2939b3}@supports (color:color-mix(in lab, red, red)){.bg-gray-800\\/70{background-color:color-mix(in oklab, var(--color-gray-800) 70%, transparent)}}.bg-gray-900{background-color:var(--color-gray-900)}.bg-green-600{background-color:var(--color-green-600)}.bg-green-700{background-color:var(--color-green-700)}.bg-green-900{background-color:var(--color-green-900)}.bg-green-900\\/30{background-color:#0d542b4d}@supports (color:color-mix(in lab, red, red)){.bg-green-900\\/30{background-color:color-mix(in oklab, var(--color-green-900) 30%, transparent)}}.bg-green-900\\/50{background-color:#0d542b80}@supports (color:color-mix(in lab, red, red)){.bg-green-900\\/50{background-color:color-mix(in oklab, var(--color-green-900) 50%, transparent)}}.bg-green-950{background-color:var(--color-green-950)}.bg-indigo-600{background-color:var(--color-indigo-600)}.bg-indigo-900{background-color:var(--color-indigo-900)}.bg-indigo-900\\/30{background-color:#312c854d}@supports (color:color-mix(in lab, red, red)){.bg-indigo-900\\/30{background-color:color-mix(in oklab, var(--color-indigo-900) 30%, transparent)}}.bg-indigo-900\\/40{background-color:#312c8566}@supports (color:color-mix(in lab, red, red)){.bg-indigo-900\\/40{background-color:color-mix(in oklab, var(--color-indigo-900) 40%, transparent)}}.bg-orange-600{background-color:var(--color-orange-600)}.bg-purple-600{background-color:var(--color-purple-600)}.bg-purple-700{background-color:var(--color-purple-700)}.bg-red-600{background-color:var(--color-red-600)}.bg-red-600\\/90{background-color:#e40014e6}@supports (color:color-mix(in lab, red, red)){.bg-red-600\\/90{background-color:color-mix(in oklab, var(--color-red-600) 90%, transparent)}}.bg-red-700{background-color:var(--color-red-700)}.bg-red-900{background-color:var(--color-red-900)}.bg-red-900\\/20{background-color:#82181a33}@supports (color:color-mix(in lab, red, red)){.bg-red-900\\/20{background-color:color-mix(in oklab, var(--color-red-900) 20%, transparent)}}.bg-red-900\\/30{background-color:#82181a4d}@supports (color:color-mix(in lab, red, red)){.bg-red-900\\/30{background-color:color-mix(in oklab, var(--color-red-900) 30%, transparent)}}.bg-red-900\\/50{background-color:#82181a80}@supports (color:color-mix(in lab, red, red)){.bg-red-900\\/50{background-color:color-mix(in oklab, var(--color-red-900) 50%, transparent)}}.bg-red-950{background-color:var(--color-red-950)}.bg-white{background-color:var(--color-white)}.bg-yellow-600{background-color:var(--color-yellow-600)}.bg-yellow-600\\/30{background-color:#cd89004d}@supports (color:color-mix(in lab, red, red)){.bg-yellow-600\\/30{background-color:color-mix(in oklab, var(--color-yellow-600) 30%, transparent)}}.bg-yellow-900{background-color:var(--color-yellow-900)}.bg-yellow-900\\/10{background-color:#733e0a1a}@supports (color:color-mix(in lab, red, red)){.bg-yellow-900\\/10{background-color:color-mix(in oklab, var(--color-yellow-900) 10%, transparent)}}.bg-yellow-900\\/20{background-color:#733e0a33}@supports (color:color-mix(in lab, red, red)){.bg-yellow-900\\/20{background-color:color-mix(in oklab, var(--color-yellow-900) 20%, transparent)}}.bg-yellow-950{background-color:var(--color-yellow-950)}.bg-gradient-to-r{--tw-gradient-position:to right in oklab;background-image:linear-gradient(var(--tw-gradient-stops))}.from-blue-400{--tw-gradient-from:var(--color-blue-400);--tw-gradient-stops:var(--tw-gradient-via-stops,var(--tw-gradient-position), var(--tw-gradient-from) var(--tw-gradient-from-position), var(--tw-gradient-to) var(--tw-gradient-to-position))}.to-purple-500{--tw-gradient-to:var(--color-purple-500);--tw-gradient-stops:var(--tw-gradient-via-stops,var(--tw-gradient-position), var(--tw-gradient-from) var(--tw-gradient-from-position), var(--tw-gradient-to) var(--tw-gradient-to-position))}.bg-clip-text{-webkit-background-clip:text;background-clip:text}.p-2{padding:calc(var(--spacing) * 2)}.p-3{padding:calc(var(--spacing) * 3)}.p-4{padding:calc(var(--spacing) * 4)}.p-5{padding:calc(var(--spacing) * 5)}.p-6{padding:calc(var(--spacing) * 6)}.px-1{padding-inline:calc(var(--spacing) * 1)}.px-2{padding-inline:calc(var(--spacing) * 2)}.px-3{padding-inline:calc(var(--spacing) * 3)}.px-4{padding-inline:calc(var(--spacing) * 4)}.px-5{padding-inline:calc(var(--spacing) * 5)}.px-6{padding-inline:calc(var(--spacing) * 6)}.py-0{padding-block:calc(var(--spacing) * 0)}.py-0\\.5{padding-block:calc(var(--spacing) * .5)}.py-1{padding-block:calc(var(--spacing) * 1)}.py-1\\.5{padding-block:calc(var(--spacing) * 1.5)}.py-2{padding-block:calc(var(--spacing) * 2)}.py-4{padding-block:calc(var(--spacing) * 4)}.py-6{padding-block:calc(var(--spacing) * 6)}.py-8{padding-block:calc(var(--spacing) * 8)}.pt-1{padding-top:calc(var(--spacing) * 1)}.pt-2{padding-top:calc(var(--spacing) * 2)}.pt-3{padding-top:calc(var(--spacing) * 3)}.pt-4{padding-top:calc(var(--spacing) * 4)}.pt-6{padding-top:calc(var(--spacing) * 6)}.pr-2{padding-right:calc(var(--spacing) * 2)}.pr-4{padding-right:calc(var(--spacing) * 4)}.pr-10{padding-right:calc(var(--spacing) * 10)}.pb-2{padding-bottom:calc(var(--spacing) * 2)}.pb-3{padding-bottom:calc(var(--spacing) * 3)}.pb-4{padding-bottom:calc(var(--spacing) * 4)}.pl-2{padding-left:calc(var(--spacing) * 2)}.pl-3{padding-left:calc(var(--spacing) * 3)}.pl-4{padding-left:calc(var(--spacing) * 4)}.text-center{text-align:center}.text-left{text-align:left}.font-mono{font-family:var(--font-mono)}.text-2xl{font-size:var(--text-2xl);line-height:var(--tw-leading,var(--text-2xl--line-height))}.text-3xl{font-size:var(--text-3xl);line-height:var(--tw-leading,var(--text-3xl--line-height))}.text-4xl{font-size:var(--text-4xl);line-height:var(--tw-leading,var(--text-4xl--line-height))}.text-lg{font-size:var(--text-lg);line-height:var(--tw-leading,var(--text-lg--line-height))}.text-sm{font-size:var(--text-sm);line-height:var(--tw-leading,var(--text-sm--line-height))}.text-xl{font-size:var(--text-xl);line-height:var(--tw-leading,var(--text-xl--line-height))}.text-xs{font-size:var(--text-xs);line-height:var(--tw-leading,var(--text-xs--line-height))}.text-\\[10px\\]{font-size:10px}.text-\\[11px\\]{font-size:11px}.leading-relaxed{--tw-leading:var(--leading-relaxed);line-height:var(--leading-relaxed)}.font-bold{--tw-font-weight:var(--font-weight-bold);font-weight:var(--font-weight-bold)}.font-extrabold{--tw-font-weight:var(--font-weight-extrabold);font-weight:var(--font-weight-extrabold)}.font-medium{--tw-font-weight:var(--font-weight-medium);font-weight:var(--font-weight-medium)}.font-normal{--tw-font-weight:var(--font-weight-normal);font-weight:var(--font-weight-normal)}.font-semibold{--tw-font-weight:var(--font-weight-semibold);font-weight:var(--font-weight-semibold)}.tracking-wider{--tw-tracking:var(--tracking-wider);letter-spacing:var(--tracking-wider)}.tracking-widest{--tw-tracking:var(--tracking-widest);letter-spacing:var(--tracking-widest)}.break-words{overflow-wrap:break-word}.break-all{word-break:break-all}.whitespace-pre-wrap{white-space:pre-wrap}.text-amber-200{color:var(--color-amber-200)}.text-amber-200\\/80{color:#fee685cc}@supports (color:color-mix(in lab, red, red)){.text-amber-200\\/80{color:color-mix(in oklab, var(--color-amber-200) 80%, transparent)}}.text-amber-300{color:var(--color-amber-300)}.text-amber-400{color:var(--color-amber-400)}.text-blue-300{color:var(--color-blue-300)}.text-blue-400{color:var(--color-blue-400)}.text-blue-500{color:var(--color-blue-500)}.text-cyan-300{color:var(--color-cyan-300)}.text-cyan-400{color:var(--color-cyan-400)}.text-cyan-400\\/90{color:#00d2efe6}@supports (color:color-mix(in lab, red, red)){.text-cyan-400\\/90{color:color-mix(in oklab, var(--color-cyan-400) 90%, transparent)}}.text-emerald-300{color:var(--color-emerald-300)}.text-emerald-400{color:var(--color-emerald-400)}.text-gray-200{color:var(--color-gray-200)}.text-gray-300{color:var(--color-gray-300)}.text-gray-400{color:var(--color-gray-400)}.text-gray-500{color:var(--color-gray-500)}.text-gray-600{color:var(--color-gray-600)}.text-green-300{color:var(--color-green-300)}.text-green-400{color:var(--color-green-400)}.text-indigo-300{color:var(--color-indigo-300)}.text-indigo-400{color:var(--color-indigo-400)}.text-orange-400{color:var(--color-orange-400)}.text-pink-300{color:var(--color-pink-300)}.text-purple-300{color:var(--color-purple-300)}.text-purple-400{color:var(--color-purple-400)}.text-red-300{color:var(--color-red-300)}.text-red-400{color:var(--color-red-400)}.text-red-500{color:var(--color-red-500)}.text-teal-400{color:var(--color-teal-400)}.text-transparent{color:#0000}.text-white{color:var(--color-white)}.text-yellow-200{color:var(--color-yellow-200)}.text-yellow-300{color:var(--color-yellow-300)}.text-yellow-400{color:var(--color-yellow-400)}.text-yellow-500{color:var(--color-yellow-500)}.capitalize{text-transform:capitalize}.lowercase{text-transform:lowercase}.uppercase{text-transform:uppercase}.underline{text-decoration-line:underline}.opacity-0{opacity:0}.shadow{--tw-shadow:0 1px 3px 0 var(--tw-shadow-color,#0000001a), 0 1px 2px -1px var(--tw-shadow-color,#0000001a);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-\\[0_0_10px_rgba\\(239\\,68\\,68\\,0\\.5\\)\\]{--tw-shadow:0 0 10px var(--tw-shadow-color,#ef444480);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-lg{--tw-shadow:0 10px 15px -3px var(--tw-shadow-color,#0000001a), 0 4px 6px -4px var(--tw-shadow-color,#0000001a);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-xl{--tw-shadow:0 20px 25px -5px var(--tw-shadow-color,#0000001a), 0 8px 10px -6px var(--tw-shadow-color,#0000001a);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-red-900{--tw-shadow-color:oklch(39.6% .141 25.723)}@supports (color:color-mix(in lab, red, red)){.shadow-red-900{--tw-shadow-color:color-mix(in oklab, var(--color-red-900) var(--tw-shadow-alpha), transparent)}}.shadow-red-900\\/50{--tw-shadow-color:#82181a80}@supports (color:color-mix(in lab, red, red)){.shadow-red-900\\/50{--tw-shadow-color:color-mix(in oklab, color-mix(in oklab, var(--color-red-900) 50%, transparent) var(--tw-shadow-alpha), transparent)}}.filter{filter:var(--tw-blur,) var(--tw-brightness,) var(--tw-contrast,) var(--tw-grayscale,) var(--tw-hue-rotate,) var(--tw-invert,) var(--tw-saturate,) var(--tw-sepia,) var(--tw-drop-shadow,)}.backdrop-filter{-webkit-backdrop-filter:var(--tw-backdrop-blur,) var(--tw-backdrop-brightness,) var(--tw-backdrop-contrast,) var(--tw-backdrop-grayscale,) var(--tw-backdrop-hue-rotate,) var(--tw-backdrop-invert,) var(--tw-backdrop-opacity,) var(--tw-backdrop-saturate,) var(--tw-backdrop-sepia,);backdrop-filter:var(--tw-backdrop-blur,) var(--tw-backdrop-brightness,) var(--tw-backdrop-contrast,) var(--tw-backdrop-grayscale,) var(--tw-backdrop-hue-rotate,) var(--tw-backdrop-invert,) var(--tw-backdrop-opacity,) var(--tw-backdrop-saturate,) var(--tw-backdrop-sepia,)}.transition{transition-property:color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to,opacity,box-shadow,transform,translate,scale,rotate,filter,-webkit-backdrop-filter,backdrop-filter,display,content-visibility,overlay,pointer-events;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration))}.transition-colors{transition-property:color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration))}.transition-opacity{transition-property:opacity;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration))}.ease-out{--tw-ease:var(--ease-out);transition-timing-function:var(--ease-out)}.select-all{-webkit-user-select:all;user-select:all}.select-none{-webkit-user-select:none;user-select:none}@media (hover:hover){.group-hover\\:opacity-100:is(:where(.group):hover *){opacity:1}}.last\\:border-0:last-child{border-style:var(--tw-border-style);border-width:0}@media (hover:hover){.hover\\:border-blue-500:hover{border-color:var(--color-blue-500)}.hover\\:border-gray-500:hover{border-color:var(--color-gray-500)}.hover\\:bg-blue-500:hover{background-color:var(--color-blue-500)}.hover\\:bg-blue-600:hover{background-color:var(--color-blue-600)}.hover\\:bg-gray-500:hover{background-color:var(--color-gray-500)}.hover\\:bg-gray-600:hover{background-color:var(--color-gray-600)}.hover\\:bg-gray-700:hover{background-color:var(--color-gray-700)}.hover\\:bg-gray-800:hover{background-color:var(--color-gray-800)}.hover\\:bg-green-500:hover{background-color:var(--color-green-500)}.hover\\:bg-green-600:hover{background-color:var(--color-green-600)}.hover\\:bg-indigo-500:hover{background-color:var(--color-indigo-500)}.hover\\:bg-orange-500:hover{background-color:var(--color-orange-500)}.hover\\:bg-orange-600:hover{background-color:var(--color-orange-600)}.hover\\:bg-purple-600:hover{background-color:var(--color-purple-600)}.hover\\:bg-red-500:hover{background-color:var(--color-red-500)}.hover\\:bg-red-600:hover{background-color:var(--color-red-600)}.hover\\:bg-yellow-500:hover{background-color:var(--color-yellow-500)}.hover\\:bg-yellow-600:hover{background-color:var(--color-yellow-600)}.hover\\:text-red-400:hover{color:var(--color-red-400)}.hover\\:text-white:hover{color:var(--color-white)}}.focus\\:border-blue-500:focus{border-color:var(--color-blue-500)}.focus\\:border-green-400:focus{border-color:var(--color-green-400)}.focus\\:border-yellow-400:focus{border-color:var(--color-yellow-400)}.focus\\:ring-blue-500:focus{--tw-ring-color:var(--color-blue-500)}.focus\\:outline-none:focus{--tw-outline-style:none;outline-style:none}@media (min-width:40rem){.sm\\:grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}}@media (min-width:48rem){.md\\:static{position:static}.md\\:col-span-2{grid-column:span 2/span 2}.md\\:flex{display:flex}.md\\:hidden{display:none}.md\\:h-full{height:100%}.md\\:max-h-none{max-height:none}.md\\:w-64{width:calc(var(--spacing) * 64)}.md\\:w-auto{width:auto}.md\\:cursor-default{cursor:default}.md\\:grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.md\\:grid-cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}.md\\:flex-row{flex-direction:row}.md\\:border-r{border-right-style:var(--tw-border-style);border-right-width:1px}.md\\:border-b-0{border-bottom-style:var(--tw-border-style);border-bottom-width:0}.md\\:border-none{--tw-border-style:none;border-style:none}.md\\:p-10{padding:calc(var(--spacing) * 10)}.md\\:shadow-none{--tw-shadow:0 0 #0000;box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}}}@property --tw-translate-x{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-y{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-z{syntax:"*";inherits:false;initial-value:0}@property --tw-rotate-x{syntax:"*";inherits:false}@property --tw-rotate-y{syntax:"*";inherits:false}@property --tw-rotate-z{syntax:"*";inherits:false}@property --tw-skew-x{syntax:"*";inherits:false}@property --tw-skew-y{syntax:"*";inherits:false}@property --tw-space-y-reverse{syntax:"*";inherits:false;initial-value:0}@property --tw-space-x-reverse{syntax:"*";inherits:false;initial-value:0}@property --tw-border-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-gradient-position{syntax:"*";inherits:false}@property --tw-gradient-from{syntax:"<color>";inherits:false;initial-value:#0000}@property --tw-gradient-via{syntax:"<color>";inherits:false;initial-value:#0000}@property --tw-gradient-to{syntax:"<color>";inherits:false;initial-value:#0000}@property --tw-gradient-stops{syntax:"*";inherits:false}@property --tw-gradient-via-stops{syntax:"*";inherits:false}@property --tw-gradient-from-position{syntax:"<length-percentage>";inherits:false;initial-value:0%}@property --tw-gradient-via-position{syntax:"<length-percentage>";inherits:false;initial-value:50%}@property --tw-gradient-to-position{syntax:"<length-percentage>";inherits:false;initial-value:100%}@property --tw-leading{syntax:"*";inherits:false}@property --tw-font-weight{syntax:"*";inherits:false}@property --tw-tracking{syntax:"*";inherits:false}@property --tw-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-shadow-color{syntax:"*";inherits:false}@property --tw-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-inset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-shadow-color{syntax:"*";inherits:false}@property --tw-inset-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-ring-color{syntax:"*";inherits:false}@property --tw-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-ring-color{syntax:"*";inherits:false}@property --tw-inset-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-ring-inset{syntax:"*";inherits:false}@property --tw-ring-offset-width{syntax:"<length>";inherits:false;initial-value:0}@property --tw-ring-offset-color{syntax:"*";inherits:false;initial-value:#fff}@property --tw-ring-offset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-blur{syntax:"*";inherits:false}@property --tw-brightness{syntax:"*";inherits:false}@property --tw-contrast{syntax:"*";inherits:false}@property --tw-grayscale{syntax:"*";inherits:false}@property --tw-hue-rotate{syntax:"*";inherits:false}@property --tw-invert{syntax:"*";inherits:false}@property --tw-opacity{syntax:"*";inherits:false}@property --tw-saturate{syntax:"*";inherits:false}@property --tw-sepia{syntax:"*";inherits:false}@property --tw-drop-shadow{syntax:"*";inherits:false}@property --tw-drop-shadow-color{syntax:"*";inherits:false}@property --tw-drop-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-drop-shadow-size{syntax:"*";inherits:false}@property --tw-backdrop-blur{syntax:"*";inherits:false}@property --tw-backdrop-brightness{syntax:"*";inherits:false}@property --tw-backdrop-contrast{syntax:"*";inherits:false}@property --tw-backdrop-grayscale{syntax:"*";inherits:false}@property --tw-backdrop-hue-rotate{syntax:"*";inherits:false}@property --tw-backdrop-invert{syntax:"*";inherits:false}@property --tw-backdrop-opacity{syntax:"*";inherits:false}@property --tw-backdrop-saturate{syntax:"*";inherits:false}@property --tw-backdrop-sepia{syntax:"*";inherits:false}@property --tw-ease{syntax:"*";inherits:false}`;
-
-    // @ts-check
     /**
      * settings-ui.js — Cupcake PM settings panel (core orchestrator).
      * Renders the full-screen settings interface with Tailwind CSS.
@@ -7838,23 +5437,7 @@ var CupcakeProviderManager = (function (exports) {
      *   settings-ui-panels.js        — API View panel + Export/Import
      */
 
-    /**
-     * Injects the pre-built Tailwind CSS into the document as a <style> tag.
-     * Replaces the previous CDN-based approach for offline reliability.
-     * @returns {Promise<HTMLStyleElement | null>}
-     */
-    function ensureTailwindLoaded() {
-        const existing = /** @type {HTMLStyleElement | null} */ (document.getElementById('cpm-tailwind'));
-        if (existing) return Promise.resolve(existing);
-
-        const style = document.createElement('style');
-        style.id = 'cpm-tailwind';
-        style.textContent = TAILWIND_CSS;
-        document.head.appendChild(style);
-        return Promise.resolve(style);
-    }
-
-    function shouldPersistControl(/** @type {any} */ el) {
+    function shouldPersistControl(el) {
         const id = el?.id || '';
         if (!id) return false;
         if (id.startsWith('cpm-cm-')) return false;
@@ -7863,96 +5446,44 @@ var CupcakeProviderManager = (function (exports) {
         return true;
     }
 
-    function bindSettingsPersistenceHandlers(/** @type {any} */ root, /** @type {any} */ setVal) {
+    function bindSettingsPersistenceHandlers(root, setVal) {
         if (!root || typeof root.querySelectorAll !== 'function' || typeof setVal !== 'function') return;
 
-        root.querySelectorAll('input[type="text"], input[type="password"], input[type="number"], select, textarea').forEach((/** @type {any} */ el) => {
+        root.querySelectorAll('input[type="text"], input[type="password"], input[type="number"], select, textarea').forEach(el => {
             if (!shouldPersistControl(el)) return;
-            el.addEventListener('change', (/** @type {any} */ e) => {
-                Promise.resolve(setVal(e.target.id, e.target.value)).catch(err => {
-                    console.error('[CupcakePM] Failed to persist setting:', e.target?.id, err);
-                });
-            });
+            el.addEventListener('change', (e) => setVal(e.target.id, e.target.value));
         });
 
-        root.querySelectorAll('input[type="checkbox"]').forEach((/** @type {any} */ el) => {
+        root.querySelectorAll('input[type="checkbox"]').forEach(el => {
             if (!shouldPersistControl(el)) return;
-            el.addEventListener('change', (/** @type {any} */ e) => {
-                Promise.resolve(setVal(e.target.id, e.target.checked)).catch(err => {
-                    console.error('[CupcakePM] Failed to persist checkbox setting:', e.target?.id, err);
-                });
-            });
+            el.addEventListener('change', (e) => setVal(e.target.id, e.target.checked));
         });
     }
 
     async function openCpmSettings() {
         Risu.showContainer('fullscreen');
 
-        // Tailwind CSS (build-time inlined)
-        ensureTailwindLoaded();
+        // Tailwind CSS
+        if (!document.getElementById('cpm-tailwind')) {
+            const tw = document.createElement('script');
+            tw.id = 'cpm-tailwind'; tw.src = 'https://cdn.tailwindcss.com';
+            document.head.appendChild(tw);
+            await new Promise(r => tw.onload = r);
+        }
 
         document.body.innerHTML = '';
         document.body.style.cssText = 'margin:0; background:#1e1e24; color:#d1d5db; font-family:-apple-system, sans-serif; height:100vh; overflow:hidden;';
 
-        const _spmAny = /** @type {any} */ (SubPluginManager);
-
-        const getVal = async (/** @type {string} */ k) => await safeGetArg(k);
-        const getBoolVal = async (/** @type {string} */ k) => await safeGetBoolArg(k);
-        const setVal = async (/** @type {string} */ k, /** @type {any} */ v) => {
-            await Risu.setArgument(k, String(v));
+        const getVal = async (k) => await safeGetArg(k);
+        const getBoolVal = async (k) => await safeGetBoolArg(k);
+        const setVal = (k, v) => {
+            Risu.setArgument(k, String(v));
             SettingsBackup.updateKey(k, String(v));
-            // Invalidate smart-fetch compatibility cache when relevant settings change
-            if (k === 'cpm_compatibility_mode' || k === 'cpm_streaming_enabled' || k === 'cpm_copilot_nodeless_mode') {
-                _resetCompatibilityCache();
-                if (k === 'cpm_copilot_nodeless_mode') clearCopilotTokenCache();
-                queueMicrotask(() => {
-                    Promise.resolve(refreshStatusIndicators()).catch(err => {
-                        console.error('[CupcakePM] Failed to refresh status indicators:', err);
-                    });
-                });
-            }
         };
 
-        async function refreshStatusIndicators() {
-            const statusEl = document.getElementById('cpm-stream-status');
-            const compatStatusEl = document.getElementById('cpm-compat-status');
+        const escAttr = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-            try {
-                const capable = await checkStreamCapability();
-                if (statusEl) {
-                    statusEl.innerHTML = capable
-                        ? '<span class="text-emerald-400">✓ Bridge 지원됨</span> — ReadableStream 전송 가능.'
-                        : '<span class="text-yellow-400">✗ Bridge 미지원</span> — 자동으로 문자열 수집 모드로 폴백됩니다.';
-                    statusEl.classList.remove('border-gray-600', 'border-emerald-700', 'border-yellow-800');
-                    statusEl.classList.add(capable ? 'border-emerald-700' : 'border-yellow-800');
-                }
-
-                if (compatStatusEl) {
-                    const manualEnabled = await safeGetBoolArg('cpm_compatibility_mode', false);
-                    const nodelessMode = await safeGetArg('cpm_copilot_nodeless_mode', 'off');
-                    compatStatusEl.classList.remove('border-gray-600', 'border-emerald-700', 'border-amber-700');
-                    if (manualEnabled) {
-                        compatStatusEl.innerHTML = `<span class="text-amber-400">⚡ 수동 활성화됨</span> — nativeFetch 건너뛰기 + 스트리밍 자동 비활성화.${nodelessMode !== 'off' ? ` <span class="text-cyan-300">Node-less 실험 모드: ${escHtml(nodelessMode)}</span>` : ''}`;
-                        compatStatusEl.classList.add('border-amber-700');
-                    } else if (!capable) {
-                        compatStatusEl.innerHTML = `<span class="text-yellow-400">⚠ Bridge 미지원</span> — ReadableStream 전달이 불가능한 환경입니다. 문제가 있으면 호환성 모드를 수동으로 켜주세요.${nodelessMode !== 'off' ? ` <span class="text-cyan-300">Node-less 실험 모드: ${escHtml(nodelessMode)}</span>` : ''}`;
-                        compatStatusEl.classList.add('border-amber-700');
-                    } else {
-                        compatStatusEl.innerHTML = nodelessMode === 'off'
-                            ? '<span class="text-emerald-400">✓ 비활성</span> — Bridge 정상. 호환성 모드가 필요하지 않습니다.'
-                            : `<span class="text-cyan-300">🧪 Node-less 실험 모드</span> — iPhone용 호환성은 꺼져 있지만 Copilot 헤더 전략은 ${escHtml(nodelessMode)} 로 동작합니다.`;
-                        compatStatusEl.classList.add('border-emerald-700');
-                    }
-                }
-            } catch (e) {
-                if (statusEl) statusEl.innerHTML = `<span class="text-red-400">Bridge 확인 실패:</span> ${escHtml(/** @type {Error} */ (e).message)}`;
-                if (compatStatusEl) compatStatusEl.innerHTML = `<span class="text-red-400">확인 실패:</span> ${escHtml(/** @type {Error} */ (e).message)}`;
-            }
-        }
-
-        const escAttr = (/** @type {any} */ s) => String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-        const renderInput = async (/** @type {string} */ id, /** @type {string} */ label, type = 'text', /** @type {any[]} */ opts = []) => {
+        const renderInput = async (id, label, type = 'text', opts = []) => {
             let html = `<div class="mb-4">`;
             if (type === 'checkbox') {
                 const val = await getBoolVal(id);
@@ -8016,7 +5547,7 @@ var CupcakeProviderManager = (function (exports) {
                 <span class="bg-blue-600 text-xs px-2 py-0.5 rounded-full" id="cpm-cm-count">0</span>
             </button>
             <div class="px-4 text-[11px] font-bold text-gray-500 uppercase tracking-wider mt-5 mb-2">Extensions</div>
-            <button class="w-full text-left px-5 py-2 text-sm hover:bg-gray-800 transition-colors focus:outline-none tab-btn text-yellow-300 font-bold bg-yellow-900/10" data-target="tab-plugins">🧩 Sub-Plugins${_spmAny._pendingUpdateNames.length > 0 ? ` <span style="background:#4f46e5;color:#e0e7ff;font-size:10px;padding:1px 6px;border-radius:9px;margin-left:4px;font-weight:bold;">${_spmAny._pendingUpdateNames.length}</span>` : ''}</button>
+            <button class="w-full text-left px-5 py-2 text-sm hover:bg-gray-800 transition-colors focus:outline-none tab-btn text-yellow-300 font-bold bg-yellow-900/10" data-target="tab-plugins">🧩 Sub-Plugins${SubPluginManager._pendingUpdateNames.length > 0 ? ` <span style="background:#4f46e5;color:#e0e7ff;font-size:10px;padding:1px 6px;border-radius:9px;margin-left:4px;font-weight:bold;">${SubPluginManager._pendingUpdateNames.length}</span>` : ''}</button>
             </div>
             <div class="p-4 border-t border-gray-800 space-y-2 shrink-0 bg-gray-900 z-10 relative" id="cpm-tab-footer">
                 <button id="cpm-export-btn" class="w-full bg-blue-600/90 hover:bg-blue-500 text-white font-semibold py-2 px-4 rounded transition-colors text-sm">⬇️ 설정 내보내기</button>
@@ -8030,14 +5561,14 @@ var CupcakeProviderManager = (function (exports) {
         content.className = 'flex-1 bg-[#121214] overflow-y-auto p-5 md:p-10';
 
         const providersList = [{ value: '', text: '🚫 미지정 (Main UI의 모델이 처리)' }];
-        for (const m of /** @type {any[]} */ (state.ALL_DEFINED_MODELS)) providersList.push({ value: m.uniqueId, text: `[${m.provider}] ${m.name}` });
+        for (const m of state.ALL_DEFINED_MODELS) providersList.push({ value: m.uniqueId, text: `[${m.provider}] ${m.name}` });
 
         const reasoningList = [{ value: 'none', text: 'None (없음)' }, { value: 'off', text: 'Off (끄기)' }, { value: 'low', text: 'Low (낮음)' }, { value: 'medium', text: 'Medium (중간)' }, { value: 'high', text: 'High (높음)' }, { value: 'xhigh', text: 'XHigh (매우 높음)' }];
         const verbosityList = [{ value: 'none', text: 'None (기본값)' }, { value: 'low', text: 'Low (낮음)' }, { value: 'medium', text: 'Medium (중간)' }, { value: 'high', text: 'High (높음)' }];
         const thinkingList = [{ value: 'off', text: 'Off (끄기)' }, { value: 'none', text: 'None (없음)' }, { value: 'MINIMAL', text: 'Minimal (최소)' }, { value: 'LOW', text: 'Low (낮음)' }, { value: 'MEDIUM', text: 'Medium (중간)' }, { value: 'HIGH', text: 'High (높음)' }];
         const effortList = [{ value: 'none', text: '사용 안함 (Off)' }, { value: 'unspecified', text: '미지정 (Unspecified)' }, { value: 'low', text: 'Low (낮음)' }, { value: 'medium', text: 'Medium (중간)' }, { value: 'high', text: 'High (높음)' }, { value: 'max', text: 'Max (최대)' }];
 
-        const renderAuxParams = async (/** @type {string} */ slot) => `
+        const renderAuxParams = async (slot) => `
         <div class="mt-8 pt-6 border-t border-gray-800 space-y-2">
             <h4 class="text-xl font-bold text-gray-300 mb-2">Generation Parameters (생성 설정)</h4>
             <p class="text-xs text-blue-400 font-semibold mb-4 border-l-2 border-blue-500 pl-2">
@@ -8116,31 +5647,12 @@ var CupcakeProviderManager = (function (exports) {
                 <div class="bg-gray-800/70 border border-emerald-900/50 rounded-lg p-4 mb-6">
                     <p class="text-xs text-emerald-300 mb-2 font-semibold">📡 실시간 스트리밍 지원</p>
                     <p class="text-xs text-gray-400 mb-2">활성화하면 API 응답을 ReadableStream으로 RisuAI에 직접 전달하여, RisuAI가 실시간으로 텍스트를 표시할 수 있습니다.</p>
-                    <p class="text-xs text-yellow-500">⚠️ 최신 RisuAI-main은 ReadableStream transferables를 지원하지만, 구버전 호스트에서는 자동으로 비활성화될 수 있습니다.</p>
+                    <p class="text-xs text-yellow-500">⚠️ RisuAI factory.ts의 guest bridge에서 ReadableStream이 collectTransferables에 포함되어야 합니다.</p>
                     <div id="cpm-stream-status" class="mt-3 text-xs font-mono px-3 py-2 rounded bg-gray-900 border border-gray-600">Bridge 상태: 확인 중...</div>
                 </div>
                 <div class="space-y-3">
                     ${await renderInput('cpm_streaming_enabled', '스트리밍 패스스루 활성화 (Enable Streaming Pass-Through)', 'checkbox')}
                     ${await renderInput('cpm_streaming_show_thinking', 'Anthropic Thinking 토큰 표시 (Show Thinking in Stream)', 'checkbox')}
-                </div>
-                <div class="mt-6 pt-4 border-t border-gray-700/50">
-                    <h5 class="text-sm font-bold text-amber-400 mb-3">📱 iPhone/Safari 호환성 모드 (Compatibility Mode)</h5>
-                    <div class="bg-gray-800/70 border border-amber-900/50 rounded-lg p-4 mb-4">
-                        <p class="text-xs text-amber-300 mb-2 font-semibold">🔧 호환성 모드란?</p>
-                        <p class="text-xs text-gray-400 mb-2">iPhone/Safari 등 ReadableStream 전달이 불안정한 환경에서 nativeFetch를 건너뛰고 risuFetch만 사용합니다.</p>
-                        <p class="text-xs text-gray-400 mb-2">또한 <strong class="text-amber-200">스트리밍을 자동으로 비활성화</strong>하여, 응답 본문을 못 받아 요청이 2회 발생하는 문제를 방지합니다.</p>
-                        <p class="text-xs text-yellow-500">⚠️ 호환성 모드는 수동으로만 활성화됩니다. iPhone/Safari 등에서 스트리밍이 안 되거나 요청이 중복 발생하면 수동으로 켜주세요.</p>
-                        <div id="cpm-compat-status" class="mt-3 text-xs font-mono px-3 py-2 rounded bg-gray-900 border border-gray-600">호환성 상태: 확인 중...</div>
-                    </div>
-                    <div class="space-y-3">
-                        ${await renderInput('cpm_compatibility_mode', '호환성 모드 활성화 (Compatibility Mode)', 'checkbox')}
-                        ${await renderInput('cpm_copilot_nodeless_mode', 'Node-less용 Copilot 실험 모드', 'select', [
-                            { value: 'off', text: '끄기 (기본 헤더 유지)' },
-                            { value: 'nodeless-1', text: '실험 1 — 토큰 교환 헤더만 축소' },
-                            { value: 'nodeless-2', text: '실험 2 — 토큰 + 실제 요청 헤더 축소' },
-                        ])}
-                    </div>
-                    <p class="text-xs text-cyan-400/90 mt-3">💡 Node-less 실험 모드는 Copilot 전용입니다. 사용자가 1번/2번을 바꿔가며 어떤 조합이 통하는지 직접 테스트할 수 있습니다.</p>
                 </div>
             </div>
             <div class="mt-10 pt-6 border-t border-gray-700">
@@ -8192,8 +5704,8 @@ var CupcakeProviderManager = (function (exports) {
                 <h3 class="text-3xl font-bold text-gray-400">Sub-Plugins Manager</h3>
                 <button id="cpm-check-updates-btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2 px-4 rounded transition-colors text-sm shadow">🔄 서브 플러그인 업데이트 확인</button>
             </div>
-            ${_spmAny._pendingUpdateNames.length > 0
-                ? `<div class="bg-indigo-900/40 border border-indigo-700 rounded-lg p-3 mb-4 flex items-center gap-2"><span class="text-indigo-300 text-sm font-semibold">🔔 ${_spmAny._pendingUpdateNames.length}개의 서브 플러그인 업데이트가 감지되었습니다.</span></div>`
+            ${SubPluginManager._pendingUpdateNames.length > 0
+                ? `<div class="bg-indigo-900/40 border border-indigo-700 rounded-lg p-3 mb-4 flex items-center gap-2"><span class="text-indigo-300 text-sm font-semibold">🔔 ${SubPluginManager._pendingUpdateNames.length}개의 서브 플러그인 업데이트가 감지되었습니다.</span></div>`
                 : ''}
             <p class="text-yellow-300 font-semibold mb-4 border-l-4 border-yellow-500 pl-4 py-1">Cupcake PM에 연동된 외부 확장 기능(Sub-Plugins)들을 통합 관리합니다.</p>
             <div id="cpm-update-status" class="hidden mb-4"></div>
@@ -8214,14 +5726,14 @@ var CupcakeProviderManager = (function (exports) {
         if (registeredProviderTabs.length > 0 && providerTabsSection) {
             let sidebarBtnsHtml = `<div class="px-4 text-[11px] font-bold text-gray-500 uppercase tracking-wider mt-5 mb-2">Providers</div>`;
             let contentHtml = '';
-            for (const tab of /** @type {any[]} */ (registeredProviderTabs)) {
+            for (const tab of registeredProviderTabs) {
                 sidebarBtnsHtml += `<button class="w-full text-left px-5 py-2 text-sm hover:bg-gray-800 transition-colors focus:outline-none tab-btn" data-target="${tab.id}">${tab.icon} ${tab.label}</button>`;
                 try {
                     const tabContent = await tab.renderContent(renderInput, { reasoningList, verbosityList, thinkingList });
                     contentHtml += `<div id="${tab.id}" class="cpm-tab-content hidden">${tabContent}</div>`;
                 } catch (err) {
                     console.error(`[CupcakePM] Failed to render settings tab: ${tab.id}`, err);
-                    contentHtml += `<div id="${tab.id}" class="cpm-tab-content hidden"><p class="text-red-400">Error rendering tab: ${/** @type {Error} */ (err).message}</p></div>`;
+                    contentHtml += `<div id="${tab.id}" class="cpm-tab-content hidden"><p class="text-red-400">Error rendering tab: ${err.message}</p></div>`;
                 }
             }
             providerTabsSection.innerHTML = sidebarBtnsHtml;
@@ -8236,7 +5748,6 @@ var CupcakeProviderManager = (function (exports) {
         const mobileIcon = document.getElementById('cpm-mobile-icon');
         if (mobileMenuBtn) {
             mobileMenuBtn.addEventListener('click', () => {
-                if (!mobileDropdown || !mobileIcon) return;
                 const isHidden = mobileDropdown.classList.contains('hidden');
                 if (isHidden) { mobileDropdown.classList.remove('hidden'); mobileDropdown.classList.add('flex'); mobileIcon.innerText = '▲'; }
                 else { mobileDropdown.classList.add('hidden'); mobileDropdown.classList.remove('flex'); mobileIcon.innerText = '▼'; }
@@ -8270,13 +5781,23 @@ var CupcakeProviderManager = (function (exports) {
             document.getElementById(targetId)?.classList.remove('hidden');
             if (targetId === 'tab-plugins') renderPluginsTab();
             if (window.innerWidth < 768 && mobileDropdown && !mobileDropdown.classList.contains('hidden')) {
-                mobileDropdown.classList.add('hidden'); mobileDropdown.classList.remove('flex'); if (mobileIcon) mobileIcon.innerText = '▼';
+                mobileDropdown.classList.add('hidden'); mobileDropdown.classList.remove('flex'); mobileIcon.innerText = '▼';
             }
         }));
         if (tabs[0] instanceof HTMLElement) tabs[0].click();
 
-        // ── Stream / compatibility status check ──
-        await refreshStatusIndicators();
+        // ── Stream capability check ──
+        (async () => {
+            const statusEl = document.getElementById('cpm-stream-status');
+            if (!statusEl) return;
+            try {
+                const capable = await checkStreamCapability();
+                statusEl.innerHTML = capable
+                    ? '<span class="text-emerald-400">✓ Bridge 지원됨</span> — ReadableStream 전송 가능.'
+                    : '<span class="text-yellow-400">✗ Bridge 미지원</span> — 자동으로 문자열 수집 모드로 폴백됩니다.';
+                statusEl.classList.replace('border-gray-600', capable ? 'border-emerald-700' : 'border-yellow-800');
+            } catch (e) { statusEl.innerHTML = `<span class="text-red-400">Bridge 확인 실패:</span> ${escHtml(e.message)}`; }
+        })();
 
         // ── Custom Models Manager ──
         initCustomModelsManager();
@@ -8291,13 +5812,12 @@ var CupcakeProviderManager = (function (exports) {
         initExportImport(setVal, openCpmSettings);
 
         // ── Close button ──
-        document.getElementById('cpm-close-btn')?.addEventListener('click', () => {
+        document.getElementById('cpm-close-btn').addEventListener('click', () => {
             document.body.innerHTML = '';
             Risu.hideContainer();
         });
     }
 
-    // @ts-check
     /**
      * init.js — Boot sequence for Cupcake Provider Manager.
      *
@@ -8329,7 +5849,7 @@ var CupcakeProviderManager = (function (exports) {
             _normalizeTokenUsage, _showTokenUsageToast: showTokenUsageToast, _needsCopilotResponsesAPI: needsCopilotResponsesAPI,
         };
         for (const [k, v] of Object.entries(fns)) {
-            /** @type {any} */ (window)[k] = v;
+            window[k] = v;
         }
 
         const objs = {
@@ -8338,18 +5858,18 @@ var CupcakeProviderManager = (function (exports) {
             CPM_SLOT_LIST, AwsV4Signer, ThoughtSignatureCache, _tokenUsageStore,
         };
         for (const [k, v] of Object.entries(objs)) {
-            /** @type {any} */ (window)[k] = v;
+            window[k] = v;
         }
 
         // Mutable state — define getters/setters that proxy to the state object
         const lets = {
-            ALL_DEFINED_MODELS: [() => state.ALL_DEFINED_MODELS, (/** @type {any} */ v) => { state.ALL_DEFINED_MODELS = v; }],
-            CUSTOM_MODELS_CACHE: [() => state.CUSTOM_MODELS_CACHE, (/** @type {any} */ v) => { state.CUSTOM_MODELS_CACHE = v; }],
-            _currentExecutingPluginId: [() => state._currentExecutingPluginId, (/** @type {any} */ v) => { state._currentExecutingPluginId = v; }],
-            vertexTokenCache: [() => state.vertexTokenCache, (/** @type {any} */ v) => { state.vertexTokenCache = v; }],
+            ALL_DEFINED_MODELS: [() => state.ALL_DEFINED_MODELS, v => { state.ALL_DEFINED_MODELS = v; }],
+            CUSTOM_MODELS_CACHE: [() => state.CUSTOM_MODELS_CACHE, v => { state.CUSTOM_MODELS_CACHE = v; }],
+            _currentExecutingPluginId: [() => state._currentExecutingPluginId, v => { state._currentExecutingPluginId = v; }],
+            vertexTokenCache: [() => state.vertexTokenCache, v => { state.vertexTokenCache = v; }],
         };
         for (const [k, [g, s]] of Object.entries(lets)) {
-            Object.defineProperty(window, k, { get: /** @type {any} */ (g), set: /** @type {any} */ (s), configurable: true });
+            Object.defineProperty(window, k, { get: g, set: s, configurable: true });
         }
 
         cpmWindow.CPM_VERSION = CPM_VERSION;
@@ -8365,112 +5885,49 @@ var CupcakeProviderManager = (function (exports) {
     // Inject _exposeScopeToWindow into SubPluginManager via DI (avoids circular deps)
     setExposeScopeFunction(_exposeScopeToWindow);
 
-    // Wire stream-builders request logger so streaming responses are recorded
-    setApiRequestLogger(updateApiRequest);
-
     // ─── Setup window.CupcakePM public API ───
     setupCupcakeAPI();
 
     // ─── Main Init IIFE ───
     (async () => {
-        /** @type {string} Boot phase tracker for diagnostics */
-        let _bootPhase = 'pre-init';
-        /** @type {string[]} Completed phases log */
-        const _completedPhases = [];
-        /** @type {string[]} Failed phases log */
-        const _failedPhases = [];
-
-        const _phaseStart = (/** @type {string} */ phase) => { _bootPhase = phase; };
-        const _phaseDone = (/** @type {string} */ phase) => { _completedPhases.push(phase); };
-        const _phaseFail = (/** @type {string} */ phase, /** @type {any} */ err) => {
-            _failedPhases.push(`${phase}: ${err?.message || err}`);
-            console.error(`[CPM] Phase '${phase}' failed (continuing):`, err?.message || err);
-        };
-
-        // ══════════════════════════════════════════════════════════════════
-        //  CRITICAL FIRST: Register settings panel IMMEDIATELY.
-        //  This MUST happen before any SubPluginManager, SettingsBackup,
-        //  streaming checks, model registration, or anything else.
-        //  If later init steps fail, the "🧁" menu entry still exists
-        //  and users can still open CPM settings to diagnose/reconfigure.
-        // ══════════════════════════════════════════════════════════════════
-        let _settingsRegistered = false;
         try {
-            _phaseStart('register-settings');
-            await Risu.registerSetting(
-                `v${CPM_VERSION}`,
-                openCpmSettings,
-                '🧁',
-                'html',
-            );
-            _settingsRegistered = true;
-            _phaseDone('register-settings');
-            console.log(`[CPM] ✓ Settings panel registered (v${CPM_VERSION})`);
-        } catch (e) {
-            _phaseFail('register-settings', e);
-        }
+            // Load & Execute Sub-Plugins FIRST (they register providers via CupcakePM.registerProvider)
+            await SubPluginManager.loadRegistry();
+            await SubPluginManager.executeEnabled();
 
-        try {
-            // ── Phase: Load Sub-Plugin Registry ──
-            _phaseStart('subplugin-registry');
-            try {
-                await SubPluginManager.loadRegistry();
-                _phaseDone('subplugin-registry');
-            } catch (e) { _phaseFail('subplugin-registry', e); }
+            // Restore settings from pluginStorage backup if @arg values were wiped
+            await SettingsBackup.load();
+            const restoredCount = await SettingsBackup.restoreIfEmpty();
+            if (restoredCount > 0) {
+                console.log(`[CPM] Auto-restored ${restoredCount} settings from persistent backup.`);
+            }
 
-            // ── Phase: Execute Sub-Plugins ──
-            _phaseStart('subplugin-execute');
-            try {
-                await SubPluginManager.executeEnabled();
-                _phaseDone('subplugin-execute');
-            } catch (e) { _phaseFail('subplugin-execute', e); }
-
-            // ── Phase: Restore Settings Backup ──
-            _phaseStart('settings-restore');
-            try {
-                await SettingsBackup.load();
-                const restoredCount = await SettingsBackup.restoreIfEmpty();
-                if (restoredCount > 0) {
-                    console.log(`[CPM] Auto-restored ${restoredCount} settings from persistent backup.`);
-                }
-                _phaseDone('settings-restore');
-            } catch (e) { _phaseFail('settings-restore', e); }
-
-            // ── Phase: Streaming Bridge Capability Check ──
-            _phaseStart('streaming-check');
+            // ── Streaming Bridge Capability Check ──
             try {
                 const streamCapable = await checkStreamCapability();
                 const streamEnabled = await safeGetBoolArg('cpm_streaming_enabled', false);
-                const compatMode = await safeGetBoolArg('cpm_compatibility_mode', false);
-
-                if (compatMode) {
-                    console.log('[Cupcake PM] 🔧 Compatibility mode: ENABLED (nativeFetch will be skipped + streaming forced OFF).');
-                } else if (!streamCapable) {
-                    console.log('[Cupcake PM] 🔧 Compatibility mode: AUTO-ACTIVE (bridge cannot transfer ReadableStream — nativeFetch skipped + streaming forced OFF).');
-                }
-
                 if (streamEnabled) {
-                    if (compatMode || !streamCapable) {
-                        console.warn('[Cupcake PM] 🔄 Streaming: enabled in settings but OVERRIDDEN by compatibility mode — non-streaming will be used to prevent duplicate requests.');
-                    } else if (streamCapable) {
+                    if (streamCapable) {
                         console.log('[Cupcake PM] 🔄 Streaming: enabled AND bridge capable — ReadableStream pass-through active.');
+                    } else {
+                        console.warn('[Cupcake PM] 🔄 Streaming: enabled but bridge NOT capable — will fall back to string collection.');
                     }
                 } else {
                     console.log(`[Cupcake PM] 🔄 Streaming: disabled (bridge ${streamCapable ? 'capable' : 'not capable'}). Enable in settings to activate.`);
                 }
-                _phaseDone('streaming-check');
-            } catch (e) { _phaseFail('streaming-check', e); }
+            } catch (e) {
+                console.warn('[Cupcake PM] Streaming capability check failed:', e.message);
+            }
 
-            // ── Phase: Dynamic Model Fetching ──
-            _phaseStart('dynamic-models');
-            for (const { name, fetchDynamicModels } of /** @type {any[]} */ (pendingDynamicFetchers)) {
+            // ── Dynamic Model Fetching ──
+            for (const { name, fetchDynamicModels } of pendingDynamicFetchers) {
                 try {
                     const enabled = await isDynamicFetchEnabled(name);
                     if (!enabled) { console.log(`[CupcakePM] Dynamic fetch disabled for ${name}, using fallback.`); continue; }
                     console.log(`[CupcakePM] Fetching dynamic models for ${name}...`);
                     const dynamicModels = await fetchDynamicModels();
                     if (dynamicModels && Array.isArray(dynamicModels) && dynamicModels.length > 0) {
-                        state.ALL_DEFINED_MODELS = state.ALL_DEFINED_MODELS.filter((/** @type {any} */ m) => m.provider !== name);
+                        state.ALL_DEFINED_MODELS = state.ALL_DEFINED_MODELS.filter(m => m.provider !== name);
                         for (const m of dynamicModels) {
                             state.ALL_DEFINED_MODELS.push({ ...m, provider: name });
                         }
@@ -8479,83 +5936,77 @@ var CupcakeProviderManager = (function (exports) {
                         console.log(`[CupcakePM] No dynamic models for ${name}, using fallback.`);
                     }
                 } catch (e) {
-                    console.warn(`[CupcakePM] Dynamic fetch failed for ${name}:`, /** @type {Error} */ (e).message || e);
+                    console.warn(`[CupcakePM] Dynamic fetch failed for ${name}:`, e.message || e);
                 }
             }
-            _phaseDone('dynamic-models');
 
-            // ── Phase: Custom Models Migration ──
-            _phaseStart('custom-models');
+            // ── Custom models migration ──
+            const customModelsJson = await safeGetArg('cpm_custom_models', '[]');
             try {
-                const customModelsJson = await safeGetArg('cpm_custom_models', '[]');
-                try {
-                    state.CUSTOM_MODELS_CACHE = parseCustomModelsValue(customModelsJson).map(model => normalizeCustomModel(model));
-                    if (!Array.isArray(state.CUSTOM_MODELS_CACHE)) state.CUSTOM_MODELS_CACHE = [];
-                } catch (_e) {
-                    state.CUSTOM_MODELS_CACHE = [];
-                }
+                state.CUSTOM_MODELS_CACHE = JSON.parse(customModelsJson);
+                if (!Array.isArray(state.CUSTOM_MODELS_CACHE)) state.CUSTOM_MODELS_CACHE = [];
+            } catch (_e) {
+                state.CUSTOM_MODELS_CACHE = [];
+            }
 
-                // Backward Compatibility: Auto-Migrate from C1-C9 to JSON
-                if (state.CUSTOM_MODELS_CACHE.length === 0) {
-                    let migrated = false;
-                    for (let i = 1; i <= 9; i++) {
-                        const legacyUrl = await safeGetArg(`cpm_c${i}_url`);
-                        const legacyModel = await safeGetArg(`cpm_c${i}_model`);
-                        const legacyKey = await safeGetArg(`cpm_c${i}_key`);
-                        if (!legacyUrl && !legacyModel && !legacyKey) continue;
-                        state.CUSTOM_MODELS_CACHE.push({
-                            uniqueId: `custom${i}`,
-                            name: await safeGetArg(`cpm_c${i}_name`) || `Custom ${i}`,
-                            model: legacyModel || '',
-                            url: legacyUrl || '',
-                            key: legacyKey || '',
-                            format: await safeGetArg(`cpm_c${i}_format`) || 'openai',
-                            sysfirst: await safeGetBoolArg(`cpm_c${i}_sysfirst`),
-                            altrole: await safeGetBoolArg(`cpm_c${i}_altrole`),
-                            mustuser: await safeGetBoolArg(`cpm_c${i}_mustuser`),
-                            maxout: await safeGetBoolArg(`cpm_c${i}_maxout`),
-                            mergesys: await safeGetBoolArg(`cpm_c${i}_mergesys`),
-                            decoupled: await safeGetBoolArg(`cpm_c${i}_decoupled`),
-                            thought: await safeGetBoolArg(`cpm_c${i}_thought`),
-                            reasoning: await safeGetArg(`cpm_c${i}_reasoning`) || 'none',
-                            verbosity: await safeGetArg(`cpm_c${i}_verbosity`) || 'none',
-                            thinking: await safeGetArg(`cpm_c${i}_thinking`) || 'none',
-                            responsesMode: 'auto',
-                            tok: await safeGetArg(`cpm_c${i}_tok`) || 'o200k_base',
-                            customParams: '',
-                        });
-                        migrated = true;
-                    }
-                    if (migrated) {
-                        Risu.setArgument('cpm_custom_models', JSON.stringify(state.CUSTOM_MODELS_CACHE));
-                        SettingsBackup.updateKey('cpm_custom_models', JSON.stringify(state.CUSTOM_MODELS_CACHE));
-                    }
-                }
-
-                // Register custom models into ALL_DEFINED_MODELS
-                state.CUSTOM_MODELS_CACHE.forEach((/** @type {any} */ m) => {
-                    state.ALL_DEFINED_MODELS.push({
-                        uniqueId: m.uniqueId,
-                        id: m.model,
-                        name: m.name || m.uniqueId,
-                        provider: 'Custom',
+            // Backward Compatibility: Auto-Migrate from C1-C9 to JSON
+            if (state.CUSTOM_MODELS_CACHE.length === 0) {
+                let migrated = false;
+                for (let i = 1; i <= 9; i++) {
+                    const legacyUrl = await safeGetArg(`cpm_c${i}_url`);
+                    const legacyModel = await safeGetArg(`cpm_c${i}_model`);
+                    const legacyKey = await safeGetArg(`cpm_c${i}_key`);
+                    if (!legacyUrl && !legacyModel && !legacyKey) continue;
+                    state.CUSTOM_MODELS_CACHE.push({
+                        uniqueId: `custom${i}`,
+                        name: await safeGetArg(`cpm_c${i}_name`) || `Custom ${i}`,
+                        model: legacyModel || '',
+                        url: legacyUrl || '',
+                        key: legacyKey || '',
+                        format: await safeGetArg(`cpm_c${i}_format`) || 'openai',
+                        sysfirst: await safeGetBoolArg(`cpm_c${i}_sysfirst`),
+                        altrole: await safeGetBoolArg(`cpm_c${i}_altrole`),
+                        mustuser: await safeGetBoolArg(`cpm_c${i}_mustuser`),
+                        maxout: await safeGetBoolArg(`cpm_c${i}_maxout`),
+                        mergesys: await safeGetBoolArg(`cpm_c${i}_mergesys`),
+                        decoupled: await safeGetBoolArg(`cpm_c${i}_decoupled`),
+                        thought: await safeGetBoolArg(`cpm_c${i}_thought`),
+                        reasoning: await safeGetArg(`cpm_c${i}_reasoning`) || 'none',
+                        verbosity: await safeGetArg(`cpm_c${i}_verbosity`) || 'none',
+                        thinking: await safeGetArg(`cpm_c${i}_thinking`) || 'none',
+                        responsesMode: 'auto',
+                        tok: await safeGetArg(`cpm_c${i}_tok`) || 'o200k_base',
+                        customParams: '',
                     });
-                });
+                    migrated = true;
+                }
+                if (migrated) {
+                    Risu.setArgument('cpm_custom_models', JSON.stringify(state.CUSTOM_MODELS_CACHE));
+                    SettingsBackup.updateKey('cpm_custom_models', JSON.stringify(state.CUSTOM_MODELS_CACHE));
+                }
+            }
 
-                // Sort alphabetically by provider, then by name
-                state.ALL_DEFINED_MODELS.sort((/** @type {any} */ a, /** @type {any} */ b) => {
-                    const providerCompare = a.provider.localeCompare(b.provider);
-                    if (providerCompare !== 0) return providerCompare;
-                    return a.name.localeCompare(b.name);
+            // Register custom models into ALL_DEFINED_MODELS
+            state.CUSTOM_MODELS_CACHE.forEach(m => {
+                state.ALL_DEFINED_MODELS.push({
+                    uniqueId: m.uniqueId,
+                    id: m.model,
+                    name: m.name || m.uniqueId,
+                    provider: 'Custom',
                 });
-                _phaseDone('custom-models');
-            } catch (e) { _phaseFail('custom-models', e); }
+            });
 
-            // ── Phase: Model Registration with RisuAI ──
-            _phaseStart('model-registration');
+            // Sort alphabetically by provider, then by name
+            state.ALL_DEFINED_MODELS.sort((a, b) => {
+                const providerCompare = a.provider.localeCompare(b.provider);
+                if (providerCompare !== 0) return providerCompare;
+                return a.name.localeCompare(b.name);
+            });
+
+            // ── Model Registration with RisuAI ──
             let _modelRegCount = 0;
             try {
-                for (const modelDef of /** @type {any[]} */ (state.ALL_DEFINED_MODELS)) {
+                for (const modelDef of state.ALL_DEFINED_MODELS) {
                     const pLabel = modelDef.provider;
                     const mLabel = modelDef.name;
 
@@ -8579,164 +6030,111 @@ var CupcakeProviderManager = (function (exports) {
                         modelFlags.push(14);   // DeveloperRole
                     }
 
-                    await Risu.addProvider(`🧁 [${pLabel}] ${mLabel}`, async (/** @type {any} */ args, /** @type {any} */ abortSignal) => {
+                    await Risu.addProvider(`🧁 [${pLabel}] ${mLabel}`, async (args, abortSignal) => {
                         try {
                             return await handleRequest(args, modelDef, abortSignal);
                         } catch (err) {
-                            return { success: false, content: `[Cupcake SDK Fallback Crash] ${/** @type {Error} */ (err).message}` };
+                            return { success: false, content: `[Cupcake SDK Fallback Crash] ${err.message}` };
                         }
                     }, {
                         model: { flags: modelFlags },
                     });
                     _modelRegCount++;
                 }
-                _phaseDone('model-registration');
             } catch (regErr) {
-                _phaseFail('model-registration', regErr);
-                console.error(`[CPM] Model registration stopped at ${_modelRegCount}/${state.ALL_DEFINED_MODELS.length}`);
+                console.error(`[CPM] Model registration error after ${_modelRegCount}/${state.ALL_DEFINED_MODELS.length} models (continuing to register settings):`, regErr);
             }
 
-            // ── Phase: Silent Update Check (deferred 5s) ──
-            // First, do a one-shot retry only if the previous boot left a pending
-            // main-plugin update marker. This avoids repeated polling / heavy work.
-            // If no pending marker exists, run the normal manifest → JS fallback checks.
-            setTimeout(async () => {
-                let retryHandled = false;
-                try {
-                    retryHandled = (typeof /** @type {any} */ (SubPluginManager).retryPendingMainPluginUpdateOnBoot === 'function')
-                        ? !!(await /** @type {any} */ (SubPluginManager).retryPendingMainPluginUpdateOnBoot())
-                        : false;
-                } catch (_) { }
-                // Sub-plugin version checks always run (checkVersionsQuiet has its own
-                // 10-min cooldown).  Only the main-plugin JS-fallback is skipped when
-                // the boot retry already handled the main update.
-                try { await /** @type {any} */ (SubPluginManager).checkVersionsQuiet(); } catch (_) { }
-                if (!retryHandled) {
-                    try { await /** @type {any} */ (SubPluginManager).checkMainPluginVersionQuiet(); } catch (_) { }
-                }
+            // ── Silent Update Check (5s delay) ──
+            setTimeout(() => {
+                SubPluginManager.checkVersionsQuiet().catch(() => {});
+                SubPluginManager.checkMainPluginVersionQuiet().catch(() => {});
             }, 5000);
 
-            // ── Phase: Keyboard Shortcut + Touch Gesture ──
-            _phaseStart('hotkey-registration');
-            try {
-                const cpmWindow = /** @type {CpmWindow} */ (window);
-                if (!cpmWindow.cpmShortcutRegistered) {
-                    cpmWindow.cpmShortcutRegistered = true;
+            // ── Register Settings UI ──
+            await Risu.registerSetting(
+                `v${CPM_VERSION}`,
+                openCpmSettings,
+                '🧁',
+                'html',
+            );
+
+            // ── Keyboard shortcut + Touch gesture ──
+            const cpmWindow = /** @type {CpmWindow} */ (window);
+            if (!cpmWindow.cpmShortcutRegistered) {
+                cpmWindow.cpmShortcutRegistered = true;
+                try {
                     const rootDoc = await Risu.getRootDocument();
 
                     if (!rootDoc) {
                         console.log('[CPM] Hotkey registration skipped: main DOM permission not granted.');
-                    } else {
-                        // ─ Remove previously registered handlers to prevent double-firing on re-init ─
-                        if (/** @type {any} */ (cpmWindow)._cpmKeydownHandler) {
-                            try { await rootDoc.removeEventListener('keydown', /** @type {any} */ (cpmWindow)._cpmKeydownHandler); } catch (_) {}
-                        }
-                        if (/** @type {any} */ (cpmWindow)._cpmAddPointerHandler) {
-                            try { await rootDoc.removeEventListener('pointerdown', /** @type {any} */ (cpmWindow)._cpmAddPointerHandler); } catch (_) {}
-                            try { await rootDoc.removeEventListener('pointerup', /** @type {any} */ (cpmWindow)._cpmRemovePointerHandler); } catch (_) {}
-                            try { await rootDoc.removeEventListener('pointercancel', /** @type {any} */ (cpmWindow)._cpmRemovePointerHandler); } catch (_) {}
-                        }
-
-                        const _keydownHandler = (/** @type {any} */ e) => {
-                            if (e.ctrlKey && e.shiftKey && e.altKey && (e.key === 'p' || e.key === 'P')) {
-                                openCpmSettings();
-                            }
-                        };
-                        await rootDoc.addEventListener('keydown', _keydownHandler);
-
-                        // 4-finger touch gesture for mobile
-                        let activePointersCount = 0;
-                        /** @type {ReturnType<typeof setTimeout> | null} */
-                        let activePointersTimer = null;
-
-                        const addPointer = () => {
-                            activePointersCount++;
-                            if (activePointersCount >= 4) {
-                                openCpmSettings();
-                                activePointersCount = 0;
-                            }
-                            if (activePointersTimer) clearTimeout(activePointersTimer);
-                            activePointersTimer = setTimeout(() => { activePointersCount = 0; }, 500);
-                        };
-                        const removePointer = () => { activePointersCount = Math.max(0, activePointersCount - 1); };
-
-                        await rootDoc.addEventListener('pointerdown', addPointer);
-                        await rootDoc.addEventListener('pointerup', removePointer);
-                        await rootDoc.addEventListener('pointercancel', removePointer);
-
-                        // Store handler references for cleanup on re-init
-                        /** @type {any} */ (cpmWindow)._cpmKeydownHandler = _keydownHandler;
-                        /** @type {any} */ (cpmWindow)._cpmAddPointerHandler = addPointer;
-                        /** @type {any} */ (cpmWindow)._cpmRemovePointerHandler = removePointer;
+                        return;
                     }
+
+                    await rootDoc.addEventListener('keydown', (e) => {
+                        if (e.ctrlKey && e.shiftKey && e.altKey && (e.key === 'p' || e.key === 'P')) {
+                            openCpmSettings();
+                        }
+                    });
+
+                    // 4-finger touch gesture for mobile
+                    let activePointersCount = 0;
+                    let activePointersTimer = null;
+
+                    const addPointer = () => {
+                        activePointersCount++;
+                        if (activePointersCount >= 4) {
+                            openCpmSettings();
+                            activePointersCount = 0;
+                        }
+                        if (activePointersTimer) clearTimeout(activePointersTimer);
+                        activePointersTimer = setTimeout(() => { activePointersCount = 0; }, 500);
+                    };
+                    const removePointer = () => { activePointersCount = Math.max(0, activePointersCount - 1); };
+
+                    await rootDoc.addEventListener('pointerdown', addPointer);
+                    await rootDoc.addEventListener('pointerup', removePointer);
+                    await rootDoc.addEventListener('pointercancel', removePointer);
+
+                } catch (err) {
+                    console.error('[CPM] Hotkey registration failed:', err);
                 }
-                _phaseDone('hotkey-registration');
-            } catch (err) {
-                _phaseFail('hotkey-registration', err);
             }
-
-            // ── Boot Summary ──
-            if (_failedPhases.length > 0) {
-                console.warn(`[CPM] Boot completed with ${_failedPhases.length} warning(s):`, _failedPhases);
-            }
-            console.log(`[CPM] ✓ Boot complete — ${_completedPhases.length} phases OK, ${_failedPhases.length} failed, ${_modelRegCount} models registered.`);
-
-            // Record boot health for diagnostics
-            try {
-                await Risu.pluginStorage.setItem('cpm_last_boot_status', JSON.stringify({
-                    ts: Date.now(), version: CPM_VERSION,
-                    ok: _completedPhases, fail: _failedPhases,
-                    models: _modelRegCount, settingsOk: _settingsRegistered,
-                }));
-            } catch (_) { /* pluginStorage may not be available */ }
 
         } catch (e) {
-            const _errAny = /** @type {any} */ (e);
-            console.error(`[CPM] Unexpected init fail at phase '${_bootPhase}':`, e);
-            console.error(`[CPM] Completed phases before crash:`, _completedPhases);
-
-            // FALLBACK: If settings weren't registered earlier (e.g. RPC bridge failure),
-            // try one more time with an error diagnostic panel.
-            if (!_settingsRegistered) {
-                try {
-                    await Risu.registerSetting(
-                        `⚠️ CPM v${CPM_VERSION} (Error)`,
-                        async () => {
-                            Risu.showContainer('fullscreen');
-                            document.body.innerHTML = `<div style="background:#1a1a2e;color:#fff;padding:40px;font-family:sans-serif;min-height:100vh;">
-                            <h1 style="color:#ff6b6b;">🧁 Cupcake PM — Initialization Error</h1>
-                            <p style="color:#ccc;margin:20px 0;">The plugin failed to initialize properly.</p>
-                            <p style="color:#aaa;">Failed at phase: <code>${_bootPhase}</code></p>
-                            <p style="color:#aaa;">Completed: ${_completedPhases.join(', ') || 'none'}</p>
-                            <pre style="background:#0d1117;color:#ff7b72;padding:16px;border-radius:8px;overflow:auto;max-height:300px;font-size:13px;">${String(_errAny && _errAny.stack ? _errAny.stack : _errAny).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>
-                            <p style="color:#aaa;margin-top:20px;">Try: reload (Ctrl+Shift+R) or re-import the plugin.</p>
-                            <button onclick="document.body.innerHTML='';try{(window.risuai||window.Risuai).hideContainer();}catch(_){}"
-                                style="margin-top:20px;padding:10px 24px;background:#e74c3c;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;">Close</button>
-                        </div>`;
-                        },
-                        '🧁',
-                        'html',
-                    );
-                } catch (_) { /* Last resort — settings were already registered above in most cases */ }
-            }
+            console.error('[CPM] init fail', e);
+            // CRITICAL FALLBACK: Ensure settings panel is still accessible
+            try {
+                await Risu.registerSetting(
+                    `⚠️ CPM v${CPM_VERSION} (Error)`,
+                    async () => {
+                        Risu.showContainer('fullscreen');
+                        document.body.innerHTML = `<div style="background:#1a1a2e;color:#fff;padding:40px;font-family:sans-serif;min-height:100vh;">
+                        <h1 style="color:#ff6b6b;">🧁 Cupcake PM — Initialization Error</h1>
+                        <p style="color:#ccc;margin:20px 0;">The plugin failed to initialize properly.</p>
+                        <pre style="background:#0d1117;color:#ff7b72;padding:16px;border-radius:8px;overflow:auto;max-height:300px;font-size:13px;">${String(e && e.stack ? e.stack : e).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>
+                        <p style="color:#aaa;margin-top:20px;">Try: reload (Ctrl+Shift+R) or re-import the plugin.</p>
+                        <button onclick="document.body.innerHTML='';Risu.hideContainer();"
+                            style="margin-top:20px;padding:10px 24px;background:#e74c3c;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;">Close</button>
+                    </div>`;
+                    },
+                    '🧁',
+                    'html',
+                );
+            } catch (_) { /* Last resort */ }
         }
     })();
 
     exports.AwsV4Signer = AwsV4Signer;
-    exports.CPM_BASE_URL = CPM_BASE_URL;
     exports.CPM_SLOT_LIST = CPM_SLOT_LIST;
     exports.CPM_VERSION = CPM_VERSION;
     exports.GEMINI_BLOCK_REASONS = GEMINI_BLOCK_REASONS;
     exports.KeyPool = KeyPool;
-    exports.MAIN_UPDATE_URL = MAIN_UPDATE_URL;
     exports.Risu = Risu;
     exports.SLOT_HEURISTICS = SLOT_HEURISTICS;
     exports.SettingsBackup = SettingsBackup;
     exports.SubPluginManager = SubPluginManager;
     exports.ThoughtSignatureCache = ThoughtSignatureCache;
-    exports.UPDATE_BUNDLE_URL = UPDATE_BUNDLE_URL;
-    exports.VERSIONS_URL = VERSIONS_URL;
-    exports._computeSHA256 = _computeSHA256;
     exports._executeViaScriptTag = _executeViaScriptTag;
     exports._extractNonce = _extractNonce;
     exports._normalizeTokenUsage = _normalizeTokenUsage;
@@ -8747,7 +6145,6 @@ var CupcakeProviderManager = (function (exports) {
     exports._takeTokenUsage = _takeTokenUsage;
     exports._tokenUsageKey = _tokenUsageKey;
     exports._tokenUsageStore = _tokenUsageStore;
-    exports.autoUpdaterMethods = autoUpdaterMethods;
     exports.buf2hex = buf2hex;
     exports.buildGeminiThinkingConfig = buildGeminiThinkingConfig;
     exports.checkStreamCapability = checkStreamCapability;
@@ -8819,7 +6216,6 @@ var CupcakeProviderManager = (function (exports) {
     exports.stripThoughtDisplayContent = stripThoughtDisplayContent;
     exports.supportsOpenAIReasoningEffort = supportsOpenAIReasoningEffort;
     exports.updateApiRequest = updateApiRequest;
-    exports.updateToastMethods = updateToastMethods;
     exports.validateGeminiParams = validateGeminiParams;
 
     return exports;

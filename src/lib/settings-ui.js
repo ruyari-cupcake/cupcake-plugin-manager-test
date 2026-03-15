@@ -124,7 +124,7 @@ export async function openCpmSettings() {
                     compatStatusEl.innerHTML = `<span class="text-amber-400">⚡ 수동 활성화됨</span> — nativeFetch 건너뛰기 + 스트리밍 자동 비활성화.${nodelessMode !== 'off' ? ` <span class="text-cyan-300">Node-less 실험 모드: ${escHtml(nodelessMode)}</span>` : ''}`;
                     compatStatusEl.classList.add('border-amber-700');
                 } else if (!capable) {
-                    compatStatusEl.innerHTML = `<span class="text-amber-400">⚡ 자동 활성화됨</span> — Bridge가 ReadableStream을 지원하지 않아 자동 적용 (iPhone/Safari 등).${nodelessMode !== 'off' ? ` <span class="text-cyan-300">Node-less 실험 모드: ${escHtml(nodelessMode)}</span>` : ''}`;
+                    compatStatusEl.innerHTML = `<span class="text-yellow-400">⚠ Bridge 미지원</span> — ReadableStream 전달이 불가능한 환경입니다. 문제가 있으면 호환성 모드를 수동으로 켜주세요.${nodelessMode !== 'off' ? ` <span class="text-cyan-300">Node-less 실험 모드: ${escHtml(nodelessMode)}</span>` : ''}`;
                     compatStatusEl.classList.add('border-amber-700');
                 } else {
                     compatStatusEl.innerHTML = nodelessMode === 'off'
@@ -318,11 +318,11 @@ export async function openCpmSettings() {
                         <p class="text-xs text-amber-300 mb-2 font-semibold">🔧 호환성 모드란?</p>
                         <p class="text-xs text-gray-400 mb-2">iPhone/Safari 등 ReadableStream 전달이 불안정한 환경에서 nativeFetch를 건너뛰고 risuFetch만 사용합니다.</p>
                         <p class="text-xs text-gray-400 mb-2">또한 <strong class="text-amber-200">스트리밍을 자동으로 비활성화</strong>하여, 응답 본문을 못 받아 요청이 2회 발생하는 문제를 방지합니다.</p>
-                        <p class="text-xs text-yellow-500">⚠️ Bridge가 ReadableStream을 지원하지 않으면 자동으로 활성화됩니다. 수동으로 켜면 항상 적용됩니다.</p>
+                        <p class="text-xs text-yellow-500">⚠️ 호환성 모드는 수동으로만 활성화됩니다. iPhone/Safari 등에서 스트리밍이 안 되거나 요청이 중복 발생하면 수동으로 켜주세요.</p>
                         <div id="cpm-compat-status" class="mt-3 text-xs font-mono px-3 py-2 rounded bg-gray-900 border border-gray-600">호환성 상태: 확인 중...</div>
                     </div>
                     <div class="space-y-3">
-                        ${await renderInput('cpm_compatibility_mode', '호환성 모드 강제 활성화 (Force Compatibility Mode)', 'checkbox')}
+                        ${await renderInput('cpm_compatibility_mode', '호환성 모드 활성화 (Compatibility Mode)', 'checkbox')}
                         ${await renderInput('cpm_copilot_nodeless_mode', 'Node-less용 Copilot 실험 모드', 'select', [
                             { value: 'off', text: '끄기 (기본 헤더 유지)' },
                             { value: 'nodeless-1', text: '실험 1 — 토큰 교환 헤더만 축소' },

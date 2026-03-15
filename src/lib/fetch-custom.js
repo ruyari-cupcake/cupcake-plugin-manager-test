@@ -28,7 +28,6 @@ import {
     parseOpenAINonStreamingResponse, parseResponsesAPINonStreamingResponse,
 } from './response-parsers.js';
 import { smartNativeFetch } from './smart-fetch.js';
-import { checkStreamCapability } from './stream-utils.js';
 import { ensureCopilotApiToken } from './copilot-token.js';
 import {
     getCopilotStaticHeaders,
@@ -56,7 +55,8 @@ function _parseRetryAfterMs(headers) {
 
 /** @param {number} status */
 function _isRetriableHttpStatus(status) {
-    return status === 408 || status === 429 || status >= 500;
+    // 524 = Cloudflare timeout — retrying immediately won't help, skip it
+    return status === 408 || status === 429 || (status >= 500 && status !== 524);
 }
 
 /**
@@ -485,14 +485,15 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
         // ── Streaming ──
         const streamingEnabled = await safeGetBoolArg('cpm_streaming_enabled', false);
         const perModelStreamingEnabled = (config.streaming === true) || (config.streaming !== false && !config.decoupled);
-        const _bridgeCapable = await checkStreamCapability();
-        const _compatManual = await safeGetBoolArg('cpm_compatibility_mode', false);
-        const _compatActive = _compatManual || !_bridgeCapable;
-        const useStreaming = streamingEnabled && perModelStreamingEnabled && !_compatActive;
-        if (streamingEnabled && _compatActive) {
-            console.log(`[Cupcake PM] Compatibility mode active — forcing non-streaming to prevent duplicate requests (manual=${_compatManual}, bridge=${_bridgeCapable}).`);
+        const _compatActive = await safeGetBoolArg('cpm_compatibility_mode', false);
+        // Copilot MUST stream — non-streaming causes guaranteed 524 (CF proxy timeout).
+        // SSE parsing happens inside the plugin iframe; ReadableStream does NOT cross the bridge.
+        const _isCopilotStreamUrl = !!(effectiveUrl && effectiveUrl.includes('githubcopilot.com'));
+        const useStreaming = streamingEnabled && perModelStreamingEnabled && (!_compatActive || _isCopilotStreamUrl);
+        if (streamingEnabled && _compatActive && !_isCopilotStreamUrl) {
+            console.log(`[Cupcake PM] Compatibility mode active — forcing non-streaming (manual toggle).`);
         }
-        if (!useStreaming && effectiveUrl && effectiveUrl.includes('githubcopilot.com')) {
+        if (!useStreaming && _isCopilotStreamUrl) {
             console.warn(`[Cupcake PM] Copilot request in non-stream mode. Long responses may return 524 via proxy.`);
         }
 
@@ -535,6 +536,11 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
 
             const _hasReadableStreamBody = !!(res?.body && typeof res.body.getReader === 'function');
             if (!_hasReadableStreamBody) {
+                // Copilot: non-streaming fallback causes 524 — return error immediately
+                if (_isCopilotStreamUrl) {
+                    console.error(`[Cupcake PM] Copilot streaming response body unavailable (no ReadableStream). Cannot fall back to non-streaming (would cause 524).`);
+                    return { success: false, content: `[Cupcake PM] Copilot 스트리밍 응답 본문을 읽을 수 없습니다. ReadableStream이 지원되지 않는 환경입니다. 호환성 모드를 확인하거나 브라우저를 업데이트해 주세요.`, _status: 0 };
+                }
                 console.warn(`[Cupcake PM] Streaming response body unavailable for ${format}; retrying as non-streaming.`);
                 const fallbackUrl = _toNonStreamingUrl(streamUrl);
                 const fallbackBodyObj = { ...body };

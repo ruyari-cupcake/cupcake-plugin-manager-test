@@ -116,9 +116,10 @@ describe('KeyPool — deep coverage', () => {
             const k = await KeyPool.pick('api_key');
             expect(['key2', 'key3']).toContain(k);
         });
-        it('throws if _getArgFn not set', async () => {
+        it('returns empty if _getArgFn not set', async () => {
             KeyPool._getArgFn = null;
-            await expect(KeyPool.pick('x')).rejects.toThrow('_getArgFn not set');
+            const result = await KeyPool.pick('x');
+            expect(result).toBe('');
         });
         it('uses inline pool when available', async () => {
             KeyPool._pools['inline_test'] = { _inline: true, keys: ['a', 'b'] };
@@ -187,13 +188,13 @@ describe('KeyPool — deep coverage', () => {
             expect(attempt).toBe(2);
         });
 
-        it('returns last result when all keys exhausted', async () => {
+        it('hits max retries when single key is exhausted repeatedly', async () => {
             KeyPool.setGetArgFn(async () => 'key1');
             const result = await KeyPool.withRotation('k', async () => {
                 return { success: false, _status: 429, content: 'rate limited' };
-            });
+            }, { maxRetries: 3 });
             expect(result.success).toBe(false);
-            expect(result.content).toBe('rate limited');
+            expect(result.content).toContain('최대 재시도');
         });
 
         it('returns error when no keys available', async () => {
@@ -292,9 +293,10 @@ describe('KeyPool — deep coverage', () => {
             expect(KeyPool._pools['cred'].error).toContain('Windows');
         });
 
-        it('throws if _getArgFn not set', async () => {
+        it('returns empty if _getArgFn not set', async () => {
             KeyPool._getArgFn = null;
-            await expect(KeyPool.pickJson('x')).rejects.toThrow('_getArgFn not set');
+            const result = await KeyPool.pickJson('x');
+            expect(result).toBe('');
         });
     });
 
