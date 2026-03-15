@@ -285,6 +285,14 @@ setupCupcakeAPI();
                 });
             });
 
+            // Diagnostic: log proxyUrl state for all custom models at boot
+            if (state.CUSTOM_MODELS_CACHE.length > 0) {
+                const proxyInfo = state.CUSTOM_MODELS_CACHE.map((/** @type {any} */ m) =>
+                    `${m.name||m.uniqueId}: proxyUrl=${m.proxyUrl ? `"${m.proxyUrl}"` : '(empty)'}`
+                ).join(', ');
+                console.log(`[CPM Init] Custom models loaded (${state.CUSTOM_MODELS_CACHE.length}): ${proxyInfo}`);
+            }
+
             // Sort alphabetically by provider, then by name
             state.ALL_DEFINED_MODELS.sort((/** @type {any} */ a, /** @type {any} */ b) => {
                 const providerCompare = a.provider.localeCompare(b.provider);

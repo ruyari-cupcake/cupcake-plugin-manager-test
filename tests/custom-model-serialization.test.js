@@ -125,6 +125,7 @@ describe('custom-model-serialization', () => {
             model: 'gpt-4.1',
             url: 'https://api.example.com',
             proxyUrl: 'https://proxy.example.com',
+            proxyDirect: false,
             format: 'openai',
             tok: 'o200k_base',
             responsesMode: 'on',

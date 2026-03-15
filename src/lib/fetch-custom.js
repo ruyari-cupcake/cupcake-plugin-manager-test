@@ -349,18 +349,41 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
         console.log(`[Cupcake PM] proxyUrl missing scheme — auto-prepended https:// → ${_proxyUrl}`);
     }
     const _isProxied = !!_proxyUrl;
+    const _proxyDirect = !!config.proxyDirect;
     if (_proxyUrl && effectiveUrl) {
-        try {
-            const _origUrl = new URL(effectiveUrl);
-            const _proxyBase = new URL(_proxyUrl);
-            effectiveUrl = _proxyBase.origin + _proxyBase.pathname.replace(/\/+$/, '') + _origUrl.pathname + _origUrl.search;
-            console.log(`[Cupcake PM] CORS Proxy active → ${effectiveUrl}`);
-        } catch (_e) {
-            console.error(`[Cupcake PM] ❌ Invalid proxyUrl "${_proxyUrl}" — proxy NOT applied. URL 형식을 확인하세요 (예: https://my-server.kr/proxy).`, _e);
+        if (_proxyDirect) {
+            // Direct mode: 프록시 URL로 직접 요청, effectiveUrl은 X-Target-URL 헤더로 전달
+            console.log(`[Cupcake PM] CORS Proxy (Direct mode) → proxy=${_proxyUrl.substring(0, 60)}, target=${effectiveUrl.substring(0, 60)}`);
+        } else {
+            // Rewrite mode (기본): 도메인을 프록시로 교체
+            try {
+                const _origUrl = new URL(effectiveUrl);
+                const _proxyBase = new URL(_proxyUrl);
+                effectiveUrl = _proxyBase.origin + _proxyBase.pathname.replace(/\/+$/, '') + _origUrl.pathname + _origUrl.search;
+                console.log(`[Cupcake PM] CORS Proxy (Rewrite mode) active → ${effectiveUrl}`);
+            } catch (_e) {
+                console.error(`[Cupcake PM] ❌ Invalid proxyUrl "${_proxyUrl}" — proxy NOT applied. URL 형식을 확인하세요 (예: https://my-server.kr/proxy).`, _e);
+            }
         }
     } else if (!_proxyUrl && effectiveUrl) {
         console.log(`[Cupcake PM] No proxyUrl configured for ${effectiveUrl.substring(0, 60)} — direct request mode`);
     }
+
+    // ── Direct proxy wrapper: intercepts smartNativeFetch in direct mode ──
+    /**
+     * @param {string} url
+     * @param {RequestInit & Record<string, any>} [options]
+     * @returns {Promise<Response>}
+     */
+    const _smartFetch = (_proxyDirect && _proxyUrl)
+        ? async (/** @type {string} */ url, /** @type {RequestInit & Record<string, any>} */ options = {}) => {
+            const directHeaders = {
+                ...(/** @type {Record<string, string>} */ (options.headers) || {}),
+                'X-Target-URL': url,
+            };
+            return smartNativeFetch(_proxyUrl, { ...options, headers: directHeaders });
+        }
+        : smartNativeFetch;
 
     // ── Core fetch logic (wrapped for key rotation) ──
     const _doCustomFetch = async (/** @type {string} */ _apiKey) => {
@@ -531,7 +554,7 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
             });
 
             const res = await _executeRequest(
-                () => smartNativeFetch(streamUrl, { method: 'POST', headers, body: finalBody, signal: abortSignal }),
+                () => _smartFetch(streamUrl, { method: 'POST', headers, body: finalBody, signal: abortSignal }),
                 `${format} stream request`
             );
             if (_reqId) _updateApiRequest(_reqId, { status: res.status });
@@ -556,7 +579,7 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
                 if (format !== 'google') fallbackBodyObj.stream = false;
                 const fallbackBody = sanitizeBodyJSON(safeStringify(fallbackBodyObj));
                 const fallbackRes = await _executeRequest(
-                    () => smartNativeFetch(fallbackUrl, { method: 'POST', headers, body: fallbackBody, signal: abortSignal }),
+                    () => _smartFetch(fallbackUrl, { method: 'POST', headers, body: fallbackBody, signal: abortSignal }),
                     `${format} non-stream fallback`
                 );
                 if (_reqId) _updateApiRequest(_reqId, { status: fallbackRes.status });
@@ -603,7 +626,7 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
         });
 
         const res = await _executeRequest(
-            () => smartNativeFetch(effectiveUrl, { method: 'POST', headers, body: _nonStreamBody, signal: abortSignal }),
+            () => _smartFetch(effectiveUrl, { method: 'POST', headers, body: _nonStreamBody, signal: abortSignal }),
             `${format} request`
         );
         if (_reqId) _updateApiRequest(_reqId, { status: res.status });

@@ -9,6 +9,37 @@ import { SettingsBackup } from './settings-backup.js';
 import { normalizeCustomModel, serializeCustomModelExport } from './custom-model-serialization.js';
 import { escHtml } from './helpers.js';
 
+/**
+ * Persist custom models to RisuAI argument storage + backup.
+ * Both setArgument and updateKey are invoked immediately (synchronous mock-friendly),
+ * then awaited in parallel. Errors are logged, not thrown.
+ * @param {string} json  Stringified CUSTOM_MODELS_CACHE
+ * @param {Record<string, any>|undefined} [savedEntry]  The model entry that was saved (for verification)
+ */
+async function _persistCustomModels(json, savedEntry) {
+    // Invoke both synchronously so mock recorders capture them immediately
+    const p1 = Risu.setArgument('cpm_custom_models', json);
+    const p2 = SettingsBackup.updateKey('cpm_custom_models', json);
+
+    try { await p1; } catch (e) { console.error('[CPM Save] Risu.setArgument FAILED:', /** @type {Error} */ (e).message || e); }
+    try { await p2; } catch (e) { console.error('[CPM Save] SettingsBackup.updateKey FAILED:', /** @type {Error} */ (e).message || e); }
+
+    // Verification: read back and confirm proxyUrl survived round-trip
+    if (savedEntry?.proxyUrl) {
+        try {
+            const verify = await Risu.getArgument('cpm_custom_models');
+            if (typeof verify === 'string') {
+                if (!verify.includes(savedEntry.proxyUrl)) {
+                    console.error(`[CPM Save] ⚠️ VERIFICATION FAILED — proxyUrl "${savedEntry.proxyUrl}" not found in persisted data! ` +
+                        `Saved length=${json.length}, readBack length=${verify.length}`);
+                } else {
+                    console.log(`[CPM Save] ✅ Verified: proxyUrl persisted correctly.`);
+                }
+            }
+        } catch (_) { /* verification is best-effort */ }
+    }
+}
+
 /** @typedef {HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement} FormField */
 
 /** @param {string} id */
@@ -67,7 +98,7 @@ export function renderCustomModelEditor(thinkingList, reasoningList, verbosityLi
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">Model Name</label><input type="text" id="cpm-cm-model" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"></div>
                 <div class="md:col-span-2"><label class="block text-sm font-medium text-gray-400 mb-1">Base URL</label><input type="text" id="cpm-cm-url" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"></div>
                 <div class="md:col-span-2"><label class="block text-sm font-medium text-gray-400 mb-1">API Key (여러 개 → 공백/줄바꿈 구분 → 자동 키회전)</label><textarea id="cpm-cm-key" rows="2" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white font-mono text-sm" spellcheck="false" placeholder="sk-xxxx"></textarea></div>
-                <div class="md:col-span-2"><label class="block text-sm font-medium text-gray-400 mb-1">CORS Proxy URL <span class="text-xs text-yellow-400">(선택사항 — 모든 API에 적용 가능. 도메인을 프록시로 교체합니다)</span></label><input type="text" id="cpm-cm-proxy-url" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white font-mono text-sm" placeholder="https://my-proxy.example.com/proxy (비워두면 직접 요청)"></div>
+                <div class="md:col-span-2"><label class="block text-sm font-medium text-gray-400 mb-1">CORS Proxy URL <span class="text-xs text-yellow-400">(선택사항 — 모든 API에 적용 가능)</span></label><input type="text" id="cpm-cm-proxy-url" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white font-mono text-sm" placeholder="https://my-proxy.example.com/proxy (비워두면 직접 요청)"><label class="flex items-center space-x-2 text-xs text-gray-400 mt-2 cursor-pointer"><input type="checkbox" id="cpm-cm-proxy-direct" class="form-checkbox bg-gray-800"> <span>Direct 모드 <span class="text-yellow-400">(프록시 URL로 직접 요청, 원본 URL은 X-Target-URL 헤더로 전달. 기본값은 도메인 교체 방식)</span></span></label></div>
                 <div class="md:col-span-2 mt-4 border-t border-gray-800 pt-4"><h5 class="text-sm font-bold text-gray-300 mb-3">Model Parameters</h5></div>
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">API Format</label><select id="cpm-cm-format" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"><option value="openai">OpenAI</option><option value="anthropic">Anthropic Claude</option><option value="google">Google Gemini</option></select></div>
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">Tokenizer</label><select id="cpm-cm-tok" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"><option value="o200k_base">o200k_base</option><option value="llama3">llama3</option><option value="claude">Claude</option><option value="gemma">Gemma</option></select></div>
@@ -78,7 +109,7 @@ export function renderCustomModelEditor(thinkingList, reasoningList, verbosityLi
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">Prompt Cache Retention</label><select id="cpm-cm-prompt-cache-retention" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"><option value="none">None</option><option value="in_memory">In-Memory</option><option value="24h">24h Extended</option></select></div>
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">Reasoning Effort</label><select id="cpm-cm-reasoning" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white">${reasoningList.map(o => `<option value="${o.value}">${o.text}</option>`).join('')}</select></div>
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">Response Verbosity</label><select id="cpm-cm-verbosity" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white">${verbosityList.map(o => `<option value="${o.value}">${o.text}</option>`).join('')}</select></div>
-                <div><label class="block text-sm font-medium text-gray-400 mb-1">Anthropic Effort</label><select id="cpm-cm-effort" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white">${effortList.map(o => `<option value="${o.value}">${o.text}</option>`).join('')}</select></div>
+                <div><label class="block text-sm font-medium text-gray-400 mb-1">Anthropic Effort</label><select id="cpm-cm-effort" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white">${effortList.map(o => `<option value="${o.value}">${o.text}</option>`).join('')}</select><p class="text-[11px] text-amber-400/80 mt-1">⚠️ Effort/적응형 사고 사용 시 응답이 길어질 수 있습니다. 스트리밍을 켜지 않으면 Cloudflare 524 타임아웃으로 응답 실패가 발생할 수 있습니다. 단, RisuAI 로컬리스(localhost) 환경에서는 스트리밍 관련 버그가 있을 수 있으므로 주의하세요.</p></div>
                 <div class="md:col-span-2 mt-4 border-t border-gray-800 pt-4">
                     <h5 class="text-sm font-bold text-gray-300 mb-3">Formatter Flags</h5>
                     <div class="space-y-2">
@@ -88,8 +119,10 @@ export function renderCustomModelEditor(thinkingList, reasoningList, verbosityLi
                         <label class="flex items-center space-x-2 text-sm text-gray-300"><input type="checkbox" id="cpm-cm-mustuser" class="form-checkbox bg-gray-800"> <span>mustStartWithUserInput</span></label>
                         <label class="flex items-center space-x-2 text-sm text-gray-300"><input type="checkbox" id="cpm-cm-maxout" class="form-checkbox bg-gray-800"> <span>useMaxOutputTokensInstead</span></label>
                         <label class="flex items-center space-x-2 text-sm text-gray-300"><input type="checkbox" id="cpm-cm-streaming" class="form-checkbox bg-gray-800"> <span>Use Streaming</span></label>
+                        <p class="text-[11px] text-cyan-400/70 ml-6 -mt-1">ℹ️ 이 옵션은 글로벌 설정의 <strong>스트리밍 패스스루</strong>도 함께 활성화해야 동작합니다. Copilot 등 프록시 경유 API는 스트리밍 필수 (미사용 시 524 타임아웃).</p>
                         <label class="flex items-center space-x-2 text-sm text-gray-300"><input type="checkbox" id="cpm-cm-thought" class="form-checkbox bg-gray-800"> <span>useThoughtSignature</span></label>
                         <label class="flex items-center space-x-2 text-sm text-gray-300"><input type="checkbox" id="cpm-cm-adaptive-thinking" class="form-checkbox bg-gray-800"> <span>useAdaptiveThinking (적응형 사고)</span></label>
+                        <p class="text-[11px] text-amber-400/70 ml-6 -mt-1">⚠️ 적응형 사고 활성화 시 추론 시간이 길어집니다. 프록시 경유 환경에서는 반드시 스트리밍을 켜세요 (524 타임아웃 방지). 로컬리스(localhost)에서는 스트리밍 버그가 있을 수 있으니 주의.</p>
                     </div>
                 </div>
                 <div class="md:col-span-2 mt-4 border-t border-gray-800 pt-4">
@@ -114,6 +147,7 @@ export function populateEditor(m) {
     getField('cpm-cm-url').value = m.url || '';
     getField('cpm-cm-key').value = m.key || '';
     getField('cpm-cm-proxy-url').value = m.proxyUrl || '';
+    getCheckbox('cpm-cm-proxy-direct').checked = !!m.proxyDirect;
     getField('cpm-cm-format').value = m.format || 'openai';
     getField('cpm-cm-tok').value = m.tok || 'o200k_base';
     getField('cpm-cm-responses-mode').value = m.responsesMode || 'auto';
@@ -138,6 +172,7 @@ export function populateEditor(m) {
 // ── Clear all editor fields ──
 export function clearEditor() {
     ['name', 'model', 'url', 'key', 'proxy-url'].forEach(f => { getField(`cpm-cm-${f}`).value = ''; });
+    getCheckbox('cpm-cm-proxy-direct').checked = false;
     getField('cpm-cm-format').value = 'openai';
     getField('cpm-cm-tok').value = 'o200k_base';
     getField('cpm-cm-responses-mode').value = 'auto';
@@ -162,6 +197,7 @@ export function readEditorValues(uid) {
         url: getField('cpm-cm-url').value,
         key: getField('cpm-cm-key').value,
         proxyUrl: getField('cpm-cm-proxy-url').value.trim(),
+        proxyDirect: getCheckbox('cpm-cm-proxy-direct').checked,
         format: getField('cpm-cm-format').value,
         tok: getField('cpm-cm-tok').value,
         responsesMode: getField('cpm-cm-responses-mode').value || 'auto',
@@ -232,8 +268,7 @@ export function initCustomModelsManager(_setVal, _openCpmSettings) {
         cmList.querySelectorAll('.cpm-cm-del-btn').forEach(btn => btn.addEventListener('click', (e) => {
             if (confirm('Delete this model?')) {
                 state.CUSTOM_MODELS_CACHE.splice(getDatasetIndex(e.target), 1);
-                Risu.setArgument('cpm_custom_models', JSON.stringify(state.CUSTOM_MODELS_CACHE));
-                SettingsBackup.updateKey('cpm_custom_models', JSON.stringify(state.CUSTOM_MODELS_CACHE));
+                _persistCustomModels(JSON.stringify(state.CUSTOM_MODELS_CACHE));
                 refreshCmList();
             }
         }));
@@ -265,8 +300,7 @@ export function initCustomModelsManager(_setVal, _openCpmSettings) {
                 } catch { errorCount++; }
             }
             if (importedCount > 0) {
-                Risu.setArgument('cpm_custom_models', JSON.stringify(state.CUSTOM_MODELS_CACHE));
-                SettingsBackup.updateKey('cpm_custom_models', JSON.stringify(state.CUSTOM_MODELS_CACHE));
+                _persistCustomModels(JSON.stringify(state.CUSTOM_MODELS_CACHE));
                 refreshCmList();
             }
             alert(`${importedCount}개 모델 가져오기 완료` + (errorCount > 0 ? ` (${errorCount}개 실패)` : ''));
@@ -294,8 +328,16 @@ export function initCustomModelsManager(_setVal, _openCpmSettings) {
         const existingIdx = state.CUSTOM_MODELS_CACHE.findIndex((/** @type {Record<string, any>} */ x) => x.uniqueId === uid);
         if (existingIdx !== -1) state.CUSTOM_MODELS_CACHE[existingIdx] = { ...state.CUSTOM_MODELS_CACHE[existingIdx], ...newModel };
         else state.CUSTOM_MODELS_CACHE.push(newModel);
-        Risu.setArgument('cpm_custom_models', JSON.stringify(state.CUSTOM_MODELS_CACHE));
-        SettingsBackup.updateKey('cpm_custom_models', JSON.stringify(state.CUSTOM_MODELS_CACHE));
+
+        const json = JSON.stringify(state.CUSTOM_MODELS_CACHE);
+
+        // Diagnostic: confirm what proxyUrl was saved
+        const savedEntry = /** @type {Record<string, any>|undefined} */ (state.CUSTOM_MODELS_CACHE.find((/** @type {Record<string, any>} */ x) => x.uniqueId === uid));
+        console.log(`[CPM Save] uid=${uid} proxyUrl="${savedEntry?.proxyUrl || ''}" cacheLen=${state.CUSTOM_MODELS_CACHE.length}`);
+
+        // Persist — chained with verification, errors logged
+        _persistCustomModels(json, savedEntry);
+
         refreshCmList();
         cmEditor.classList.add('hidden');
     });

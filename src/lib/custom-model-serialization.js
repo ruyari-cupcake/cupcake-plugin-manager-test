@@ -71,6 +71,7 @@ export function normalizeCustomModel(raw, options = {}) {
             if (_pUrl && !/^https?:\/\//i.test(_pUrl)) _pUrl = 'https://' + _pUrl;
             return _pUrl;
         })(),
+        proxyDirect: toBool(raw?.proxyDirect),
         format: toText(raw?.format || 'openai') || 'openai',
         tok: toText(raw?.tok || 'o200k_base') || 'o200k_base',
         responsesMode: toText(raw?.responsesMode || 'auto') || 'auto',

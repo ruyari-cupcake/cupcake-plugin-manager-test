@@ -99,8 +99,15 @@ export async function fetchByProviderId(modelDef, args, abortSignal, _reqId) {
             const cDef = /** @type {Record<string, any>|undefined} */ (state.CUSTOM_MODELS_CACHE.find((/** @type {any} */ m) => m.uniqueId === modelDef.uniqueId));
             if (!cDef) return { success: false, content: `[Cupcake PM] Custom model config not found.` };
 
+            // Diagnostic: log actual proxyUrl value from cache at request time
+            if (cDef.proxyUrl) {
+                console.log(`[CPM Router] ✓ proxyUrl="${cDef.proxyUrl}" for ${cDef.name || cDef.uniqueId}`);
+            } else {
+                console.log(`[CPM Router] ⚠ proxyUrl is EMPTY for ${cDef.name || cDef.uniqueId} (uniqueId=${cDef.uniqueId}, keys=${Object.keys(cDef).join(',')})`);
+            }
+
             return await fetchCustom({
-                url: cDef.url, key: cDef.key, model: cDef.model, proxyUrl: cDef.proxyUrl || '',
+                url: cDef.url, key: cDef.key, model: cDef.model, proxyUrl: cDef.proxyUrl || '', proxyDirect: !!cDef.proxyDirect,
                 format: cDef.format || 'openai',
                 sysfirst: !!cDef.sysfirst, altrole: !!cDef.altrole,
                 mustuser: !!cDef.mustuser, maxout: !!cDef.maxout, mergesys: !!cDef.mergesys,

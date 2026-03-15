@@ -55,8 +55,8 @@
         "changes": "v2.1.3: 전체 서브플러그인 버전 동기화 릴리즈"
     },
     "Cupcake Provider Manager": {
-        "version": "1.20.12",
+        "version": "1.20.13",
         "file": "provider-manager.js",
-        "changes": "v1.20.12: 클플 워커에 임베딩 프록시 추가, 하이파 탭 가이드에 클플 워커 방법 추가"
+        "changes": "v1.20.13: 커스텀 모델 UI에 스트리밍/524 타임아웃 안내 문구 추가"
     }
 }

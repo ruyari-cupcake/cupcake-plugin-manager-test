@@ -17,6 +17,7 @@ const { mockState, mockRisu, mockSettingsBackup } = vi.hoisted(() => ({
     },
     mockRisu: {
         setArgument: vi.fn(),
+        getArgument: vi.fn(async () => ''),
         showContainer: vi.fn(),
         hideContainer: vi.fn(),
     },
@@ -57,6 +58,7 @@ function setupDom() {
                 <input type="text" id="cpm-cm-url" value="">
                 <textarea id="cpm-cm-key"></textarea>
                 <input type="text" id="cpm-cm-proxy-url" value="">
+                <input type="checkbox" id="cpm-cm-proxy-direct">
                 <select id="cpm-cm-format"><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="google">Google</option></select>
                 <select id="cpm-cm-tok"><option value="o200k_base">o200k_base</option><option value="llama3">llama3</option></select>
                 <select id="cpm-cm-responses-mode"><option value="auto">Auto</option><option value="on">On</option></select>
