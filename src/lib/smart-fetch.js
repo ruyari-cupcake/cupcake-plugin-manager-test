@@ -106,12 +106,22 @@ export async function smartNativeFetch(url, options = {}) {
         throw new DOMException('The operation was aborted.', 'AbortError');
     }
 
-    // Final body sanitization before any network call
+    // Body integrity logging — helps diagnose "unexpected EOF" errors
+    // sanitizeBodyJSON is intentionally NOT called here; the caller (fetchCustom)
+    // already sanitizes. Double-sanitization added unnecessary parse/stringify
+    // overhead and could mask truncation bugs.
     if (options.method === 'POST' && typeof options.body === 'string') {
-        try {
-            options = { ...options, body: sanitizeBodyJSON(options.body) };
-        } catch (e) {
-            console.error('[CupcakePM] smartNativeFetch: body re-sanitization failed:', /** @type {Error} */ (e).message);
+        const _bodyLen = options.body.length;
+        if (_bodyLen > 5_000_000) {
+            console.warn(`[CupcakePM] ⚠️ Large request body: ${(_bodyLen / 1_048_576).toFixed(2)} MB — V3 bridge transfer may truncate.`);
+        }
+        // Quick JSON validity check (catches corruption before network)
+        if (options.body.charAt(0) === '{' || options.body.charAt(0) === '[') {
+            try {
+                JSON.parse(options.body);
+            } catch (_validErr) {
+                console.error(`[CupcakePM] ❌ Body JSON validation FAILED before fetch (len=${_bodyLen}):`, /** @type {Error} */ (_validErr).message);
+            }
         }
     }
 

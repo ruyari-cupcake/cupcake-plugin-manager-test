@@ -547,6 +547,10 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
             }
 
             const finalBody = sanitizeBodyJSON(safeStringify(streamBody));
+            const _streamBodyLen = finalBody.length;
+            if (_streamBodyLen > 5_000_000) {
+                console.warn(`[Cupcake PM] ⚠️ Streaming body size: ${(_streamBodyLen / 1_048_576).toFixed(2)} MB (${body.messages?.length || 0} messages). Large bodies may cause 'unexpected EOF' if V3 bridge truncates data.`);
+            }
             if (_reqId) _updateApiRequest(_reqId, {
                 url: streamUrl,
                 requestHeaders: { ...headers, 'Authorization': headers['Authorization'] ? '***REDACTED***' : undefined },
@@ -562,6 +566,15 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
             if (!res.ok) {
                 const errBody = await res.text();
                 if (_reqId) _updateApiRequest(_reqId, { response: errBody.substring(0, 2000) });
+                // Enhanced diagnostic for JSON truncation errors
+                if (res.status === 400 && errBody.includes('unexpected EOF')) {
+                    console.error(`[Cupcake PM] ❌ API returned 'unexpected EOF' — the JSON body was likely truncated during transfer.`,
+                        `\n  Body size: ${_streamBodyLen} chars`,
+                        `\n  Message count: ${streamBody.messages?.length || streamBody.input?.length || 0}`,
+                        `\n  Format: ${format}`,
+                        `\n  URL: ${streamUrl?.substring(0, 80)}`,
+                        `\n  Hint: If body > 5MB, try reducing chat history length or removing images.`);
+                }
                 return { success: false, content: `[Custom API Error ${res.status}] ${errBody}`, _status: res.status };
             }
 
@@ -619,6 +632,10 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
 
         // ── Non-streaming fallback ──
         const _nonStreamBody = sanitizeBodyJSON(safeStringify(body));
+        const _nonStreamBodyLen = _nonStreamBody.length;
+        if (_nonStreamBodyLen > 5_000_000) {
+            console.warn(`[Cupcake PM] ⚠️ Non-stream body size: ${(_nonStreamBodyLen / 1_048_576).toFixed(2)} MB (${body.messages?.length || 0} messages). Large bodies may cause 'unexpected EOF' if V3 bridge truncates data.`);
+        }
         if (_reqId) _updateApiRequest(_reqId, {
             url: effectiveUrl,
             requestHeaders: { ...headers, 'Authorization': headers['Authorization'] ? '***REDACTED***' : undefined },

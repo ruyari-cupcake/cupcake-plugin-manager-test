@@ -1,7 +1,7 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.20.13
+//@version 1.20.14
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================
@@ -180,7 +180,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.20.13';
+    const CPM_VERSION = '1.20.14';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -3518,12 +3518,22 @@ var CupcakeProviderManager = (function (exports) {
             throw new DOMException('The operation was aborted.', 'AbortError');
         }
 
-        // Final body sanitization before any network call
+        // Body integrity logging — helps diagnose "unexpected EOF" errors
+        // sanitizeBodyJSON is intentionally NOT called here; the caller (fetchCustom)
+        // already sanitizes. Double-sanitization added unnecessary parse/stringify
+        // overhead and could mask truncation bugs.
         if (options.method === 'POST' && typeof options.body === 'string') {
-            try {
-                options = { ...options, body: sanitizeBodyJSON(options.body) };
-            } catch (e) {
-                console.error('[CupcakePM] smartNativeFetch: body re-sanitization failed:', /** @type {Error} */ (e).message);
+            const _bodyLen = options.body.length;
+            if (_bodyLen > 5_000_000) {
+                console.warn(`[CupcakePM] ⚠️ Large request body: ${(_bodyLen / 1_048_576).toFixed(2)} MB — V3 bridge transfer may truncate.`);
+            }
+            // Quick JSON validity check (catches corruption before network)
+            if (options.body.charAt(0) === '{' || options.body.charAt(0) === '[') {
+                try {
+                    JSON.parse(options.body);
+                } catch (_validErr) {
+                    console.error(`[CupcakePM] ❌ Body JSON validation FAILED before fetch (len=${_bodyLen}):`, /** @type {Error} */ (_validErr).message);
+                }
             }
         }
 
@@ -6422,6 +6432,10 @@ var CupcakeProviderManager = (function (exports) {
                 }
 
                 const finalBody = sanitizeBodyJSON(safeStringify(streamBody));
+                const _streamBodyLen = finalBody.length;
+                if (_streamBodyLen > 5_000_000) {
+                    console.warn(`[Cupcake PM] ⚠️ Streaming body size: ${(_streamBodyLen / 1_048_576).toFixed(2)} MB (${body.messages?.length || 0} messages). Large bodies may cause 'unexpected EOF' if V3 bridge truncates data.`);
+                }
                 if (_reqId) updateApiRequest(_reqId, {
                     url: streamUrl,
                     requestHeaders: { ...headers, 'Authorization': headers['Authorization'] ? '***REDACTED***' : undefined },
@@ -6437,6 +6451,15 @@ var CupcakeProviderManager = (function (exports) {
                 if (!res.ok) {
                     const errBody = await res.text();
                     if (_reqId) updateApiRequest(_reqId, { response: errBody.substring(0, 2000) });
+                    // Enhanced diagnostic for JSON truncation errors
+                    if (res.status === 400 && errBody.includes('unexpected EOF')) {
+                        console.error(`[Cupcake PM] ❌ API returned 'unexpected EOF' — the JSON body was likely truncated during transfer.`,
+                            `\n  Body size: ${_streamBodyLen} chars`,
+                            `\n  Message count: ${streamBody.messages?.length || streamBody.input?.length || 0}`,
+                            `\n  Format: ${format}`,
+                            `\n  URL: ${streamUrl?.substring(0, 80)}`,
+                            `\n  Hint: If body > 5MB, try reducing chat history length or removing images.`);
+                    }
                     return { success: false, content: `[Custom API Error ${res.status}] ${errBody}`, _status: res.status };
                 }
 
@@ -6494,6 +6517,10 @@ var CupcakeProviderManager = (function (exports) {
 
             // ── Non-streaming fallback ──
             const _nonStreamBody = sanitizeBodyJSON(safeStringify(body));
+            const _nonStreamBodyLen = _nonStreamBody.length;
+            if (_nonStreamBodyLen > 5_000_000) {
+                console.warn(`[Cupcake PM] ⚠️ Non-stream body size: ${(_nonStreamBodyLen / 1_048_576).toFixed(2)} MB (${body.messages?.length || 0} messages). Large bodies may cause 'unexpected EOF' if V3 bridge truncates data.`);
+            }
             if (_reqId) updateApiRequest(_reqId, {
                 url: effectiveUrl,
                 requestHeaders: { ...headers, 'Authorization': headers['Authorization'] ? '***REDACTED***' : undefined },
