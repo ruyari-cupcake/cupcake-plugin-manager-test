@@ -101,9 +101,9 @@ var CupcakeProviderManager = (function (exports) {
      * Both `src/lib/endpoints.js` (runtime) and `rollup.config.mjs` (build-time
      * banner injection into plugin-header.js) read from this file.
      *
-     * URL is determined by the `CPM_ENV` environment variable:
-     *   - CPM_ENV=production  → https://cupcake-plugin-manager.vercel.app
-     *   - CPM_ENV=test (or unset) → https://cupcake-plugin-manager-test.vercel.app
+    * URL is determined by the `CPM_ENV` environment variable:
+    *   - CPM_ENV=production  → https://cupcake-plugin-manager.vercel.app
+    *   - CPM_ENV=test (or unset) → https://cupcake-plugin-manager.vercel.app
      *
      * Build usage:
      *   CPM_ENV=production npm run build   (production)
@@ -113,7 +113,7 @@ var CupcakeProviderManager = (function (exports) {
 
     const _URLS = {
         production: 'https://cupcake-plugin-manager.vercel.app',
-        test: 'https://cupcake-plugin-manager-test.vercel.app',
+        test: 'https://cupcake-plugin-manager.vercel.app',
     };
 
     const _env = 'production';
