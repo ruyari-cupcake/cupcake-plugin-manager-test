@@ -55,8 +55,8 @@
         "changes": "v2.1.3: 전체 서브플러그인 버전 동기화 릴리즈"
     },
     "Cupcake Provider Manager": {
-        "version": "1.20.8",
+        "version": "1.20.10",
         "file": "provider-manager.js",
-        "changes": "v1.20.8: CI 정리, 커스텀 모델 직렬화 정식 반영, 테스트/검증 강화"
+        "changes": "v1.20.10: 524 스트리밍 무한루프 수정, 키회전 쿨다운 제거, 호환성모드 수동 전환으로 변경"
     }
 }

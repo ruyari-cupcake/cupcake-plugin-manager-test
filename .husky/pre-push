@@ -1,0 +1,6 @@
+npm run lint
+npm run build:css
+npm run typecheck
+npm run build
+npm run verify:release-sync
+npm run test:release-sync

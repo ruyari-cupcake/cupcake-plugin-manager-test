@@ -1,0 +1,9 @@
+@import "tailwindcss";
+
+/* Scan settings UI source files for used Tailwind classes */
+@source "../src/lib/settings-ui.js";
+@source "../src/lib/settings-ui-panels.js";
+@source "../src/lib/settings-ui-plugins.js";
+@source "../src/lib/settings-ui-custom-models.js";
+@source "../src/lib/update-toast.js";
+@source "../src/lib/token-toast.js";

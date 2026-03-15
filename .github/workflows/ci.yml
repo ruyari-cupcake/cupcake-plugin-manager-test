@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-test-build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [20, 22]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Generate CSS (required by typecheck)
+        run: npm run build:css
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build (Rollup IIFE)
+        run: npm run build
+
+      - name: Verify build output
+        run: |
+          test -f dist/provider-manager.js
+          echo "✅ dist/provider-manager.js generated ($(wc -c < dist/provider-manager.js) bytes)"
+
+      - name: Verify release sync
+        run: npm run verify:release-sync
+
+      - name: Test + Coverage (threshold gate)
+        run: npm run test:coverage
+
+      - name: Release pipeline dry-run
+        run: node scripts/release.cjs --dry-run --skip-test

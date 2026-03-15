@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>프로덕션 준비도 코드 감사 보고서</title>
+<style>
+  :root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2129;--border:#30363d;--text:#c9d1d9;--text-muted:#8b949e;--text-bright:#e6edf3;--accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922;--yellow:#e3b341;--blue:#58a6ff;--purple:#bc8cff}
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;line-height:1.6;padding:20px;max-width:1200px;margin:0 auto}
+  h1{color:var(--text-bright);font-size:1.8rem;border-bottom:2px solid var(--accent);padding-bottom:12px;margin-bottom:24px}
+  h2{color:var(--accent);font-size:1.35rem;margin:28px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+  h3{color:var(--text-bright);font-size:1.1rem;margin:18px 0 10px}
+  h4{color:var(--text-muted);font-size:.95rem;margin:14px 0 8px}
+  p,li{font-size:.9rem;margin-bottom:6px}
+  code{background:var(--surface2);color:var(--purple);padding:2px 6px;border-radius:4px;font-size:.85rem;font-family:'SF Mono',Consolas,monospace}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px}
+  .card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+  table{width:100%;border-collapse:collapse;margin:12px 0}
+  th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--border);font-size:.88rem}
+  th{background:var(--surface2);color:var(--text-bright);font-weight:600}
+  tr:hover{background:rgba(88,166,255,.04)}
+  .score{font-size:1.8rem;font-weight:700;text-align:center;min-width:48px}
+  .score-good{color:var(--green)}
+  .score-ok{color:var(--yellow)}
+  .score-bad{color:var(--red)}
+  .score-mid{color:var(--orange)}
+  .badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:.78rem;font-weight:600;margin-right:6px}
+  .badge-crit{background:rgba(248,81,73,.15);color:var(--red)}
+  .badge-major{background:rgba(210,153,34,.15);color:var(--orange)}
+  .badge-minor{background:rgba(227,179,65,.15);color:var(--yellow)}
+  .badge-sug{background:rgba(88,166,255,.15);color:var(--blue)}
+  .badge-tag{background:rgba(188,140,255,.12);color:var(--purple);font-weight:500}
+  .anchor-block{background:var(--surface2);border-left:3px solid var(--accent);padding:12px 16px;margin:10px 0 14px;border-radius:0 6px 6px 0;font-size:.87rem}
+  .anchor-block strong{color:var(--text-bright)}
+  .total-box{background:linear-gradient(135deg,#161b22,#1a2233);border:2px solid var(--accent);border-radius:14px;padding:28px;text-align:center;margin:24px 0}
+  .total-score{font-size:3.2rem;font-weight:800;background:linear-gradient(90deg,var(--green),var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+  .grade-badge{display:inline-block;font-size:2.4rem;font-weight:800;padding:6px 22px;border-radius:12px;margin-top:8px}
+  .grade-a{background:rgba(63,185,80,.15);color:var(--green);border:2px solid var(--green)}
+  .summary-zone{background:linear-gradient(135deg,#13161d,#161b22);border:1px solid var(--border);border-radius:14px;padding:28px;margin-top:32px}
+  .verdict-text{font-size:.95rem;line-height:1.7;color:var(--text)}
+  ul{padding-left:20px}
+  .action-item{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--border)}
+  .action-tag{min-width:80px}
+  .tag-quick{color:var(--green)}
+  .tag-harden{color:var(--orange)}
+  .tag-strat{color:var(--purple)}
+  .flex-row{display:flex;gap:16px;flex-wrap:wrap}
+  .flex-row > *{flex:1;min-width:280px}
+  .finding{margin:8px 0;padding:10px 14px;background:var(--surface2);border-radius:6px;font-size:.87rem;line-height:1.55}
+  @media(max-width:768px){body{padding:12px}.flex-row{flex-direction:column}.flex-row > *{min-width:auto}}
+</style>
+</head>
+<body>
+
+<h1>🧁 프로덕션 준비도 코드 감사 보고서</h1>
+
+<!-- ════════════════════════════════════════ -->
+<!-- DETAIL ZONE                             -->
+<!-- ════════════════════════════════════════ -->
+
+<h2>A. 개요 및 기술 스택</h2>
+<div class="card">
+  <p>다중 AI 프로바이더(OpenAI, Anthropic, Gemini, Vertex AI, AWS Bedrock, DeepSeek, OpenRouter, GitHub Copilot 등)를 하나의 통합 인터페이스로 관리하는 호스트 애플리케이션(RisuAI V3)용 플러그인. 서브 플러그인 아키텍처를 통해 프로바이더를 동적으로 등록·관리하며, 키 로테이션, 스트리밍 패스스루, 자동 업데이트, 설정 백업/복원 등의 기능을 제공한다.</p>
+
+  <h4>호스트 환경</h4>
+  <p>RisuAI V3의 iframe sandbox(<code>about:srcdoc</code>, <code>sandbox="allow-scripts allow-modals allow-downloads"</code>)에서 실행. CSP <code>connect-src 'none'</code>으로 네트워크 직접 접근이 차단되며, 모든 HTTP 요청은 호스트가 제공하는 <code>nativeFetch</code>/<code>risuFetch</code> RPC 브릿지(postMessage)를 경유. 깃허브에 모듈 소스파일이 올라가지 않은 것은 보안상 의도적 조치임.</p>
+
+  <table>
+    <tr><th>항목</th><th>세부</th></tr>
+    <tr><td>런타임</td><td>JavaScript (ES2022), iframe sandbox (about:srcdoc), <code>connect-src 'none'</code></td></tr>
+    <tr><td>빌드</td><td>Rollup 4 → IIFE 단일 번들 (<code>dist/provider-manager.js</code>), Tailwind CSS 4</td></tr>
+    <tr><td>타입 검사</td><td>TypeScript 5.9 (<code>checkJs: true</code>, <code>strict: true</code>, JSDoc 기반, emit 없음)</td></tr>
+    <tr><td>테스트</td><td>Vitest 4.0.18 + @vitest/coverage-v8</td></tr>
+    <tr><td>린트</td><td>ESLint 10 (flat config)</td></tr>
+    <tr><td>배포</td><td>Vercel (서버리스 함수), GitHub Actions CI/CD</td></tr>
+    <tr><td>Git Hooks</td><td>Husky + lint-staged → pre-commit: ESLint auto-fix, pre-push: build + sync 검증 + 테스트</td></tr>
+    <tr><td>프로덕션 의존성</td><td><strong>0개</strong> (전체 devDependencies만, 번들은 자체 완결)</td></tr>
+  </table>
+
+  <h4>정량 데이터 (소스 파일 직접 측정)</h4>
+  <table>
+    <tr><th>지표</th><th>값</th><th>산출 근거</th></tr>
+    <tr><td>소스 LOC</td><td>8,031줄 (39개 파일)</td><td><code>src/**/*.js</code> 행 수 합산 (2026-03 재측정)</td></tr>
+    <tr><td>테스트 LOC</td><td>37,743줄 (104개 파일)</td><td><code>tests/**/*.test.js</code> 행 수 합산 (2026-03 재측정)</td></tr>
+    <tr><td>테스트 케이스</td><td>2,949개</td><td><code>npm test</code> 실행 결과 기준</td></tr>
+    <tr><td>테스트:소스 비율</td><td>4.70 : 1</td><td>테스트 LOC / 소스 LOC</td></tr>
+    <tr><td>코드 커버리지</td><td>Lines 97.85% / Branches 90.00% / Functions 95.64% / Stmts 96.31%</td><td><code>coverage/coverage-summary.json</code> (2026-03 재산출)</td></tr>
+    <tr><td>커버리지 임계값 게이트</td><td>Stmts 90% / Branches 80% / Functions 90% / Lines 92%</td><td><code>vitest.config.js</code></td></tr>
+    <tr><td>커밋 수</td><td>184</td><td><code>git log --oneline</code></td></tr>
+    <tr><td>최대 소스 파일</td><td><code>auto-updater.js</code> (970줄)</td><td>–</td></tr>
+  </table>
+</div>
+
+<!-- ── 점수 테이블 ── -->
+<h2>B. 점수 테이블</h2>
+<div class="card">
+  <p style="color:var(--text-muted);font-size:.85rem;margin-bottom:10px">가중치 재배분: 해당 프로젝트는 네트워크를 경유하여 외부 API 키를 처리하고 원격 코드를 다운로드하므로 보안 공격 표면이 존재하나, 호스트 sandbox가 강력한 1차 방어선이므로 기본 가중치를 유지.</p>
+  <table>
+    <tr><th>카테고리</th><th>가중치</th><th>점수</th><th>가중점</th><th>핵심 근거</th></tr>
+    <tr>
+      <td>가독성 및 수정 용이성</td><td>20%</td>
+      <td><span class="score score-good">8</span></td><td>1.60</td>
+      <td>29개 모듈 단일 책임, JSDoc 일관, 대형 파일 3개만 약점</td>
+    </tr>
+    <tr>
+      <td>견고성 및 오류 복원력</td><td>20%</td>
+      <td><span class="score score-good">9</span></td><td>1.80</td>
+      <td>다층 fallback, phase 독립 실패, 키 쿨다운. 타임아웃 미설정은 의도적 설계</td>
+    </tr>
+    <tr>
+      <td>보안 태세</td><td>15%</td>
+      <td><span class="score score-good">8</span></td><td>1.20</td>
+      <td>호스트 sandbox + SHA-256 검증, 서브 플러그인 접근은 기능상 필수, 단독 배포 + 면책 명시</td>
+    </tr>
+    <tr>
+      <td>검증 및 정확성 보증</td><td>20%</td>
+      <td><span class="score score-good">9</span></td><td>1.80</td>
+      <td>2,949개 테스트, 97.85% 라인 / 90.00% 브랜치 커버리지, CI 임계값 게이트, 릴리스 동기 검증</td>
+    </tr>
+    <tr>
+      <td>아키텍처 및 구조 건전성</td><td>15%</td>
+      <td><span class="score score-good">8</span></td><td>1.20</td>
+      <td>DI 패턴 순환 해소, 계층 분리 명확, 레거시 전역 노출 아쉬움</td>
+    </tr>
+    <tr>
+      <td>의존성 및 환경 건전성</td><td>10%</td>
+      <td><span class="score score-good">9</span></td><td>0.90</td>
+      <td>제로 런타임 의존성, lockfile, CI 매트릭스, 완전한 문서</td>
+    </tr>
+  </table>
+  <div class="total-box">
+    <div style="color:var(--text-muted);font-size:.9rem">가중 총점</div>
+    <div class="total-score">8.50 / 10</div>
+    <div class="grade-badge grade-a">A</div>
+    <p style="color:var(--text-muted);font-size:.82rem;margin-top:10px">(8.0–8.9 = A등급, 프로덕션 배포 가능 수준)</p>
+  </div>
+</div>
+
+<!-- ── 핵심 발견 사항 ── -->
+<h2>C. 핵심 발견 사항</h2>
+
+<!-- ─── 1. 가독성 ─── -->
+<div class="card">
+  <h3>1. 가독성 및 수정 용이성 — <span class="score-good">8</span>/10</h3>
+  <div class="anchor-block">
+    <strong>앵커링 블록</strong><br>
+    <strong>Best-case (10):</strong> 모든 모듈 50줄 이하, 일관된 JSDoc 타입, 자명한 변수명으로 문서 없이 즉시 파악 가능.<br>
+    <strong>Worst-case (1):</strong> 단일 파일 만줄 IIFE, 주석·타입 없이 모든 로직이 뒤섞임.<br>
+    <strong>현재:</strong> 29개 모듈로 잘 분리, JSDoc + <code>@ts-check</code>가 전체에 일관 적용. 다만 <code>fetch-custom.js</code>(625줄), <code>smart-fetch.js</code>(535줄), <code>auto-updater.js</code>(970줄) 3개가 300줄 크게 초과. <code>index.js</code>의 모듈 맵 주석이 탐색에 효과적. DI 패턴으로 모듈 간 결합도 최소화. → <strong>8/10</strong>
+  </div>
+
+  <div class="finding">
+    <span class="badge badge-minor">🟡 Minor</span> <span class="badge badge-tag">TRADE-OFF: 프로바이더별 분기 불가피</span><br>
+    <code>fetch-custom.js</code>가 625줄. OpenAI/Anthropic/Google/Copilot 4개 포맷 + 스트리밍/비스트리밍 분기를 한 파일에 포함. 각 포맷의 요청 바디 구성 로직이 인라인되어 인지 부하가 높음. 다만 4개 포맷이 미묘하게 다른 바디 구조를 요구하는 현실적 복잡성의 반영이므로 단순 분할로 해결되지 않을 수 있음.
+  </div>
+
+  <div class="finding">
+    <span class="badge badge-sug">🔵 제안</span> <span class="badge badge-tag">OVERSIGHT</span><br>
+    <code>auto-updater.js</code>가 970줄로 프로젝트 최대 파일. 업데이트 마커 관리, 다운로드, 설치, 부트 재시도, 서브 플러그인 체크가 한 파일에 집중. 메서드들이 <code>SubPluginManager</code>에 오브젝트 스프레드로 병합되는 설계이므로 cohesion은 있으나, 단일 파일 크기가 유지보수 임계점을 초과.
+  </div>
+
+  <div class="finding">
+    <span class="badge badge-sug">🔵 제안</span> <span class="badge badge-tag">TRADE-OFF: 배럴 파일의 명시적 관리</span><br>
+    <code>index.js</code>의 re-export가 219줄 × 29개 모듈. 모듈 맵 주석과 섹션 구분이 명확하여 탐색에 유용하나, 새 심볼 추가 시 수동 갱신이 필요한 관리 비용 존재.
+  </div>
+
+  <h4>AI 생성 코드 안티패턴 점검</h4>
+  <div class="finding">
+    "자명한 주석 남발" 패턴 해당 없음 — 주석 대부분이 JSDoc 타입 어노테이션이거나 모듈 상단 아키텍처 설명. <code>init.js</code>의 부트 시퀀스 주석은 실행 순서 문서화로 정당화됨. 코드 중복은 <code>extractNormalizedMessagePayload</code>의 <code>image_url</code>/<code>input_image</code> 처리에 소규모 반복 존재하나 실질 위험 낮음.
+  </div>
+</div>
+
+<!-- ─── 2. 견고성 ─── -->
+<div class="card">
+  <h3>2. 견고성 및 오류 복원력 — <span class="score-good">9</span>/10</h3>
+  <div class="anchor-block">
+    <strong>앵커링 블록</strong><br>
+    <strong>Best-case (10):</strong> 모든 외부 호출에 타임아웃·재시도·fallback, 부분 실패 시 자동 복구, 진단 가능한 메시지 제공.<br>
+    <strong>Worst-case (1):</strong> 네트워크 에러 시 무한 루프, 에러 메시지 없이 조용한 실패.<br>
+    <strong>현재:</strong> 부트 시퀀스가 phase별로 독립 실행. fetch가 3단계 fallback(direct → risuFetch → nativeFetch). <code>KeyPool</code>이 429/503에 자동 쿨다운. 스트리밍 실패 시 비스트리밍 전환. <code>copilot-token.js</code>에 negative cache(60초) + single-flight dedup. fetch 경로에 명시적 타임아웃은 미설정이나 이는 의도적 설계(아래 상세). → <strong>9/10</strong>
+  </div>
+
+  <div class="finding">
+    <span class="badge badge-sug">🔵 참고</span> <span class="badge badge-tag">INTENTIONAL: 장시간 응답 대응 설계</span><br>
+    <code>smartNativeFetch</code>와 <code>fetchCustom</code>의 HTTP 호출에 명시적 타임아웃 미설정. 이는 <strong>의도적 설계 결정</strong>으로, AI API 응답이 복잡한 프롬프트에서 수십 분까지 소요될 수 있는 도메인 특성을 반영한 것이다. 임의 타임아웃을 설정할 경우, 요청은 프로바이더 측에서 계속 처리되어 API 사용 비용이 발생하지만 클라이언트는 응답을 수신하지 못하는 — 비용만 차감되고 결과는 유실되는 최악의 시나리오가 발생한다. <code>AbortSignal</code> 전파가 구현되어 있어 사용자가 명시적으로 요청을 취소할 수 있으므로, 자동 타임아웃 대신 사용자 주도 취소 패턴이 이 도메인에 적합하다.
+  </div>
+
+  <div class="finding">
+    <span class="badge badge-minor">🟡 Minor</span> <span class="badge badge-tag">TRADE-OFF: 호스트 런타임 제약</span><br>
+    <code>init.js</code>의 에러 복구 패널이 <code>document.body.innerHTML</code>을 직접 설정. iframe sandbox 내부이므로 XSS 위험은 사실상 없으며, 에러 메시지에 <code>&lt;</code>/<code>&gt;</code> 이스케이프가 명시적으로 적용되어 HTML 주입은 방지됨.
+  </div>
+
+  <div class="finding">
+    <span class="badge badge-sug">🔵 제안</span> <span class="badge badge-tag">TRADE-OFF: 메시지 무결성 우선</span><br>
+    <code>sanitizeMessages</code> + <code>sanitizeBodyJSON</code> + <code>JSON.parse(JSON.stringify())</code> 딥 클론의 3중 정화. 방어적이지만, 대규모 멀티모달 페이로드에서 성능 비용 대비 보호 가치가 있는지 프로파일링 검토 권장.
+  </div>
+
+  <div class="finding">
+    <span class="badge badge-sug">🔵 제안</span> <span class="badge badge-tag">OVERSIGHT</span><br>
+    <code>_executeRequest</code>의 재시도 로직(408/429/500+, 최대 3회)에 지수 백오프가 없음. 현재는 즉시 재시도하므로 429 Rate-Limit 상황에서 재시도가 동일하게 실패할 확률이 높음. <code>KeyPool</code> 쿨다운이 보완해주지만, 키가 1개인 사용자에게는 효과가 없음.
+  </div>
+</div>
+
+<!-- ─── 3. 보안 ─── -->
+<div class="card">
+  <h3>3. 보안 태세 — <span class="score-good">8</span>/10</h3>
+  <div class="anchor-block">
+    <strong>앵커링 블록</strong><br>
+    <strong>Best-case (10):</strong> 모든 시크릿이 메모리 내에서만 사용, 원격 코드에 무결성 검증 완벽, customParams 주입 차단, 배포 경로 완전 통제.<br>
+    <strong>Worst-case (1):</strong> API 키 소스 하드코딩, 원격 코드 검증 없이 실행, 사용자 입력이 요청에 그대로 전달.<br>
+    <strong>현재:</strong> 호스트 iframe sandbox + CSP <code>connect-src 'none'</code>이 강력한 1차 방어선. API 키는 <code>@arg</code> 스토리지에 저장, 로그에서 <code>***REDACTED***</code> 처리. 원격 업데이트에 SHA-256 + <code>@name</code> 일치 검증. <code>customParams</code>에 구조 필드 블록리스트 존재. 서브 플러그인이 CPM 내부 상태에 전체 접근 가능하나 이는 프로바이더 기능에 필수적이며, 배포가 개발자 단독으로 제한되고 비공식 플러그인 사용 시 면책이 명시되어 있어 위협 모델상 수용 가능. URL 전환 자동화도 적용 완료. → <strong>8/10</strong>
+  </div>
+
+  <h4>공격 표면 식별</h4>
+  <p>이 프로젝트는: (1) 사용자 API 키/토큰으로 외부 API에 요청, (2) 원격 서버에서 코드 다운로드·실행, (3) 서브 플러그인(제3자 코드) 런타임 로드. 보안 범주가 적용되는 시스템.</p>
+
+  <div class="finding">
+    <span class="badge badge-sug">🔵 참고</span> <span class="badge badge-tag">INTENTIONAL: 프로바이더 기능 요구사항</span><br>
+    <code>csp-exec.js</code>의 <code>_executeViaScriptTag</code>가 서브 플러그인 코드를 CSP nonce가 부여된 <code>&lt;script&gt;</code> 태그로 실행. 서브 플러그인이 iframe <code>window</code> 객체와 CPM 내부 함수(<code>customFetchers</code>, <code>KeyPool</code> 등)에 접근 가능한 것은 <strong>의도적 설계</strong>이다 — 서브 플러그인이 프로바이더로서 동작하려면 API 키를 읽고 fetch 함수를 호출할 수 있어야 하므로, 이 접근 권한은 기능적 필수 요건이다. 위협 모델 관점에서 다음 세 가지 통제가 존재: (1) sandbox iframe 내부이므로 호스트 DOM/쿠키/네트워크 접근 차단, (2) <strong>서브 플러그인 배포는 개발자 단독으로만 가능</strong>하여 제3자가 임의 코드를 주입할 경로가 없음, (3) 공식 배포 외 플러그인 사용 시 책임을 지지 않음이 명시적으로 고지됨. SHA-256 무결성 검증이 업데이트 시 적용되어 배포 후 변조도 방지.
+  </div>
+
+  <div class="finding">
+    <span class="badge badge-sug">🔵 업데이트</span> <span class="badge badge-tag">RESOLVED</span><br>
+    해당 이슈는 해소됨. <code>CPM_ENV</code> 기반 빌드로 <code>@update-url</code>와 런타임 엔드포인트가 함께 치환되며, <code>npm run build:production</code> / <code>CPM_ENV=production node scripts/release.cjs</code> 패턴으로 프로덕션·테스트 URL이 자동 분기된다.
+  </div>
+
+  <div class="finding">
+    <span class="badge badge-sug">🔵 참고</span> <span class="badge badge-tag">INTENTIONAL: 프로바이더 접근 일관성</span><br>
+    <code>copilot-token.js</code>에서 GitHub OAuth 토큰이 <code>window.__copilot_access_token</code>과 모듈 스코프 변수에 캐싱. sandbox 내부이므로 외부 접근 불가. 서브 플러그인이 해당 전역 변수를 읽을 수 있으나, 이는 다른 API 키와 동일하게 프로바이더 기능에 필요한 접근이며 토큰 스코프도 Copilot용으로 제한적. 배포가 개발자 단독으로 제한되므로 실질 위험은 미미.
+  </div>
+
+  <h4>우선순위 취약점 체크</h4>
+  <table>
+    <tr><th>유형</th><th>상태</th></tr>
+    <tr><td>SQL Injection (CWE-89)</td><td style="color:var(--green)">N/A — 데이터베이스 미사용</td></tr>
+    <tr><td>XSS (CWE-79/80)</td><td style="color:var(--yellow)">제한적 — <code>init.js</code> 에러패널 <code>innerHTML</code>, 명시적 이스케이프 + sandbox</td></tr>
+    <tr><td>Log Injection (CWE-117)</td><td style="color:var(--green)">경미 — 브라우저 콘솔만 사용, 서버 로그 아님</td></tr>
+    <tr><td>SSRF</td><td style="color:var(--green)">N/A — 모든 요청이 호스트 RPC 브릿지 경유</td></tr>
+    <tr><td>Insecure Deserialization</td><td style="color:var(--yellow)">관리됨 — <code>schema.js</code> 구조 검증, <code>customParams</code> 블록리스트, thenable 거부</td></tr>
+    <tr><td>Remote Code Execution</td><td style="color:var(--yellow)">설계적 허용 — 서브 플러그인 시스템의 근본, sandbox 내부로 격리</td></tr>
+  </table>
+</div>
+
+<!-- ─── 4. 검증 ─── -->
+<div class="card">
+  <h3>4. 검증 및 정확성 보증 — <span class="score-good">9</span>/10</h3>
+  <div class="anchor-block">
+    <strong>앵커링 블록</strong><br>
+    <strong>Best-case (10):</strong> 단위·통합·E2E 테스트 완비, 뮤테이션 테스트로 품질 검증, CI 커버리지 게이트 강제, 배포 전 릴리스 동기 자동 검증.<br>
+    <strong>Worst-case (1):</strong> 테스트 전무, 수동 검증에만 의존.<br>
+    <strong>현재:</strong> 8,031줄 소스 × 2,949개 테스트 × 37,743줄 테스트 코드. 라인 커버리지 97.85%, 브랜치 90.00%. CI가 Stmts 90%/Lines 92% 임계값을 강제하고 미달 시 빌드 실패. <code>verify-release-sync.cjs</code>가 버전·해시·메타데이터 일관성을 5개 파일에 걸쳐 교차 검증. pre-push 훅이 풀 빌드+릴리스 동기 테스트를 강제. 다만 E2E(실제 호스트 환경) 테스트와 뮤테이션 테스트는 미적용. → <strong>9/10</strong>
+  </div>
+
+  <div class="finding">
+    <span class="badge badge-sug">🔵 제안</span> <span class="badge badge-tag">TRADE-OFF: iframe 환경 제약</span><br>
+    테스트가 주로 단위 테스트로 구성. 실제 RisuAI iframe sandbox 내에서의 통합 테스트(E2E)는 부재. <code>Risu</code> 객체가 모든 테스트에서 모킹되므로 호스트 RPC 브릿지 실제 동작은 미검증. iframe sandbox에서 테스트 프레임워크를 실행하기 어려운 현실적 제약의 반영이나, Playwright 등으로 실제 iframe 내 시나리오 테스트를 추가하면 브릿지 호환성을 보장할 수 있음.
+  </div>
+
+  <div class="finding">
+    <span class="badge badge-sug">🔵 업데이트</span> <span class="badge badge-tag">RESOLVED</span><br>
+    2026-03 재산출 기준 전체 커버리지는 <code>Lines 97.85% / Branches 90.00% / Functions 95.64% / Stmts 96.31%</code>로 확인되었다. <code>smart-fetch.js</code>, <code>fetch-custom.js</code>, <code>auto-updater.js</code> 중심의 보강 테스트가 실제로 반영되어 HD-2 목표(브랜치 90%)를 충족했다.
+  </div>
+
+  <h4>AI 안티패턴 점검</h4>
+  <div class="finding">
+    "가짜 테스트 커버리지" 패턴 해당 없음. 검사한 테스트 파일들이 경계값, 에러 경로, 실제 비즈니스 로직을 검증. <code>aws-signer.test.js</code>는 SHA-256 해시를 알려진 값과 대조. <code>smart-fetch.test.js</code>는 Copilot 중복 replay 방지 로직을 구체적으로 검증. <code>router.test.js</code>는 프로바이더별 라우팅 분기를 개별 테스트. <code>init-deep.test.js</code>는 <code>vi.hoisted</code>로 Risu API를 체계적으로 모킹.
+  </div>
+</div>
+
+<!-- ─── 5. 아키텍처 ─── -->
+<div class="card">
+  <h3>5. 아키텍처 및 구조 건전성 — <span class="score-good">8</span>/10</h3>
+  <div class="anchor-block">
+    <strong>앵커링 블록</strong><br>
+    <strong>Best-case (10):</strong> 깔끔한 계층 분리, 모든 설정 외부화, 순환 참조 없음, 기능 추가 시 1~2개 파일만 수정.<br>
+    <strong>Worst-case (1):</strong> 단일 파일에 모든 로직, 하드코딩 산재, 기능 추가마다 전역 리팩토링 필요.<br>
+    <strong>현재:</strong> 29개 모듈이 Pure Utilities → Formatters → Infrastructure → Streaming → Core Logic 계층으로 분리. 4개 DI 주입 포인트(<code>setExposeScopeFunction</code>, <code>setGetArgFn</code>, <code>setCopilotFetchFn</code>, <code>setApiRequestLogger</code>)로 순환 의존성 교과서적 해소. URL 설정이 <code>cpm-url.config.js</code> 단일 소스에 집중. 새 프로바이더 추가 시 1개 파일 생성 + router.js 등록으로 완결. → <strong>8/10</strong>
+  </div>
+
+  <div class="finding">
+    <span class="badge badge-minor">🟡 Minor</span> <span class="badge badge-tag">TRADE-OFF: 서브 플러그인 API 호환성</span><br>
+    <code>init.js</code>의 <code>_exposeScopeToWindow</code>가 ~30개 내부 함수를 전역 <code>window</code>에 노출. <code>window.CupcakePM</code> API도 별도 존재하여 두 경로를 동시 유지. 서브 플러그인의 기존 전역 참조 패턴을 보존하기 위함이나, 내부 구현 변경 시 하위 호환성 부담이 큼.
+  </div>
+
+  <div class="finding">
+    <span class="badge badge-sug">🔵 제안</span> <span class="badge badge-tag">OVERSIGHT</span><br>
+    <code>autoUpdaterMethods</code>가 오브젝트 스프레드로 <code>SubPluginManager</code>에 병합되는 패턴. <code>@this</code> JSDoc으로 타입 관리하나, 20+개 메서드의 출처가 IDE에서 추적하기 어려움. 클래스 상속 또는 명시적 위임 패턴이 더 명확할 수 있음.
+  </div>
+
+  <div class="finding">
+    <span class="badge badge-sug">🔵 업데이트</span> <span class="badge badge-tag">RESOLVED</span><br>
+    Rollup 빌드는 현재 <code>CPM_ENV</code>를 기준으로 프로덕션/테스트 URL을 자동 전환한다. 배너의 <code>@update-url</code>뿐 아니라 번들 내부 런타임 엔드포인트도 함께 치환되도록 보강되었다.
+  </div>
+</div>
+
+<!-- ─── 6. 의존성 ─── -->
+<div class="card">
+  <h3>6. 의존성 및 환경 건전성 — <span class="score-good">9</span>/10</h3>
+  <div class="anchor-block">
+    <strong>앵커링 블록</strong><br>
+    <strong>Best-case (10):</strong> 제로 프로덕션 의존성, lockfile 완벽, 최신 안정 도구체인, README에 완전한 사이클 가이드.<br>
+    <strong>Worst-case (1):</strong> 버전 미고정, 유령 패키지 참조, 환경별 하드코딩 경로.<br>
+    <strong>현재:</strong> 프로덕션 의존성 0개 — IIFE 번들이 모든 코드를 자체 포함. 8개 devDependencies가 최신 메이저 버전. <code>package-lock.json</code> 커밋됨. <code>.nvmrc</code> 미설정이나 CI에서 Node 20/22 매트릭스 검증. README에 install → configure → build → deploy → release 전 과정이 스크린샷 없이도 재현 가능하게 문서화. → <strong>9/10</strong>
+  </div>
+
+  <div class="finding">
+    <span class="badge badge-sug">🔵 업데이트</span> <span class="badge badge-tag">RESOLVED</span><br>
+    <code>package.json</code>에 <code>"engines": {"node": "&gt;=20"}</code>가 추가되어, README/CI에서 문서화하던 Node 20+ 요구사항이 실제 설치 단계에서도 강제된다.
+  </div>
+
+  <div class="finding">
+    <span class="badge badge-sug">🔵 제안</span> <span class="badge badge-tag">TRADE-OFF: 최신 도구체인 우선</span><br>
+    ESLint 10, Vitest 4 등 최신 메이저 버전 사용. 커뮤니티 생태계(플러그인, IDE 지원)가 아직 완전히 따라오지 않았을 수 있으나, 프로젝트가 단독 빌드 환경이므로 호환성 문제 발생 가능성 낮음.
+  </div>
+</div>
+
+<!-- ── 액션 플랜 ── -->
+<h2>D. 액션 플랜</h2>
+<div class="card">
+  <h4 style="color:var(--green);margin-top:0">Quick Win (즉시 적용 가능)</h4>
+  <div class="action-item">
+    <div class="action-tag"><strong class="tag-quick">QW-1</strong></div>
+    <div><s><code>package.json</code>에 <code>"engines": {"node": "&gt;=20"}</code> 추가</s> ✅ 완료</div>
+  </div>
+  <div class="action-item">
+    <div class="action-tag"><strong class="tag-quick">QW-2</strong></div>
+    <div><s><code>_executeRequest</code>에 지수 백오프 추가 (429 재시도 시 <code>2^n * 1000ms</code> 대기)</s> ✅ 완료</div>
+  </div>
+
+  <h4 style="color:var(--orange)">Hardening (1~3일 내 처리)</h4>
+  <div class="action-item">
+    <div class="action-tag"><strong class="tag-harden">HD-1</strong></div>
+    <div><s><code>cpm-url.config.js</code>↔Rollup URL 연동을 환경변수 기반으로 전환. <code>CPM_ENV=production npm run build</code> 패턴으로 프로덕션/테스트 URL 자동 분기</s> ✅ 완료</div>
+  </div>
+  <div class="action-item">
+    <div class="action-tag"><strong class="tag-harden">HD-2</strong></div>
+    <div><s>브랜치 커버리지 85% → 90% 목표로 <code>smart-fetch.js</code>·<code>auto-updater.js</code>의 에러 분기 테스트 추가</s> ✅ 완료 — 2026-03 재산출 기준 전체 브랜치 커버리지 <strong>90.00%</strong></div>
+  </div>
+
+  <h4 style="color:var(--purple)">Strategic (스프린트 단위 계획)</h4>
+  <div class="action-item">
+    <div class="action-tag"><strong class="tag-strat">ST-1</strong></div>
+    <div><code>fetch-custom.js</code>(625줄)의 포맷별 바디 구성 로직을 <code>format-openai.js</code>, <code>format-anthropic.js</code> 등으로 분리하여 파일 크기 300줄 이하로 관리</div>
+  </div>
+  <div class="action-item">
+    <div class="action-tag"><strong class="tag-strat">ST-2</strong></div>
+    <div><code>auto-updater.js</code>(970줄)를 마커관리·다운로드·설치·부트 재시도 4개 모듈로 분할</div>
+  </div>
+  <div class="action-item">
+    <div class="action-tag"><strong class="tag-strat">ST-3</strong></div>
+    <div>서브 플러그인 API를 <code>window.CupcakePM</code>으로 단일화, <code>_exposeScopeToWindow</code>의 레거시 전역 노출에 deprecation 경고 추가 후 점진적 제거</div>
+  </div>
+  <div class="action-item">
+    <div class="action-tag"><strong class="tag-strat">ST-4</strong></div>
+    <div>Playwright 기반 실제 iframe sandbox 통합 테스트 파일럿. 부트 시퀀스 → 설정 호출 → 프로바이더 요청의 최소 E2E 시나리오 1개부터 시작</div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════ -->
+<!-- SUMMARY ZONE                            -->
+<!-- ════════════════════════════════════════ -->
+
+<div class="summary-zone">
+  <h2 style="border:none;margin-top:0;padding:0">E. 코드베이스 성격</h2>
+  <p class="verdict-text" style="margin:12px 0 20px;">
+    방어적 프로그래밍을 극단까지 밀어붙인 코드베이스. 모든 외부 호출에 다중 fallback, 모든 부트 단계에 독립 에러 격리, 모든 직렬화 경계에 다중 정화(sanitize)를 적용하되, 29개 모듈의 경계와 2,949개 테스트의 검증 규율은 놓치지 않는 — <strong>계산된 과잉 방어</strong>의 산물. 8,000줄 규모의 소스에 37,000줄 이상의 테스트를 붙인 것은 "충분한 테스트"가 아니라 "남이 건드려도 부서지지 않는 테스트"를 목표로 한 결과물이다.
+  </p>
+
+  <h2 style="border:none;padding:0">F. 최종 판정</h2>
+
+  <table style="margin:16px 0">
+    <tr><th>카테고리</th><th>점수</th><th>한줄 해석</th></tr>
+    <tr><td>가독성 및 수정 용이성</td><td>8/10</td><td>모듈 분리 우수, 대형 파일 3개가 유일한 약점</td></tr>
+    <tr><td>견고성 및 오류 복원력</td><td>9/10</td><td>다중 fallback + phase 격리 + 의도적 무타임아웃 설계</td></tr>
+    <tr><td>보안 태세</td><td>8/10</td><td>호스트 sandbox + 단독 배포 통제, 서브 플러그인 접근은 기능적 필수</td></tr>
+    <tr><td>검증 및 정확성 보증</td><td>9/10</td><td>2,949개 테스트, 97.85% 라인 / 90.00% 브랜치 커버리지 — 동종 프로젝트 대비 최상급</td></tr>
+    <tr><td>아키텍처 및 구조 건전성</td><td>8/10</td><td>DI + 계층 분리, 레거시 전역 노출만 아쉬움</td></tr>
+    <tr><td>의존성 및 환경 건전성</td><td>9/10</td><td>제로 런타임 의존성, lockfile + CI 매트릭스 완비</td></tr>
+  </table>
+
+  <div class="total-box">
+    <div style="color:var(--text-muted);font-size:.9rem">가중 총점</div>
+    <div class="total-score">8.50 / 10</div>
+    <div class="grade-badge grade-a">A</div>
+    <p style="color:var(--text-muted);font-size:.82rem;margin-top:10px">8.0–8.9 = A등급</p>
+  </div>
+
+  <p class="verdict-text" style="margin-top:20px;">
+    8,000줄 규모의 코드베이스에 37,000줄 이상의 테스트를 갖추고, 라인 97.85%·브랜치 90.00% 커버리지를 CI 기준선 위로 유지하며, pre-push 훅이 빌드→동기 검증→테스트를 순차 실행하는 것은 팀 프로젝트에서도 보기 어려운 품질 관리 수준이다.
+  </p>
+  <p class="verdict-text">
+    7개 AI 프로바이더 API의 미묘한 차이(OpenAI vs Anthropic 바디 구조, Google의 generateContent 엔드포인트, AWS V4 Signature, Copilot 토큰 교환 흐름)를 하나의 라우터로 추상화하면서도, 키 로테이션(429 쿨다운 + 랜덤 선택), 스트리밍 자동 전환(스트리밍 실패→비스트리밍 fallback), 호환성 모드 자동 감지(risuFetch 버전 차이 대응) 등 프로덕션 현실의 엣지 케이스를 빈틈없이 처리한다.
+  </p>
+  <p class="verdict-text">
+    아키텍처가 29개 모듈 + 4개의 DI 주입 포인트로 순환 의존성을 해소한 것, 부트 시퀀스가 9개 phase를 독립 실행하여 한 단계 실패가 전체를 차단하지 않는 것, 릴리스 파이프라인이 5개 파일에 걸쳐 버전·해시·메타데이터를 교차 검증하는 것은 명확한 엔지니어링 의사결정의 결과이다.
+  </p>
+  <p class="verdict-text" style="margin-top:12px;">
+    <strong>설계 결정에 대한 보충:</strong> (1) 핵심 fetch 경로에 요청 수준 타임아웃이 없는 것은 의도적 설계이다 — AI API 응답이 수십 분 소요될 수 있으며 중간 절단 시 비용만 발생하고 응답을 유실하는 최악의 결과가 되므로, <code>AbortSignal</code>을 통한 사용자 주도 취소 패턴이 이 도메인에 적합하다. (2) 서브 플러그인이 CPM 내부 상태(키 풀 포함)에 접근 가능한 것은 프로바이더로서 기능하기 위한 필수 요건이며, 배포가 개발자 단독으로 제한되고 비공식 플러그인 사용 시 면책이 명시되어 위협 모델상 통제된다. 현재 남은 개선점은 대형 파일 분할과 실제 iframe 기반 E2E 파일럿 도입 같은 구조적 고도화 과제다.
+  </p>
+
+  <p class="verdict-text" style="margin-top:20px;padding:14px 20px;background:var(--surface2);border-radius:8px;font-weight:600;text-align:center;font-size:1.05rem;border:1px solid var(--green)">
+    🟢 프로덕션 준비도: <span style="color:var(--green)">배포 가능</span><br>
+    <span style="font-weight:400;font-size:.88rem;color:var(--text-muted)">QW-1/2, HD-1/2 반영 완료. 다음 우선순위는 대형 파일 분할과 실제 iframe 기반 E2E 검증</span>
+  </p>
+</div>
+
+<p style="color:var(--text-muted);font-size:.78rem;margin-top:24px;text-align:center">
+  감사 갱신 일자: 2026-03-14 &nbsp;|&nbsp; 대상 버전: v1.20.6 &nbsp;|&nbsp; 소스 파일 직접 검토 + 재측정 (39개 src + 104개 test)
+</p>
+
+</body>
+</html>

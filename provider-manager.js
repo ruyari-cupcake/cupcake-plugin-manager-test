@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.20.8
-//@update-url https://cupcake-plugin-manager.vercel.app/api/main-plugin
+//@version 1.20.10
+//@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================
 // ARGUMENT SCHEMAS (Saved Natively by RisuAI)
@@ -101,9 +101,9 @@ var CupcakeProviderManager = (function (exports) {
      * Both `src/lib/endpoints.js` (runtime) and `rollup.config.mjs` (build-time
      * banner injection into plugin-header.js) read from this file.
      *
-    * URL is determined by the `CPM_ENV` environment variable:
-    *   - CPM_ENV=production  → https://cupcake-plugin-manager.vercel.app
-    *   - CPM_ENV=test (or unset) → https://cupcake-plugin-manager.vercel.app
+     * URL is determined by the `CPM_ENV` environment variable:
+     *   - CPM_ENV=production  → https://cupcake-plugin-manager.vercel.app
+     *   - CPM_ENV=test (or unset) → https://cupcake-plugin-manager-test.vercel.app
      *
      * Build usage:
      *   CPM_ENV=production npm run build   (production)
@@ -113,10 +113,10 @@ var CupcakeProviderManager = (function (exports) {
 
     const _URLS = {
         production: 'https://cupcake-plugin-manager.vercel.app',
-        test: 'https://cupcake-plugin-manager.vercel.app',
+        test: 'https://cupcake-plugin-manager-test.vercel.app',
     };
 
-    const _env = 'production';
+    const _env = 'test';
 
     /** @type {string} */
     const CPM_BASE_URL = _URLS[_env];
@@ -180,7 +180,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.20.8';
+    const CPM_VERSION = '1.20.10';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -1675,10 +1675,6 @@ var CupcakeProviderManager = (function (exports) {
     const KeyPool = {
         /** @type {Record<string, any>} */
         _pools: {},
-        /** @type {Record<string, number>} Cooldown timestamps after key exhaustion */
-        _cooldowns: {},
-        /** Cooldown duration in ms after all keys are exhausted (30 seconds) */
-        _COOLDOWN_MS: 30000,
         /** Injected safeGetArg function. Set via setGetArgFn(). @type {((key: string, defaultValue?: string) => Promise<string>) | null} */
         _getArgFn: null,
 
@@ -1696,19 +1692,12 @@ var CupcakeProviderManager = (function (exports) {
          * @param {string} argName
          */
         async pick(argName) {
-            // Check cooldown — if all keys were recently exhausted, return empty
-            const cooldownUntil = this._cooldowns[argName];
-            if (cooldownUntil && Date.now() < cooldownUntil) {
-                return '';
-            }
-            delete this._cooldowns[argName];
-
             const pool = this._pools[argName];
             if (pool && pool._inline && pool.keys.length > 0) {
                 return pool.keys[Math.floor(Math.random() * pool.keys.length)];
             }
             const getArg = this._getArgFn;
-            if (!getArg) throw new Error('KeyPool._getArgFn not set. Call setGetArgFn() first.');
+            if (!getArg) return '';  // No getArgFn → cannot re-parse keys after reset()
             const raw = await getArg(argName);
             if (!pool || pool.lastRaw !== raw || pool.keys.length === 0) {
                 this._pools[argName] = {
@@ -1776,10 +1765,10 @@ var CupcakeProviderManager = (function (exports) {
                 console.warn(`[KeyPool] 🔄 키 교체: ${argName} (HTTP ${result._status}, 남은 키: ${remaining}개, 시도: ${attempt + 1})`);
 
                 if (remaining === 0) {
-                    console.warn(`[KeyPool] ⚠️ ${argName}의 모든 키가 소진되었습니다. ${this._COOLDOWN_MS / 1000}초 쿨다운 적용.`);
-                    this._cooldowns[argName] = Date.now() + this._COOLDOWN_MS;
+                    console.warn(`[KeyPool] ⚠️ ${argName}의 모든 키가 소진되었습니다. 키를 재파싱합니다.`);
                     this.reset(argName);
-                    return result;
+                    // Don't return — reset() clears lastRaw so next pick() re-parses from settings.
+                    // The loop continues and pick() will return a fresh key set.
                 }
             }
             return { success: false, content: `[KeyPool] 최대 재시도 횟수(${maxRetries})를 초과했습니다.` };
@@ -1849,15 +1838,8 @@ var CupcakeProviderManager = (function (exports) {
          * @param {string} argName
          */
         async pickJson(argName) {
-            // Check cooldown — if all credentials were recently exhausted, return empty
-            const cooldownUntilJ = this._cooldowns[argName];
-            if (cooldownUntilJ && Date.now() < cooldownUntilJ) {
-                return '';
-            }
-            delete this._cooldowns[argName];
-
             const getArg = this._getArgFn;
-            if (!getArg) throw new Error('KeyPool._getArgFn not set. Call setGetArgFn() first.');
+            if (!getArg) return '';  // No getArgFn → cannot re-parse keys after reset()
             const raw = await getArg(argName);
             const pool = this._pools[argName];
             if (!pool || pool.lastRaw !== raw || pool.keys.length === 0) {
@@ -1905,10 +1887,9 @@ var CupcakeProviderManager = (function (exports) {
                 console.warn(`[KeyPool] 🔄 JSON 인증 교체: ${argName} (HTTP ${result._status}, 남은 인증: ${remaining}개, 시도: ${attempt + 1})`);
 
                 if (remaining === 0) {
-                    console.warn(`[KeyPool] ⚠️ ${argName}의 모든 JSON 인증이 소진되었습니다. ${this._COOLDOWN_MS / 1000}초 쿨다운 적용.`);
-                    this._cooldowns[argName] = Date.now() + this._COOLDOWN_MS;
+                    console.warn(`[KeyPool] ⚠️ ${argName}의 모든 JSON 인증이 소진되었습니다. 키를 재파싱합니다.`);
                     this.reset(argName);
-                    return result;
+                    // Don't return — reset() clears lastRaw so next pickJson() re-parses from settings.
                 }
             }
             return { success: false, content: `[KeyPool] 최대 재시도 횟수(${maxRetries})를 초과했습니다.` };
@@ -3441,6 +3422,7 @@ var CupcakeProviderManager = (function (exports) {
      *
      * Dependency: sanitizeBodyJSON from sanitize.js, Risu from shared-state.js
      */
+    // checkStreamCapability removed — compat mode is manual-toggle only now
 
     /**
      * Smart native fetch: 3-strategy fallback for V3 iframe sandbox.
@@ -3505,35 +3487,24 @@ var CupcakeProviderManager = (function (exports) {
     /** Cached compatibility mode flag — null = not yet read, boolean = cached value */
     /** @type {boolean | null} */
     let _compatibilityModeCache = null;
-    /** Cached bridge capability — null = not yet checked */
-    /** @type {boolean | null} */
-    let _bridgeCapableCache = null;
 
     /**
      * Reset cached compatibility mode state (for testing).
      */
     function _resetCompatibilityCache() {
         _compatibilityModeCache = null;
-        _bridgeCapableCache = null;
     }
 
     /**
-     * Check if compatibility mode is active (user toggle OR auto-detected).
+     * Check if compatibility mode is active (manual user toggle only).
      * Result is cached for the lifetime of the plugin.
      * @returns {Promise<boolean>}
      */
     async function _isCompatibilityMode() {
-        // User toggle takes priority
         if (_compatibilityModeCache === null) {
             _compatibilityModeCache = await safeGetBoolArg('cpm_compatibility_mode', false);
         }
-        if (_compatibilityModeCache) return true;
-
-        // Auto-detect: if bridge cannot transfer ReadableStream, skip nativeFetch
-        if (_bridgeCapableCache === null) {
-            _bridgeCapableCache = await checkStreamCapability();
-        }
-        return !_bridgeCapableCache;
+        return _compatibilityModeCache;
     }
 
     /**
@@ -4424,6 +4395,31 @@ var CupcakeProviderManager = (function (exports) {
         }
     }
 
+    /**
+     * Race a promise against a timeout and clear the timer once settled.
+     * Prevents dangling timer handles during tests and retries.
+     * @template T
+     * @param {Promise<T>} promise
+     * @param {number} ms
+     * @param {string} message
+     * @returns {Promise<T>}
+     */
+    function _withTimeout(promise, ms, message) {
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error(message)), ms);
+            Promise.resolve(promise).then(
+                value => {
+                    clearTimeout(timer);
+                    resolve(value);
+                },
+                error => {
+                    clearTimeout(timer);
+                    reject(error);
+                }
+            );
+        });
+    }
+
     // ────────────────────────────────────────────────────────────────
     // Auto-updater method collection
     // ────────────────────────────────────────────────────────────────
@@ -4885,10 +4881,11 @@ var CupcakeProviderManager = (function (exports) {
             let _fallbackExpectedSha256 = null;
             try {
                 const vUrl = this.VERSIONS_URL + '?_t=' + Date.now();
-                const vRes = await Promise.race([
+                const vRes = await _withTimeout(
                     Risu.risuFetch(vUrl, { method: 'GET', plainFetchForce: true }),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('versions manifest timed out (10s)')), 10000)),
-                ]);
+                    10000,
+                    'versions manifest timed out (10s)'
+                );
                 if (vRes?.data) {
                     const vData = typeof vRes.data === 'string' ? JSON.parse(vRes.data) : vRes.data;
                     _fallbackExpectedSha256 = vData?.['Cupcake Provider Manager']?.sha256 || null;
@@ -4907,16 +4904,18 @@ var CupcakeProviderManager = (function (exports) {
 
                     let response;
                     try {
-                        response = await Promise.race([
+                        response = await _withTimeout(
                             Risu.nativeFetch(cacheBuster, { method: 'GET' }),
-                            new Promise((_, reject) => setTimeout(() => reject(new Error('nativeFetch timed out (20s)')), 20000)),
-                        ]);
+                            20000,
+                            'nativeFetch timed out (20s)'
+                        );
                     } catch (nativeErr) {
                         console.warn(`${LOG} nativeFetch failed, falling back to risuFetch:`, /** @type {any} */ (nativeErr).message || nativeErr);
-                        const risuResult = await Promise.race([
+                        const risuResult = await _withTimeout(
                             Risu.risuFetch(cacheBuster, { method: 'GET', plainFetchForce: true }),
-                            new Promise((_, reject) => setTimeout(() => reject(new Error('risuFetch fallback timed out (20s)')), 20000)),
-                        ]);
+                            20000,
+                            'risuFetch fallback timed out (20s)'
+                        );
                         if (!risuResult.data || (risuResult.status && risuResult.status >= 400)) {
                             throw new Error(`risuFetch failed with status ${risuResult.status}`);
                         }
@@ -4938,10 +4937,11 @@ var CupcakeProviderManager = (function (exports) {
                         throw new Error(`HTTP ${response.status}`);
                     }
 
-                    const text = await Promise.race([
+                    const text = await _withTimeout(
                         response.text(),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('response body read timed out (20s)')), 20000)),
-                    ]);
+                        20000,
+                        'response body read timed out (20s)'
+                    );
 
                     const contentLength = parseInt(response.headers?.get?.('content-length') || '0', 10);
                     if (contentLength > 0) {
@@ -5536,22 +5536,88 @@ var CupcakeProviderManager = (function (exports) {
         /** @param {string} code */
         extractMetadata(code) {
             const meta = { name: 'Unnamed Sub-Plugin', version: '', description: '', icon: '📦', updateUrl: '' };
-            const nameMatch = code.match(/\/\/\s*@(?:name|display-name)\s+(.+)/i);
-            if (nameMatch) meta.name = nameMatch[1].trim();
-            const verMatch = code.match(/\/\/\s*@version\s+([^\r\n]+)/i);
-            if (verMatch) meta.version = verMatch[1].trim();
-            const descMatch = code.match(/\/\/\s*@description\s+(.+)/i);
-            if (descMatch) meta.description = descMatch[1].trim();
-            const iconMatch = code.match(/\/\/\s*@icon\s+(.+)/i);
-            if (iconMatch) meta.icon = iconMatch[1].trim();
-            const updateMatch = code.match(/\/\/\s*@update-url\s+(.+)/i);
-            if (updateMatch) meta.updateUrl = updateMatch[1].trim();
+            const lines = code.split(/\r?\n/);
+            let parsedName = '';
+            let parsedDisplayName = '';
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
+                if (!trimmed.startsWith('//')) break;
+
+                const nameMatch = trimmed.match(/^\/\/\s*@name\s+(.+)$/i);
+                if (nameMatch && !parsedName) {
+                    parsedName = nameMatch[1].trim();
+                    continue;
+                }
+
+                const displayNameMatch = trimmed.match(/^\/\/\s*@display-name\s+(.+)$/i);
+                if (displayNameMatch && !parsedDisplayName) {
+                    parsedDisplayName = displayNameMatch[1].trim();
+                    continue;
+                }
+
+                const verMatch = trimmed.match(/^\/\/\s*@version\s+(.+)$/i);
+                if (verMatch && !meta.version) {
+                    meta.version = verMatch[1].trim();
+                    continue;
+                }
+
+                const descMatch = trimmed.match(/^\/\/\s*@description\s+(.+)$/i);
+                if (descMatch && !meta.description) {
+                    meta.description = descMatch[1].trim();
+                    continue;
+                }
+
+                const iconMatch = trimmed.match(/^\/\/\s*@icon\s+(.+)$/i);
+                if (iconMatch && meta.icon === '📦') {
+                    meta.icon = iconMatch[1].trim();
+                    continue;
+                }
+
+                const updateMatch = trimmed.match(/^\/\/\s*@update-url\s+(.+)$/i);
+                if (updateMatch && !meta.updateUrl) {
+                    meta.updateUrl = updateMatch[1].trim();
+                }
+            }
+
+            meta.name = parsedName || parsedDisplayName || meta.name;
             return meta;
+        },
+
+        /** Names that must never be installed as a sub-plugin (main plugin identifiers). */
+        BLOCKED_NAMES: ['Cupcake_Provider_Manager', 'Cupcake Provider Manager'],
+        MAX_INSTALL_BYTES: 300 * 1024,
+
+        /** @param {string} code */
+        getCodeSizeBytes(code) {
+            try {
+                if (typeof TextEncoder !== 'undefined') {
+                    return new TextEncoder().encode(code || '').length;
+                }
+            } catch (_) {}
+            return String(code || '').length;
         },
 
         /** @param {string} code */
         async install(code) {
             const meta = this.extractMetadata(code);
+            const codeSizeBytes = this.getCodeSizeBytes(code);
+
+            if (codeSizeBytes > this.MAX_INSTALL_BYTES) {
+                throw new Error(
+                    `서브 플러그인 용량이 너무 큽니다. ` +
+                    `최대 ${(this.MAX_INSTALL_BYTES / 1024).toFixed(0)}KB까지만 설치할 수 있습니다.`
+                );
+            }
+
+            // Block installing the main provider-manager plugin as a sub-plugin
+            if (this.BLOCKED_NAMES.some(n => n.toLowerCase() === meta.name.toLowerCase())) {
+                throw new Error(
+                    `'${meta.name}'은(는) 메인 프로바이더 매니저 플러그인입니다. ` +
+                    `서브 플러그인으로 설치할 수 없습니다.`
+                );
+            }
+
             const existing = this.plugins.find(p => p.name === meta.name);
             if (existing) {
                 existing.code = code;
@@ -5864,7 +5930,8 @@ var CupcakeProviderManager = (function (exports) {
 
     /** @param {number} status */
     function _isRetriableHttpStatus(status) {
-        return status === 408 || status === 429 || status >= 500;
+        // 524 = Cloudflare timeout — retrying immediately won't help, skip it
+        return status === 408 || status === 429 || (status >= 500 && status !== 524);
     }
 
     /**
@@ -6293,14 +6360,15 @@ var CupcakeProviderManager = (function (exports) {
             // ── Streaming ──
             const streamingEnabled = await safeGetBoolArg('cpm_streaming_enabled', false);
             const perModelStreamingEnabled = (config.streaming === true) || (config.streaming !== false && !config.decoupled);
-            const _bridgeCapable = await checkStreamCapability();
-            const _compatManual = await safeGetBoolArg('cpm_compatibility_mode', false);
-            const _compatActive = _compatManual || !_bridgeCapable;
-            const useStreaming = streamingEnabled && perModelStreamingEnabled && !_compatActive;
-            if (streamingEnabled && _compatActive) {
-                console.log(`[Cupcake PM] Compatibility mode active — forcing non-streaming to prevent duplicate requests (manual=${_compatManual}, bridge=${_bridgeCapable}).`);
+            const _compatActive = await safeGetBoolArg('cpm_compatibility_mode', false);
+            // Copilot MUST stream — non-streaming causes guaranteed 524 (CF proxy timeout).
+            // SSE parsing happens inside the plugin iframe; ReadableStream does NOT cross the bridge.
+            const _isCopilotStreamUrl = !!(effectiveUrl && effectiveUrl.includes('githubcopilot.com'));
+            const useStreaming = streamingEnabled && perModelStreamingEnabled && (!_compatActive || _isCopilotStreamUrl);
+            if (streamingEnabled && _compatActive && !_isCopilotStreamUrl) {
+                console.log(`[Cupcake PM] Compatibility mode active — forcing non-streaming (manual toggle).`);
             }
-            if (!useStreaming && effectiveUrl && effectiveUrl.includes('githubcopilot.com')) {
+            if (!useStreaming && _isCopilotStreamUrl) {
                 console.warn(`[Cupcake PM] Copilot request in non-stream mode. Long responses may return 524 via proxy.`);
             }
 
@@ -6343,6 +6411,11 @@ var CupcakeProviderManager = (function (exports) {
 
                 const _hasReadableStreamBody = !!(res?.body && typeof res.body.getReader === 'function');
                 if (!_hasReadableStreamBody) {
+                    // Copilot: non-streaming fallback causes 524 — return error immediately
+                    if (_isCopilotStreamUrl) {
+                        console.error(`[Cupcake PM] Copilot streaming response body unavailable (no ReadableStream). Cannot fall back to non-streaming (would cause 524).`);
+                        return { success: false, content: `[Cupcake PM] Copilot 스트리밍 응답 본문을 읽을 수 없습니다. ReadableStream이 지원되지 않는 환경입니다. 호환성 모드를 확인하거나 브라우저를 업데이트해 주세요.`, _status: 0 };
+                    }
                     console.warn(`[Cupcake PM] Streaming response body unavailable for ${format}; retrying as non-streaming.`);
                     const fallbackUrl = _toNonStreamingUrl(streamUrl);
                     const fallbackBodyObj = { ...body };
@@ -7377,13 +7450,26 @@ var CupcakeProviderManager = (function (exports) {
                 pFileInput.addEventListener('change', async (e) => {
                     const file = asInput(e.target).files?.[0];
                     if (!file) return;
+                    if (file.size > SubPluginManager.MAX_INSTALL_BYTES) {
+                        alert(
+                            `⚠️ 설치 실패: 파일 용량이 너무 큽니다. ` +
+                            `최대 ${(SubPluginManager.MAX_INSTALL_BYTES / 1024).toFixed(0)}KB까지만 설치할 수 있습니다.`
+                        );
+                        renderPluginsTab();
+                        return;
+                    }
                     const reader = new FileReader();
                     reader.onload = async (ev) => {
                         const code = /** @type {string} */ ((/** @type {FileReader} */ (ev.target)).result);
-                        const name = await SubPluginManager.install(code);
-                        const installed = SubPluginManager.plugins.find(p => p.name === name);
-                        if (installed) await SubPluginManager.hotReload(installed.id);
-                        alert(`서브 플러그인 '${name}' 설치 완료!`);
+                        try {
+                            const name = await SubPluginManager.install(code);
+                            const installed = SubPluginManager.plugins.find(p => p.name === name);
+                            if (installed) await SubPluginManager.hotReload(installed.id);
+                            alert(`서브 플러그인 '${name}' 설치 완료!`);
+                        } catch (installErr) {
+                            const message = installErr instanceof Error ? installErr.message : String(installErr || '알 수 없는 오류');
+                            alert(`⚠️ 설치 실패: ${message}`);
+                        }
                         renderPluginsTab();
                     };
                     reader.readAsText(file);
@@ -7849,7 +7935,7 @@ var CupcakeProviderManager = (function (exports) {
                         compatStatusEl.innerHTML = `<span class="text-amber-400">⚡ 수동 활성화됨</span> — nativeFetch 건너뛰기 + 스트리밍 자동 비활성화.${nodelessMode !== 'off' ? ` <span class="text-cyan-300">Node-less 실험 모드: ${escHtml(nodelessMode)}</span>` : ''}`;
                         compatStatusEl.classList.add('border-amber-700');
                     } else if (!capable) {
-                        compatStatusEl.innerHTML = `<span class="text-amber-400">⚡ 자동 활성화됨</span> — Bridge가 ReadableStream을 지원하지 않아 자동 적용 (iPhone/Safari 등).${nodelessMode !== 'off' ? ` <span class="text-cyan-300">Node-less 실험 모드: ${escHtml(nodelessMode)}</span>` : ''}`;
+                        compatStatusEl.innerHTML = `<span class="text-yellow-400">⚠ Bridge 미지원</span> — ReadableStream 전달이 불가능한 환경입니다. 문제가 있으면 호환성 모드를 수동으로 켜주세요.${nodelessMode !== 'off' ? ` <span class="text-cyan-300">Node-less 실험 모드: ${escHtml(nodelessMode)}</span>` : ''}`;
                         compatStatusEl.classList.add('border-amber-700');
                     } else {
                         compatStatusEl.innerHTML = nodelessMode === 'off'
@@ -8043,11 +8129,11 @@ var CupcakeProviderManager = (function (exports) {
                         <p class="text-xs text-amber-300 mb-2 font-semibold">🔧 호환성 모드란?</p>
                         <p class="text-xs text-gray-400 mb-2">iPhone/Safari 등 ReadableStream 전달이 불안정한 환경에서 nativeFetch를 건너뛰고 risuFetch만 사용합니다.</p>
                         <p class="text-xs text-gray-400 mb-2">또한 <strong class="text-amber-200">스트리밍을 자동으로 비활성화</strong>하여, 응답 본문을 못 받아 요청이 2회 발생하는 문제를 방지합니다.</p>
-                        <p class="text-xs text-yellow-500">⚠️ Bridge가 ReadableStream을 지원하지 않으면 자동으로 활성화됩니다. 수동으로 켜면 항상 적용됩니다.</p>
+                        <p class="text-xs text-yellow-500">⚠️ 호환성 모드는 수동으로만 활성화됩니다. iPhone/Safari 등에서 스트리밍이 안 되거나 요청이 중복 발생하면 수동으로 켜주세요.</p>
                         <div id="cpm-compat-status" class="mt-3 text-xs font-mono px-3 py-2 rounded bg-gray-900 border border-gray-600">호환성 상태: 확인 중...</div>
                     </div>
                     <div class="space-y-3">
-                        ${await renderInput('cpm_compatibility_mode', '호환성 모드 강제 활성화 (Force Compatibility Mode)', 'checkbox')}
+                        ${await renderInput('cpm_compatibility_mode', '호환성 모드 활성화 (Compatibility Mode)', 'checkbox')}
                         ${await renderInput('cpm_copilot_nodeless_mode', 'Node-less용 Copilot 실험 모드', 'select', [
                             { value: 'off', text: '끄기 (기본 헤더 유지)' },
                             { value: 'nodeless-1', text: '실험 1 — 토큰 교환 헤더만 축소' },

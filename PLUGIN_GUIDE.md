@@ -1,7 +1,7 @@
 # Cupcake Provider Manager — Sub-Plugin Development Guide
 
-> **Last Updated:** 2026-03-09  
-> **CPM Version:** 1.19.6  
+> **Last Updated:** 2026-03-14  
+> **CPM Version:** 1.20.6  
 > **RisuAI Compatibility:** V3 (iframe-sandboxed plugins)
 
 ---
@@ -61,7 +61,7 @@ Sub-plugins are standalone `.js` files that run inside CPM's execution context (
 ```
 RisuAI V3 App
   └─ iframe (about:srcdoc, sandboxed)
-       └─ provider-manager.js (CPM v1.19.6 engine)
+       └─ provider-manager.js (CPM v1.20.6 engine)
             ├─ window.CupcakePM API exposed
             ├─ KeyPool (key rotation engine)
             ├─ SettingsBackup (pluginStorage persistence)
@@ -75,8 +75,9 @@ RisuAI V3 App
             │   ├─ cpm-provider-openrouter.js
             │   ├─ cpm-copilot-manager.js
             │   ├─ cpm-chat-resizer.js
+            │   ├─ cpm-chat-navigation.js
             │   ├─ cpm-translation-cache.js
-            │   └─ ... (eval'd in same context)
+            │   └─ ... (executed via CSP nonce-based <script> tag)
             ├─ handleRequest() routes to correct fetcher
             │   ├─ inferSlot() → aux slot parameter overrides
             │   └─ fetchByProviderId() → customFetchers[provider] or fetchCustom()
@@ -755,7 +756,8 @@ reasoningList = [
     { value: 'off', text: 'Off (끄기)' },
     { value: 'low', text: 'Low (낮음)' },
     { value: 'medium', text: 'Medium (중간)' },
-    { value: 'high', text: 'High (높음)' }
+    { value: 'high', text: 'High (높음)' },
+    { value: 'xhigh', text: 'XHigh (매우 높음)' }
 ];
 
 verbosityList = [
@@ -836,7 +838,7 @@ When dynamic models are fetched successfully:
 
 ## 11. Key Rotation (키 회전)
 
-CPM v1.19.6 includes a built-in **KeyPool** system for automatic multi-key rotation. Users can enter multiple API keys separated by whitespace/newlines in a single settings field.
+CPM v1.20.6 includes a built-in **KeyPool** system for automatic multi-key rotation. Users can enter multiple API keys separated by whitespace/newlines in a single settings field.
 
 ### 11.1 Basic Key Rotation
 
@@ -1091,6 +1093,7 @@ Sub-plugins don't have to be providers. You can create UI components or utilitie
 | Sub-Plugin | Description |
 |------------|-------------|
 | **Chat Input Resizer** (`cpm-chat-resizer.js`) | Fullscreen text input overlay for mobile |
+| **Chat Navigation** (`cpm-chat-navigation.js`) | 채팅 메시지 네비게이션 (4버튼 → 2버튼 → 키보드 → OFF 순환) |
 | **Copilot Token Manager** (`cpm-copilot-manager.js`) | GitHub Copilot OAuth device flow, token management, model list, quota check |
 | **Translation Cache Manager** (`cpm-translation-cache.js`) | Search/edit/manage RisuAI's LLM translation cache, user dictionary |
 
@@ -1174,13 +1177,15 @@ await risuai.pluginStorage.setItem('my_custom_data', JSON.stringify(myData));
 
 ```
 your-repo/
-├── src/                           # ESM source modules (v1.19.6)
+├── src/                           # ESM source modules (v1.20.6)
 │   ├── index.js                   # Rollup entry point
 │   ├── plugin-header.js           # RisuAI @arg declarations
-│   └── lib/                       # All core modules (27+)
+│   ├── cpm-url.config.js          # Build-time URL config (test/production)
+│   └── lib/                       # All core modules (30+)
 ├── dist/
 │   └── provider-manager.js        # Built IIFE bundle
 ├── tests/                         # Vitest test files (30+)
+├── styles/                        # Tailwind CSS source + generated
 ├── cpm-provider-openai.js         # OpenAI sub-plugin
 ├── cpm-provider-anthropic.js      # Anthropic sub-plugin
 ├── cpm-provider-gemini.js         # Gemini Studio sub-plugin
@@ -1190,12 +1195,20 @@ your-repo/
 ├── cpm-provider-openrouter.js     # OpenRouter sub-plugin
 ├── cpm-copilot-manager.js         # GitHub Copilot Token Manager
 ├── cpm-chat-resizer.js            # Chat Input Resizer UI component
+├── cpm-chat-navigation.js         # Chat Navigation UI component
 ├── cpm-translation-cache.js       # Translation Cache Manager
 ├── versions.json                  # Version manifest
 ├── update-bundle.json             # ⚠️ BUNDLED versions + code (auto-generated)
+├── release-hashes.json            # SHA-256 manifest (auto-generated)
 ├── api/
+│   ├── main-plugin.js             # Vercel serverless — main plugin download
 │   ├── versions.js                # Vercel serverless — version manifest
 │   └── update-bundle.js           # Vercel serverless — update bundle
+├── scripts/
+│   ├── build-production.cjs       # Cross-platform production build
+│   ├── build-tailwind.cjs         # Tailwind CSS generation
+│   ├── release.cjs                # Atomic release pipeline
+│   └── verify-release-sync.cjs    # Release sync verification
 ├── vercel.json                    # Vercel routing config
 ├── rollup.config.mjs             # Rollup build config
 ├── vitest.config.js              # Vitest + coverage config
@@ -1211,44 +1224,52 @@ Maps plugin display names to version + filename:
 ```json
 {
     "CPM Provider - OpenAI": {
-        "version": "1.5.1",
+        "version": "1.5.7",
         "file": "cpm-provider-openai.js"
     },
     "CPM Provider - Anthropic": {
-        "version": "1.6.1",
+        "version": "1.6.6",
         "file": "cpm-provider-anthropic.js"
     },
     "CPM Provider - Gemini Studio": {
-        "version": "1.5.0",
+        "version": "1.6.4",
         "file": "cpm-provider-gemini.js"
     },
     "CPM Provider - Vertex AI": {
-        "version": "1.5.0",
+        "version": "1.6.4",
         "file": "cpm-provider-vertex.js"
     },
     "CPM Provider - AWS Bedrock": {
-        "version": "1.4.1",
+        "version": "1.5.2",
         "file": "cpm-provider-aws.js"
     },
     "CPM Provider - DeepSeek": {
-        "version": "1.4.0",
+        "version": "1.4.5",
         "file": "cpm-provider-deepseek.js"
     },
     "CPM Provider - OpenRouter": {
-        "version": "1.3.0",
+        "version": "1.3.5",
         "file": "cpm-provider-openrouter.js"
     },
     "CPM Component - Chat Input Resizer": {
-        "version": "0.1.9",
+        "version": "0.3.6",
         "file": "cpm-chat-resizer.js"
     },
     "CPM Component - Copilot Token Manager": {
-        "version": "1.5.2",
+        "version": "1.7.2",
         "file": "cpm-copilot-manager.js"
     },
     "CPM Component - Translation Cache Manager": {
-        "version": "1.2.1",
+        "version": "1.3.2",
         "file": "cpm-translation-cache.js"
+    },
+    "CPM Component - Chat Navigation": {
+        "version": "2.1.3",
+        "file": "cpm-chat-navigation.js"
+    },
+    "Cupcake Provider Manager": {
+        "version": "1.20.6",
+        "file": "provider-manager.js"
     }
 }
 ```
@@ -1257,48 +1278,45 @@ Maps plugin display names to version + filename:
 
 ### 16.3 update-bundle.json
 
-This is the **critical file** that the update system reads. It's a single JSON object combining versions and embedded code:
+This is the **critical file** that the update system reads. It's a single JSON object combining versions (with SHA-256 integrity hashes) and embedded code:
 
 ```json
 {
     "versions": {
-        "CPM Provider - OpenAI": { "version": "1.5.1", "file": "cpm-provider-openai.js" },
+        "CPM Provider - OpenAI": { "version": "1.5.7", "file": "cpm-provider-openai.js", "sha256": "abc123..." },
         "...": "..."
     },
     "code": {
-        "cpm-provider-openai.js": "// @name CPM Provider - OpenAI\n// @version 1.5.1\n...(full file contents)...",
+        "cpm-provider-openai.js": "// @name CPM Provider - OpenAI\n// @version 1.5.7\n...(full file contents)...",
         "...": "..."
     }
 }
 ```
 
-The Vercel API route (`/api/update-bundle`) serves this file directly with CORS headers.
+The Vercel API routes (`/api/update-bundle`, `/api/main-plugin`) serve this file directly with CORS headers.
 
 ### 16.4 Rebuilding update-bundle.json
 
 **⚠️ You MUST rebuild this file after every sub-plugin code change, or the update won't be detected by users.**
 
-Run this script from the repository root:
-
-```javascript
-// rebuild-bundle.js
-const fs = require('fs');
-const versions = JSON.parse(fs.readFileSync('versions.json', 'utf-8'));
-const bundle = { versions: {}, code: {} };
-
-for (const [name, info] of Object.entries(versions)) {
-    bundle.versions[name] = { version: info.version, file: info.file };
-    bundle.code[info.file] = fs.readFileSync(info.file, 'utf-8');
-}
-
-fs.writeFileSync('update-bundle.json', JSON.stringify(bundle));
-console.log('update-bundle.json rebuilt with', Object.keys(bundle.code).length, 'files');
-```
-
-Or as a one-liner:
+The recommended way is to use the integrated release pipeline:
 
 ```bash
-node -e "const fs=require('fs');const v=JSON.parse(fs.readFileSync('versions.json','utf-8'));const b={versions:{},code:{}};for(const[n,i]of Object.entries(v)){b.versions[n]={version:i.version,file:i.file};b.code[i.file]=fs.readFileSync(i.file,'utf-8');}fs.writeFileSync('update-bundle.json',JSON.stringify(b));console.log('Done:',Object.keys(b.code).length,'files')"
+node scripts/release.cjs
+```
+
+This single command performs the full pipeline:
+1. Rollup build → `dist/provider-manager.js`
+2. Copy dist → root (if changed)
+3. Verify `versions.json` ↔ actual file header versions match
+4. Regenerate `update-bundle.json` with SHA-256 hashes
+5. Run full test suite
+6. Produce `release-hashes.json` manifest
+
+Alternatively, you can regenerate just the bundle with the standalone script:
+
+```bash
+node generate-bundle.cjs
 ```
 
 ### 16.5 Complete Update Checklist
@@ -1309,10 +1327,10 @@ When you update a sub-plugin, you must update **4 things**:
 |------|--------|------|
 | 1 | Update `@version` in the sub-plugin file header | `cpm-provider-xyz.js` |
 | 2 | Update version number in `versions.json` | `versions.json` |
-| 3 | **Rebuild `update-bundle.json`** | `update-bundle.json` |
+| 3 | **Run `node scripts/release.cjs`** to rebuild bundle + verify + test | `update-bundle.json`, `release-hashes.json` |
 | 4 | Commit and push to GitHub | All changed files |
 
-**Common mistake:** Forgetting step 3.
+**Recommended:** Use `node scripts/release.cjs` which automates steps 2-3 verification and ensures all artifacts are in sync. If versions.json doesn't match the file headers, the release pipeline will abort with an error.
 
 ### 16.6 How the Update System Works
 
@@ -1327,38 +1345,54 @@ When you update a sub-plugin, you must update **4 things**:
 
 ### 16.7 Main Engine (`provider-manager.js`) Updates
 
-The `provider-manager.js` main engine has its own `@update-url` pointing to the Vercel deployment:
+The `provider-manager.js` main engine has its own `@update-url` pointing to the Vercel API endpoint. The source always contains the test URL:
 
 ```
-//@update-url https://cupcake-plugin-manager.vercel.app/provider-manager.js
+//@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 ```
+
+At build time, `rollup.config.mjs` substitutes the URL based on `CPM_ENV`:
+- **test** (default): `cupcake-plugin-manager-test.vercel.app`
+- **production**: `cupcake-plugin-manager.vercel.app`
 
 This is separate from the sub-plugin update bundle. RisuAI handles main engine updates via its native plugin update mechanism. To update the main engine:
 
-1. Update `@version` **and** `CPM_VERSION` constant in `provider-manager.js`
-2. Ensure the file is deployed to Vercel (via git push)
-3. RisuAI will detect the new version on next plugin update check
+1. Update source version fields (`package.json`, `src/plugin-header.js`, `src/lib/shared-state.js`) and `versions.json`
+2. Run `node scripts/release.cjs` to regenerate `provider-manager.js`, `update-bundle.json`, and `release-hashes.json`
+3. Push the synced artifacts
+4. RisuAI will detect the new version on next plugin update check
 
 ### 16.8 Vercel API Route
 
-The `api/update-bundle.js` serverless function:
+The `api/update-bundle.js` serverless function (ESM):
 
 ```javascript
-const fs = require('fs');
-const path = require('path');
+import { readFileSync } from 'fs';
+import { join } from 'path';
 
-module.exports = (req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    if (req.method === 'OPTIONS') return res.status(204).end();
-
-    const bundlePath = path.join(__dirname, '..', 'update-bundle.json');
-    const data = fs.readFileSync(bundlePath, 'utf-8');
-    res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.status(200).send(data);
+const CORS_HEADERS = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Range',
+    'Access-Control-Max-Age': '86400',
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
 };
+
+export default function handler(req, res) {
+    if (req.method === 'OPTIONS') {
+        res.writeHead(204, CORS_HEADERS);
+        res.end();
+        return;
+    }
+
+    const bundlePath = join(process.cwd(), 'update-bundle.json');
+    const data = readFileSync(bundlePath, 'utf-8');
+    res.writeHead(200, {
+        ...CORS_HEADERS,
+        'Content-Type': 'application/json; charset=utf-8',
+    });
+    res.end(data);
+}
 ```
 
 ---
@@ -1367,9 +1401,9 @@ module.exports = (req, res) => {
 
 > **CPM은 RisuAI V3의 iframe 샌드박스 안에서 실행됩니다. 사용자의 시스템이나 브라우저 데이터에 접근할 수 없습니다.**
 
-### 17.1 eval() 사용과 안전성
+### 17.1 Nonce 기반 코드 실행과 안전성
 
-CPM은 서브 플러그인을 로드하기 위해 `eval()`을 사용합니다 (`SubPluginManager.executeEnabled()`, `SubPluginManager.executeOne()`). 이는 "서브 플러그인 메타 프레임워크"라는 CPM의 설계에 필수적인 구조적 결정이며, **sandbox 보안 경계를 탈출하지 않습니다**.
+CPM은 서브 플러그인을 로드하기 위해 **CSP nonce 기반 `<script>` 태그 주입**을 사용합니다 (`_executeViaScriptTag()` — `csp-exec.js`). 이전에 사용하던 `eval()` 대신 V3 호스트의 CSP 정책과 호환되는 방식으로 전환되었으며, sandbox 보안 경계를 탈출하지 않습니다.
 
 #### RisuAI V3 다중 보안 레이어
 
@@ -1380,24 +1414,25 @@ CPM은 서브 플러그인을 로드하기 위해 `eval()`을 사용합니다 (`
 | **RPC Bridge** | 모든 API 호출은 postMessage 기반 RPC Proxy를 통해 직렬화됨 (structured clone) |
 | **Host API Restrictions** | URL 블랙리스트, SafeElement 래핑, mode 고정, 권한 검사 (getPluginPermission) 적용 |
 
-#### eval()이 안전한 이유
+#### Nonce 기반 `<script>` 실행이 안전한 이유
 
-1. **iframe 내부 실행** — eval()은 이미 격리된 sandbox iframe 안에서 실행됩니다. 추가적인 sandbox 탈출 경로를 열지 않습니다.
-2. **RisuAI 공식 허용** — RisuAI의 `GUEST_BRIDGE_SCRIPT` 자체에서 `eval()`을 사용하며 (`factory.ts` L185-190), iframe 내 eval()은 공식 허용된 패턴입니다.
+1. **iframe 내부 실행** — 서브 플러그인 코드는 이미 격리된 sandbox iframe 안에서 nonce가 부여된 `<script>` 태그로 실행됩니다. sandbox 탈출 경로를 열지 않습니다.
+2. **CSP와 호환** — V3 호스트의 Content-Security-Policy nonce를 자동 추출 (`_extractNonce()`)하여 사용하므로 CSP 위반 없이 안전하게 실행됩니다.
 3. **사용자 동의 기반** — 모든 서브 플러그인은 사용자가 직접 설치(파일 업로드 또는 업데이트 버튼 클릭)한 코드만 실행합니다.
-4. **업데이트 안전장치** — 원격 코드의 `@name`이 대상 플러그인과 일치하지 않으면 업데이트가 차단됩니다 (`provider-manager.js` L846-849).
+4. **업데이트 안전장치** — 원격 코드의 `@name`이 대상 플러그인과 일치하지 않으면 업데이트가 차단되며, SHA-256 무결성 검증도 수행됩니다.
+5. **타임아웃 보호** — `_executeViaScriptTag()`는 10초 타임아웃을 가지며, CSP 차단 등으로 스크립트가 실행되지 않으면 자동으로 에러를 발생시킵니다.
 
-#### eval() 코드 vs 일반 코드 비교
+#### 서브 플러그인 코드 vs 일반 코드 비교
 
-| 항목 | eval() 코드 (서브 플러그인) | 일반 iframe 코드 |
-|------|--------------------------|----------------|
+| 항목 | 서브 플러그인 (`<script nonce>`) | 일반 iframe 코드 |
+|------|-------------------------------|----------------|
 | 호스트 DOM 접근 | ❌ 불가 | ❌ 불가 |
 | 호스트 localStorage | ❌ 불가 | ❌ 불가 |
 | 직접 fetch() | ❌ CSP 차단 | ❌ CSP 차단 |
 | window.parent 접근 | ❌ cross-origin 차단 | ❌ cross-origin 차단 |
-| PM 로컬 변수 접근 | ✅ 가능 (스코프 공유) | ❌ 불가 |
+| PM 로컬 변수 접근 | ✅ 가능 (window scope 공유) | ❌ 불가 |
 
-> eval()이 일반 코드와 다른 점은 오직 PM의 로컬 변수 접근이며, 이는 sandbox 외부로의 탈출이 아닌 **sandbox 내부에서의 권한 공유**입니다.
+> nonce `<script>` 코드가 일반 코드와 다른 점은 오직 PM의 window scope 접근이며, 이는 sandbox 외부로의 탈출이 아닌 **sandbox 내부에서의 권한 공유**입니다.
 
 ### 17.2 서브 플러그인 간 격리
 
@@ -1415,7 +1450,7 @@ CPM은 서브 플러그인을 로드하기 위해 `eval()`을 사용합니다 (`
 | Update Bundle | CPM Vercel API에서 버전 확인 후 다운로드 | ✅ "Update" 버튼 클릭 |
 | 초기 설치 | RisuAI 플러그인 시스템을 통한 PM 자체 설치 | ✅ 사용자 설치 |
 
-> 📄 전체 보안 분석 보고서: [Issue #4 — CPM eval() Security Analysis Report](https://github.com/ruyari-cupcake/cupcake-plugin-manager/issues/4)
+> 📄 보안 분석 히스토리: [Issue #4](https://github.com/ruyari-cupcake/cupcake-plugin-manager/issues/4) (초기 eval() 기반 → 현재 nonce 기반 `<script>` 전환)
 
 ---
 
@@ -1534,16 +1569,17 @@ Follow semantic versioning: `MAJOR.MINOR.PATCH`
 
 | Sub-Plugin | Version | Type | Description |
 |------------|---------|------|-------------|
-| CPM Provider - OpenAI | 1.5.1 | Provider | GPT-4.1, GPT-5, GPT-5.1, GPT-5.2, ChatGPT-4o, o-series; Key rotation, Service Tier |
-| CPM Provider - Anthropic | 1.6.1 | Provider | Claude 4–4.6; Adaptive thinking, Prompt caching, Key rotation |
-| CPM Provider - Gemini Studio | 1.5.0 | Provider | Gemini 2.5–3.1; Thinking config (thinkMode / thinkingBudget), Key rotation |
-| CPM Provider - Vertex AI | 1.5.0 | Provider | Gemini via GCP; Service Account JSON auth, JSON key rotation |
-| CPM Provider - AWS Bedrock | 1.4.1 | Provider | Claude/others via AWS; V4 signing, Key rotation |
-| CPM Provider - DeepSeek | 1.4.0 | Provider | DeepSeek Chat/Reasoner; Key rotation |
-| CPM Provider - OpenRouter | 1.3.0 | Provider | OpenRouter aggregator; Provider routing, Key rotation |
-| CPM Component - Chat Input Resizer | 0.1.9 | UI | Fullscreen text input overlay for mobile |
-| CPM Component - Copilot Token Manager | 1.5.2 | Utility | GitHub Copilot OAuth flow, Token/Quota management |
-| CPM Component - Translation Cache Manager | 1.2.1 | Utility | Translation cache search/edit/dictionary |
+| CPM Provider - OpenAI | 1.5.7 | Provider | GPT-4.1, GPT-5, GPT-5.1, GPT-5.2, GPT-5.4, ChatGPT-4o, o-series; Key rotation, Service Tier |
+| CPM Provider - Anthropic | 1.6.6 | Provider | Claude 4–4.6; Adaptive thinking, Prompt caching, Key rotation |
+| CPM Provider - Gemini Studio | 1.6.4 | Provider | Gemini 2.5–3.1; Thinking config (thinkMode / thinkingBudget), Key rotation |
+| CPM Provider - Vertex AI | 1.6.4 | Provider | Gemini via GCP; Service Account JSON auth, JSON key rotation |
+| CPM Provider - AWS Bedrock | 1.5.2 | Provider | Claude/others via AWS; V4 signing, Key rotation |
+| CPM Provider - DeepSeek | 1.4.5 | Provider | DeepSeek Chat/Reasoner; Key rotation |
+| CPM Provider - OpenRouter | 1.3.5 | Provider | OpenRouter aggregator; Provider routing, Key rotation |
+| CPM Component - Chat Input Resizer | 0.3.6 | UI | Fullscreen text input overlay for mobile |
+| CPM Component - Chat Navigation | 2.1.3 | UI | 채팅 메시지 네비게이션 (4버튼 → 2버튼 → 키보드 → OFF 순환) |
+| CPM Component - Copilot Token Manager | 1.7.2 | Utility | GitHub Copilot OAuth flow, Token/Quota management |
+| CPM Component - Translation Cache Manager | 1.3.2 | Utility | Translation cache search/edit/dictionary |
 
 ## Appendix B: Complete Example — Anthropic Provider
 

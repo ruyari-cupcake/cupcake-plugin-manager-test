@@ -1,0 +1,67 @@
+{
+  "timestamp": "2026-03-15T03:09:08.843Z",
+  "version": "1.20.10",
+  "files": {
+    "cpm-provider-vertex.js": {
+      "version": "1.6.4",
+      "sha256": "f491d8f0158c31f8dfb74d4a4b170b6fd71ebfe17cd9c951d2d62906adccfd91",
+      "size": 39141
+    },
+    "cpm-provider-gemini.js": {
+      "version": "1.6.4",
+      "sha256": "ff0be1f74da4190b87ec780c26bfb1b36d77d677307117e742328330c7df457a",
+      "size": 15205
+    },
+    "cpm-provider-anthropic.js": {
+      "version": "1.6.6",
+      "sha256": "23ee79e9c4de3ca293fca8bd6d242fa14238c112da32ee90670e616500a641e2",
+      "size": 17117
+    },
+    "cpm-provider-openai.js": {
+      "version": "1.5.7",
+      "sha256": "a288279421754e6d1c8ad9375a3543bad699fc5b22f5ce7719db90f3794bc1bf",
+      "size": 23307
+    },
+    "cpm-provider-deepseek.js": {
+      "version": "1.4.5",
+      "sha256": "760841d248509ab7a9bc23a01ff97e783ae4a60a858aa8a4b6a84be96dcae015",
+      "size": 10174
+    },
+    "cpm-provider-openrouter.js": {
+      "version": "1.3.5",
+      "sha256": "90a70aba1c8bc2987c37000ffcad990f263da7428d60c778a12b265d1289a8cc",
+      "size": 11064
+    },
+    "cpm-provider-aws.js": {
+      "version": "1.5.2",
+      "sha256": "44bd16f5ddc434e3f61227eaca25c770f509ec92dd4995f7e9c8241872ed9edc",
+      "size": 27439
+    },
+    "cpm-chat-resizer.js": {
+      "version": "0.3.6",
+      "sha256": "eee0be99bfabf66edfc156aced5f94b4dde6382006719cd420ead75767a5a99f",
+      "size": 22194
+    },
+    "cpm-copilot-manager.js": {
+      "version": "1.7.2",
+      "sha256": "0c925040475b80aa60eb6e288e9b0817d476b1e56e8782454dc3fabf28850802",
+      "size": 52943
+    },
+    "cpm-translation-cache.js": {
+      "version": "1.3.2",
+      "sha256": "43628f16d9f4c55857220b63f1536c31c24570fa865d11541f95c95ea91378d4",
+      "size": 47140
+    },
+    "cpm-chat-navigation.js": {
+      "version": "2.1.3",
+      "sha256": "3a32ca4e166125d2c6303491f51bf77ccf3052f6398c20350cbcbab5d8c9be12",
+      "size": 22781
+    },
+    "provider-manager.js": {
+      "version": "1.20.10",
+      "sha256": "8bf058e84c6e799a11b0974f33acc7dbc20d84517e597ccfc11f73d0cecdf9a9",
+      "size": 490744
+    }
+  },
+  "bundleHash": "56109ff2825c29aa565239852f7097ac08f1b2dbaffbb07d5882c520a2dbb1ca"
+}
