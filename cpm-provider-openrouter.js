@@ -1,5 +1,5 @@
 //@name CPM Provider - OpenRouter
-//@version 1.3.5
+//@version 1.3.6
 //@description OpenRouter provider for Cupcake PM (Streaming, Key Rotation)
 //@icon 🌐
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-provider-openrouter.js
@@ -26,10 +26,11 @@
             { uniqueId: 'openrouter-dynamic', id: 'openrouter', name: 'OpenRouter (Set inside PM config)' },
         ],
         fetcher: async function (modelDef, messages, temp, maxTokens, args, abortSignal, _reqId) {
+            const _so = args?._cpmSlotThinkingConfig || {};
             const config = {
                 url: await CPM.safeGetArg('cpm_openrouter_url'),
                 model: await CPM.safeGetArg('cpm_openrouter_model'),
-                reasoning: await CPM.safeGetArg('cpm_openrouter_reasoning'),
+                reasoning: _so.reasoning || await CPM.safeGetArg('cpm_openrouter_reasoning'),
                 providerString: await CPM.safeGetArg('cpm_openrouter_provider'),
             };
 

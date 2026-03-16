@@ -1,5 +1,5 @@
 //@name CPM Provider - Gemini Studio
-//@version 1.6.5
+//@version 1.6.6
 //@description Google Gemini Studio (API Key) provider for Cupcake PM (Streaming, Key Rotation)
 //@icon 🔵
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-provider-gemini.js
@@ -133,10 +133,11 @@
         fetcher: async function (modelDef, messages, temp, maxTokens, args, abortSignal, _reqId) {
             const streamingEnabled = await CPM.safeGetBoolArg('cpm_streaming_enabled', false);
             const usePlainFetch = await CPM.safeGetBoolArg('chat_gemini_usePlainFetch', false);
+            const _so = args?._cpmSlotThinkingConfig || {};
             const config = {
                 model: await CPM.safeGetArg('cpm_gemini_model') || modelDef.id,
-                thinking: await CPM.safeGetArg('cpm_gemini_thinking_level'),
-                thinkingBudget: await CPM.safeGetArg('cpm_gemini_thinking_budget'),
+                thinking: _so.thinking_level || await CPM.safeGetArg('cpm_gemini_thinking_level'),
+                thinkingBudget: _so.thinkingBudget || await CPM.safeGetArg('cpm_gemini_thinking_budget'),
                 preserveSystem: await CPM.safeGetBoolArg('chat_gemini_preserveSystem', true),
                 showThoughtsToken: await CPM.safeGetBoolArg('chat_gemini_showThoughtsToken'),
                 useThoughtSignature: await CPM.safeGetBoolArg('chat_gemini_useThoughtSignature'),

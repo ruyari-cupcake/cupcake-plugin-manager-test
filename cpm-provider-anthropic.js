@@ -1,5 +1,5 @@
 //@name CPM Provider - Anthropic
-//@version 1.6.6
+//@version 1.6.7
 //@description Anthropic Claude provider for Cupcake PM (Streaming, Key Rotation)
 //@icon 🟠
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-provider-anthropic.js
@@ -100,11 +100,12 @@
             const cacheTtl = await CPM.safeGetArg('cpm_anthropic_cache_ttl');
             const cacheTtlNormalized = String(cacheTtl || '').trim().toLowerCase();
             const oneHourCaching = cacheTtlNormalized === '1h' || String(cacheRaw || '').trim().toLowerCase() === '1h';
+            const _so = args?._cpmSlotThinkingConfig || {};
             const config = {
                 url: await CPM.safeGetArg('cpm_anthropic_url'),
                 model: await CPM.safeGetArg('cpm_anthropic_model') || modelDef.id,
-                budget: await CPM.safeGetArg('cpm_anthropic_thinking_budget'),
-                effort: await CPM.safeGetArg('cpm_anthropic_thinking_effort'),
+                budget: _so.thinkingBudget || await CPM.safeGetArg('cpm_anthropic_thinking_budget'),
+                effort: _so.effort || await CPM.safeGetArg('cpm_anthropic_thinking_effort'),
                 caching: !!cacheEnabled || oneHourCaching,
                 claude1HourCaching: oneHourCaching,
             };

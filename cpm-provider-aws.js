@@ -1,5 +1,5 @@
 //@name CPM Provider - AWS Bedrock
-//@version 1.5.2
+//@version 1.5.3
 //@description AWS Bedrock (Claude) provider for Cupcake PM (Streaming)
 //@icon 🔶
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-provider-aws.js
@@ -261,13 +261,14 @@
             // which cannot be reliably parsed in the V3 plugin sandbox (text-based split/regex fails).
             // Force non-streaming (invoke endpoint) for all AWS models.
             const streamingEnabled = false;
+            const _so = args?._cpmSlotThinkingConfig || {};
             const config = {
                 key: await CPM.safeGetArg('cpm_aws_key'),
                 secret: await CPM.safeGetArg('cpm_aws_secret'),
                 region: await CPM.safeGetArg('cpm_aws_region'),
                 model: modelDef.id,
-                budget: await CPM.safeGetArg('cpm_aws_thinking_budget'),
-                effort: await CPM.safeGetArg('cpm_aws_thinking_effort'),
+                budget: _so.thinkingBudget || await CPM.safeGetArg('cpm_aws_thinking_budget'),
+                effort: _so.effort || await CPM.safeGetArg('cpm_aws_thinking_effort'),
             };
 
             if (!config.key || !config.secret || !config.region || !config.model) {

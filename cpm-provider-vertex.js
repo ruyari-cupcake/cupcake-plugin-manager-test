@@ -1,5 +1,5 @@
 //@name CPM Provider - Vertex AI
-//@version 1.6.5
+//@version 1.6.6
 //@description Google Vertex AI (Service Account) provider for Cupcake PM (Streaming, Key Rotation)
 //@icon 🔷
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-provider-vertex.js
@@ -260,12 +260,13 @@
             const _vtxCacheTtl = await CPM.safeGetArg('cpm_vertex_claude_cache_ttl');
             const _vtxCacheTtlNorm = String(_vtxCacheTtl || '').trim().toLowerCase();
             const _vtxOneHourCaching = _vtxCacheTtlNorm === '1h' || String(_vtxCacheRaw || '').trim().toLowerCase() === '1h';
+            const _so = args?._cpmSlotThinkingConfig || {};
             const config = {
                 location: await CPM.safeGetArg('cpm_vertex_location'),
                 model: await CPM.safeGetArg('cpm_vertex_model') || modelDef.id,
-                thinking: await CPM.safeGetArg('cpm_vertex_thinking_level'),
-                thinkingBudget: await CPM.safeGetArg('cpm_vertex_thinking_budget'),
-                claudeThinkingBudget: await CPM.safeGetArg('cpm_vertex_claude_thinking_budget'),
+                thinking: _so.thinking_level || await CPM.safeGetArg('cpm_vertex_thinking_level'),
+                thinkingBudget: _so.thinkingBudget || await CPM.safeGetArg('cpm_vertex_thinking_budget'),
+                claudeThinkingBudget: _so.thinkingBudget || await CPM.safeGetArg('cpm_vertex_claude_thinking_budget'),
                 preserveSystem: await CPM.safeGetBoolArg('chat_vertex_preserveSystem', true),
                 showThoughtsToken: await CPM.safeGetBoolArg('chat_vertex_showThoughtsToken'),
                 useThoughtSignature: await CPM.safeGetBoolArg('chat_vertex_useThoughtSignature'),
@@ -375,7 +376,7 @@
                     // Older models use budget-based thinking (type: 'enabled') with budget_tokens
                     const VERTEX_ADAPTIVE_PATTERNS = ['claude-opus-4-6', 'claude-sonnet-4-6'];
                     const VERTEX_EFFORT_OPTIONS = ['low', 'medium', 'high', 'max'];
-                    const vertexClaudeEffort = await CPM.safeGetArg('cpm_vertex_claude_effort');
+                    const vertexClaudeEffort = _so.effort || await CPM.safeGetArg('cpm_vertex_claude_effort');
                     const isVertexAdaptive = VERTEX_ADAPTIVE_PATTERNS.some(p => model.includes(p));
 
                     // BUG-3 FIX: Only enter adaptive path when effort is explicitly set.

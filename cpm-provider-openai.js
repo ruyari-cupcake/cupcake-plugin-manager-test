@@ -1,5 +1,5 @@
 //@name CPM Provider - OpenAI
-//@version 1.5.8
+//@version 1.5.9
 //@description OpenAI provider for Cupcake PM (Streaming, Key Rotation)
 //@icon 🟢
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-provider-openai.js
@@ -81,11 +81,12 @@
             }
         },
         fetcher: async function (modelDef, messages, temp, maxTokens, args, abortSignal, _reqId) {
+            const _so = args?._cpmSlotThinkingConfig || {};
             const config = {
                 url: await CPM.safeGetArg('cpm_openai_url'),
                 model: await CPM.safeGetArg('cpm_openai_model') || modelDef.id,
-                reasoning: await CPM.safeGetArg('cpm_openai_reasoning'),
-                verbosity: await CPM.safeGetArg('cpm_openai_verbosity'),
+                reasoning: _so.reasoning || await CPM.safeGetArg('cpm_openai_reasoning'),
+                verbosity: _so.verbosity || await CPM.safeGetArg('cpm_openai_verbosity'),
                 servicetier: await CPM.safeGetArg('common_openai_servicetier'),
                 promptCacheRetention: await CPM.safeGetArg('cpm_openai_prompt_cache_retention'),
             };
