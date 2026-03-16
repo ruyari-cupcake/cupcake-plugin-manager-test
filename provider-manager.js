@@ -1400,7 +1400,7 @@ var CupcakeProviderManager = (function (exports) {
      * @param {string} [modelId] - Model ID for model-aware threshold selection
      */
     function getGeminiSafetySettings(modelId) {
-        const noCivic = isGeminiNoCivicModel(modelId);
+        const noCivic = isGeminiNoCivicModel(modelId || '');
 
         const categories = [
             'HATE_SPEECH',
@@ -3278,7 +3278,7 @@ var CupcakeProviderManager = (function (exports) {
      * Default version literals live in copilot-version-defaults.js — edit
      * ONLY that file when a new VS Code / Copilot Chat / Electron build ships.
      *
-     * Users can override every version at runtime via @arg settings.
+     * Users can override every version at runtime via plugin settings.
      * Call setCopilotVersionOverrides() at boot time to apply saved overrides.
      */
 
