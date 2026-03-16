@@ -123,6 +123,19 @@ export function buildGeminiThinkingConfig(model, level, budget, _isVertexAI) {
             // and Gemini REST API ThinkingLevel enum (LOW/MEDIUM/HIGH/MINIMAL).
             return { includeThoughts: true, thinkingLevel: String(level).toUpperCase() };
         }
+        // BUG-B001 FIX: Translate budget number → thinkingLevel for Gemini 3
+        // when level is not explicitly set (aligned with RisuAI google.ts L360-371).
+        if (budgetNum > 0) {
+            const isFlash = model && /gemini-3[^.]*flash/i.test(model);
+            let thinkingLevel = 'HIGH';
+            if (isFlash) {
+                if (budgetNum < 4096) thinkingLevel = 'LOW';
+                else if (budgetNum < 16384) thinkingLevel = 'MEDIUM';
+            } else {
+                if (budgetNum < 8192) thinkingLevel = 'LOW';
+            }
+            return { includeThoughts: true, thinkingLevel };
+        }
         return null;
     }
 

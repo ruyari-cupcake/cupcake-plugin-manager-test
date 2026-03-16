@@ -41,6 +41,31 @@ import { updateApiRequest as _updateApiRequest } from './api-request-log.js';
 /** @param {number} ms */
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+/**
+ * Cached ReadableStream support flag.
+ * Checked once — prevents double-request on environments (iOS Safari)
+ * where streaming fetch succeeds but getReader() fails.
+ * @type {boolean | null}
+ */
+let _readableStreamSupported = null;
+
+/** @returns {boolean} */
+function _checkReadableStreamSupport() {
+    if (_readableStreamSupported !== null) return _readableStreamSupported;
+    try {
+        const _testRes = new Response(new ReadableStream());
+        const _reader = _testRes.body?.getReader();
+        if (_reader) { _reader.releaseLock(); _readableStreamSupported = true; }
+        else { _readableStreamSupported = false; }
+    } catch (_e) {
+        _readableStreamSupported = false;
+    }
+    if (!_readableStreamSupported) {
+        console.warn('[Cupcake PM] ReadableStream not supported in this environment — streaming will be auto-disabled for custom models.');
+    }
+    return _readableStreamSupported;
+}
+
 /** @param {any} headers */
 function _parseRetryAfterMs(headers) {
     const raw = headers?.get?.('retry-after');
@@ -198,7 +223,7 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
 
     // ── Final safety: deep-clone + filter ──
     if (body.messages) {
-        try { body.messages = JSON.parse(JSON.stringify(body.messages)); } catch (e) { console.error('[Cupcake PM] Deep-clone of messages failed:', /** @type {Error} */ (e).message); }
+        try { body.messages = JSON.parse(JSON.stringify(body.messages)); } catch (e) { console.error('[Cupcake PM] Deep-clone of messages failed:', /** @type {Error} */ (e).message); return { success: false, content: `[Cupcake PM] Message serialization failed: ${/** @type {Error} */ (e).message}. Messages may contain non-serializable objects.` }; }
         const before = body.messages.length;
         body.messages = body.messages.filter((/** @type {any} */ m) => {
             if (m == null || typeof m !== 'object') return false;
@@ -210,7 +235,7 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
         if (body.messages.length === 0) return { success: false, content: '[Cupcake PM] messages must be non-empty (all messages became empty after sanitization)' };
     }
     if (body.contents) {
-        try { body.contents = JSON.parse(JSON.stringify(body.contents)); } catch (e) { console.error('[Cupcake PM] ⚠️ Deep-clone of contents failed:', /** @type {Error} */ (e).message); }
+        try { body.contents = JSON.parse(JSON.stringify(body.contents)); } catch (e) { console.error('[Cupcake PM] ⚠️ Deep-clone of contents failed:', /** @type {Error} */ (e).message); return { success: false, content: `[Cupcake PM] Content serialization failed: ${/** @type {Error} */ (e).message}. Contents may contain non-serializable objects.` }; }
         const before = body.contents.length;
         body.contents = body.contents.filter((/** @type {any} */ m) => m != null && typeof m === 'object');
         if (body.contents.length < before) console.warn(`[Cupcake PM] ⚠️ Removed ${before - body.contents.length} null/invalid entries from contents array`);
@@ -528,15 +553,23 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
         const streamingEnabled = await safeGetBoolArg('cpm_streaming_enabled', false);
         const perModelStreamingEnabled = (config.streaming === true) || (config.streaming !== false && !config.decoupled);
         const _compatActive = await safeGetBoolArg('cpm_compatibility_mode', false);
-        // Copilot MUST stream — non-streaming causes guaranteed 524 (CF proxy timeout).
-        // SSE parsing happens inside the plugin iframe; ReadableStream does NOT cross the bridge.
         const _isCopilotStreamUrl = !!(effectiveUrl && effectiveUrl.includes('githubcopilot.com'));
-        const useStreaming = streamingEnabled && perModelStreamingEnabled && (!_compatActive || _isCopilotStreamUrl);
-        if (streamingEnabled && _compatActive && !_isCopilotStreamUrl) {
-            console.log(`[Cupcake PM] Compatibility mode active — forcing non-streaming (manual toggle).`);
+        // ReadableStream pre-check: auto-disable streaming on environments where
+        // getReader() will fail (iOS Safari / iframe sandbox), preventing the
+        // "stream request succeeded → ReadableStream read failed → non-stream
+        // fallback" double-request bug.
+        const _rsSupported = _checkReadableStreamSupport();
+        // Compatibility mode: disable ALL streaming (including Copilot).
+        // Copilot can return non-streaming responses fine; the old 524 issue
+        // only applies to very long responses and is far less harmful than
+        // the double-request bug on iPhone.
+        let useStreaming = streamingEnabled && perModelStreamingEnabled && !_compatActive;
+        if (useStreaming && !_rsSupported) {
+            console.log(`[Cupcake PM] ReadableStream unavailable — auto-disabling streaming for ${format} to prevent duplicate requests.`);
+            useStreaming = false;
         }
-        if (!useStreaming && _isCopilotStreamUrl) {
-            console.warn(`[Cupcake PM] Copilot request in non-stream mode. Long responses may return 524 via proxy.`);
+        if (streamingEnabled && _compatActive) {
+            console.log(`[Cupcake PM] Compatibility mode active — forcing non-streaming for all endpoints (including Copilot).`);
         }
 
         if (useStreaming) {
@@ -559,6 +592,9 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
 
             const finalBody = sanitizeBodyJSON(safeStringify(streamBody));
             const _streamBodyLen = finalBody.length;
+            if (_streamBodyLen > 10_000_000) {
+                return { success: false, content: `[Cupcake PM] Request body too large (${(_streamBodyLen / 1_048_576).toFixed(1)} MB). V3 bridge limit is ~10 MB. Reduce chat history or remove images.` };
+            }
             if (_streamBodyLen > 5_000_000) {
                 console.warn(`[Cupcake PM] ⚠️ Streaming body size: ${(_streamBodyLen / 1_048_576).toFixed(2)} MB (${body.messages?.length || 0} messages). Large bodies may cause 'unexpected EOF' if V3 bridge truncates data.`);
             }
@@ -596,7 +632,52 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
                     console.error(`[Cupcake PM] Copilot streaming response body unavailable (no ReadableStream). Cannot fall back to non-streaming (would cause 524).`);
                     return { success: false, content: `[Cupcake PM] Copilot 스트리밍 응답 본문을 읽을 수 없습니다. ReadableStream이 지원되지 않는 환경입니다. 호환성 모드를 확인하거나 브라우저를 업데이트해 주세요.`, _status: 0 };
                 }
-                console.warn(`[Cupcake PM] Streaming response body unavailable for ${format}; retrying as non-streaming.`);
+
+                // ── Safety net: try reading the already-received response as text ──
+                // The server already processed the streaming request, so the data
+                // may still be accessible via Response.text() even when
+                // ReadableStream.getReader() is unavailable (iOS Safari).
+                // This avoids a duplicate non-streaming request.
+                try {
+                    const _existingText = await res.text();
+                    if (_existingText && _existingText.trim().length > 0) {
+                        console.log(`[Cupcake PM] ReadableStream unavailable but Response.text() succeeded (${_existingText.length} chars) — extracting content without duplicate request.`);
+                        // Parse SSE lines from the streaming response text
+                        const _sseChunks = [];
+                        for (const _line of _existingText.split('\n')) {
+                            if (!_line.startsWith('data: ') || _line.trim() === 'data: [DONE]') continue;
+                            try {
+                                const _d = JSON.parse(_line.slice(6));
+                                if (format === 'openai') {
+                                    const _t = _d.choices?.[0]?.delta?.content || _d.choices?.[0]?.message?.content || '';
+                                    if (_t) _sseChunks.push(_t);
+                                } else if (format === 'anthropic') {
+                                    const _t = _d.delta?.text || '';
+                                    if (_t) _sseChunks.push(_t);
+                                } else if (format === 'google') {
+                                    const _t = _d.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                                    if (_t) _sseChunks.push(_t);
+                                }
+                            } catch { /* skip non-JSON data lines */ }
+                        }
+                        if (_sseChunks.length > 0) {
+                            const _extracted = _sseChunks.join('');
+                            if (_reqId) _updateApiRequest(_reqId, { response: `(SSE text fallback: ${_extracted.length} chars)` });
+                            return { success: true, content: _extracted };
+                        }
+                        // Not SSE — maybe the server returned plain JSON despite stream:true
+                        try {
+                            const _jsonData = JSON.parse(_existingText);
+                            if (_reqId) _updateApiRequest(_reqId, { response: _jsonData });
+                            return _parseNonStreamingData(_jsonData);
+                        } catch { /* not valid JSON either, fall through */ }
+                    }
+                } catch (_textErr) {
+                    console.warn(`[Cupcake PM] Response.text() also failed: ${/** @type {Error} */ (_textErr).message}`);
+                }
+
+                // Last resort: non-streaming duplicate request
+                console.warn(`[Cupcake PM] Streaming response body completely unreadable for ${format}; retrying as non-streaming (duplicate request).`);
                 const fallbackUrl = _toNonStreamingUrl(streamUrl);
                 const fallbackBodyObj = { ...body };
                 delete fallbackBodyObj.stream_options;
@@ -644,6 +725,9 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
         // ── Non-streaming fallback ──
         const _nonStreamBody = sanitizeBodyJSON(safeStringify(body));
         const _nonStreamBodyLen = _nonStreamBody.length;
+        if (_nonStreamBodyLen > 10_000_000) {
+            return { success: false, content: `[Cupcake PM] Request body too large (${(_nonStreamBodyLen / 1_048_576).toFixed(1)} MB). V3 bridge limit is ~10 MB. Reduce chat history or remove images.` };
+        }
         if (_nonStreamBodyLen > 5_000_000) {
             console.warn(`[Cupcake PM] ⚠️ Non-stream body size: ${(_nonStreamBodyLen / 1_048_576).toFixed(2)} MB (${body.messages?.length || 0} messages). Large bodies may cause 'unexpected EOF' if V3 bridge truncates data.`);
         }
@@ -684,7 +768,7 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
     // ── Key Rotation dispatch ──
     const _dispatchFetch = async () => {
         if (_useKeyRotation) {
-            const _rotationPoolName = `_cpm_custom_inline_${config.model || 'unknown'}`;
+            const _rotationPoolName = `_cpm_custom_inline_${config.url || ''}::${config.model || 'unknown'}`;
             /** @type {Record<string, any>} */ (KeyPool._pools)[_rotationPoolName] = { lastRaw: _rawKeys, keys: [..._keyPool], _inline: true };
             return KeyPool.withRotation(_rotationPoolName, _doCustomFetch);
         }

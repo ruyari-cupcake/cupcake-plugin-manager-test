@@ -61,7 +61,7 @@ export async function checkStreamCapability() {
     // Phase 2: Guest bridge transferable check
     try {
         const scriptContent = document.querySelector('script')?.textContent || '';
-        const ctFnMatch = scriptContent.match(/function\s+collectTransferables\b[\s\S]{0,800}?return\s+transferables/);
+        const ctFnMatch = scriptContent.match(/function\s+collectTransferables\b[\s\S]{0,3000}?return\s+transferables/);
         if (ctFnMatch && ctFnMatch[0].includes('ReadableStream')) {
             const s2 = new ReadableStream({ start(c) { c.close(); } });
             const mc2 = new MessageChannel();

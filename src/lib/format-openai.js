@@ -31,6 +31,8 @@ export function formatToOpenAI(messages, config = {}) {
         }
         if (sysPrompt && newMsgs.length > 0) {
             newMsgs[0].content = sysPrompt + "\n\n" + (typeof newMsgs[0].content === 'string' ? newMsgs[0].content : JSON.stringify(newMsgs[0].content));
+        } else if (sysPrompt && newMsgs.length === 0) {
+            newMsgs.push({ role: 'user', content: sysPrompt });
         }
         msgs = newMsgs;
     }

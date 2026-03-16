@@ -129,9 +129,9 @@ describe('format-anthropic integration — uncovered branches', () => {
             const { messages: fmt, system } = formatToAnthropic(messages, { caching: true });
             expect(system).toBe('You are helpful');
             expect(fmt.length).toBeGreaterThanOrEqual(3);
-            // Non-leading system → user with "system:" prefix
+            // Non-leading system → user with "System:" prefix
             const systemAsUser = fmt.find(m =>
-                Array.isArray(m.content) && m.content.some(p => p.text?.includes('system:'))
+                Array.isArray(m.content) && m.content.some(p => p.text?.includes('System:'))
             );
             expect(systemAsUser).toBeTruthy();
         });

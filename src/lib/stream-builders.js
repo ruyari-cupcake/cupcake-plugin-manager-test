@@ -65,7 +65,7 @@ export function createSSEStream(response, lineParser, abortSignal, onComplete, _
                         return;
                     }
                     buffer += decoder.decode(value, { stream: true });
-                    const lines = buffer.split('\n');
+                    const lines = buffer.split(/\r?\n/);
                     buffer = lines.pop() || '';
                     for (const line of lines) {
                         const trimmed = line.trim();
@@ -255,7 +255,7 @@ export function createAnthropicSSEStream(response, abortSignal, _logRequestId, o
                         return;
                     }
                     buffer += decoder.decode(value, { stream: true });
-                    const lines = buffer.split('\n');
+                    const lines = buffer.split(/\r?\n/);
                     buffer = lines.pop() || '';
                     for (const line of lines) {
                         const trimmed = line.trim();

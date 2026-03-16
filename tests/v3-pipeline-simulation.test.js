@@ -359,7 +359,7 @@ describe('V3 Pipeline Simulation: Custom Models', () => {
             typeof m.content === 'string' ? m.content :
             Array.isArray(m.content) ? m.content.map(p => p.text || '').join(' ') : ''
         ).join(' ');
-        expect(allContent).toContain('system: Context update');
+        expect(allContent).toContain('System: Context update');
     });
 
     it('Custom + Google format: system extraction works without reformater interference', () => {

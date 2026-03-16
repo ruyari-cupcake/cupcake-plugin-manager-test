@@ -165,7 +165,7 @@ describe('formatToAnthropic', () => {
         ];
         const { messages: msgs } = formatToAnthropic(messages);
         expect(msgs[0].role).toBe('user');
-        expect(msgs[0].content[1].text).toBe('system: {"policy":"strict"}');
+        expect(msgs[0].content[1].text).toBe('System: {"policy":"strict"}');
     });
 
     it('preserves already-normalized base64 image parts', () => {
@@ -211,8 +211,8 @@ describe('formatToAnthropic', () => {
         const firstMsg = msgs[0];
         if (Array.isArray(firstMsg.content)) {
             const lastBlock = firstMsg.content[firstMsg.content.length - 1];
-            // Anthropic API only supports { type: 'ephemeral' } — custom TTL strings are not supported
-            expect(lastBlock.cache_control).toEqual({ type: 'ephemeral' });
+            // With extended-cache-ttl-2025-04-11 beta header, 1h TTL is supported
+            expect(lastBlock.cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
         }
     });
 

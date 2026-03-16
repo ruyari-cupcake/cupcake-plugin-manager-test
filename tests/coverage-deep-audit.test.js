@@ -46,10 +46,10 @@ describe('formatToAnthropic — deep branch coverage', () => {
             { role: 'user', content: 'more' },
         ];
         const { messages: fmt } = formatToAnthropic(messages);
-        // Non-leading system → user with "system: " prefix
+        // Non-leading system → user with "System: " prefix
         const systemConverted = fmt.find(m => {
             if (!Array.isArray(m.content)) return false;
-            return m.content.some(p => typeof p.text === 'string' && p.text.includes('system:'));
+            return m.content.some(p => typeof p.text === 'string' && p.text.includes('System:'));
         });
         expect(systemConverted).toBeTruthy();
     });

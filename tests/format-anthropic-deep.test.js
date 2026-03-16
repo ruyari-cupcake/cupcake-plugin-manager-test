@@ -274,8 +274,8 @@ describe('formatToAnthropic — deep branch coverage', () => {
         const { messages: msgs } = formatToAnthropic(messages, { caching: true, claude1HourCaching: true });
         const userMsg = msgs[0];
         const lastBlock = userMsg.content[userMsg.content.length - 1];
-        // Anthropic API only supports { type: 'ephemeral' } — custom TTL strings are not supported
-        expect(lastBlock.cache_control).toEqual({ type: 'ephemeral' });
+        // With extended-cache-ttl-2025-04-11 beta header, 1h TTL is supported
+        expect(lastBlock.cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
     });
 
     // ── input_image with https URL in array content ───
@@ -329,8 +329,8 @@ describe('formatToAnthropic — deep branch coverage', () => {
             { role: 'assistant', content: 'OK' },
         ];
         const { messages: msgs } = formatToAnthropic(messages);
-        // Non-leading system → user role with "system: " prefix + JSON.stringify
-        const systemAsUser = msgs.find(m => m.content.some?.(p => p.text?.includes('system:')));
+        // Non-leading system → user role with "System: " prefix + JSON.stringify
+        const systemAsUser = msgs.find(m => m.content.some?.(p => p.text?.includes('System:')));
         expect(systemAsUser).toBeDefined();
     });
 
@@ -498,7 +498,7 @@ describe('formatToAnthropic — branch gap coverage', () => {
         // Since ci=1, ci>0 is true, prevRole===curRole → no fmtIdx increment
         const userMsg = msgs[0];
         const lastBlock = userMsg.content[userMsg.content.length - 1];
-        // Anthropic API only supports { type: 'ephemeral' } — custom TTL strings are not supported
-        expect(lastBlock.cache_control).toEqual({ type: 'ephemeral' });
+        // With extended-cache-ttl-2025-04-11 beta header, 1h TTL is supported
+        expect(lastBlock.cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
     });
 });

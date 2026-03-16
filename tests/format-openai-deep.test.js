@@ -266,8 +266,10 @@ describe('formatToOpenAI — deep branch coverage', () => {
             { role: 'system', content: 'System only' },
         ];
         const result = formatToOpenAI(messages, { mergesys: true });
-        // No non-system messages → newMsgs is empty, sysPrompt not injected
-        expect(result).toHaveLength(0);
+        // BUG-A002 fix: system prompt is preserved as a synthetic user message
+        expect(result).toHaveLength(1);
+        expect(result[0].role).toBe('user');
+        expect(result[0].content).toBe('System only');
     });
 
     // ── sysfirst: no system messages ───
