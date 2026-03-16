@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.21.1
-//@changes v1.21.1: 메인 플러그인 자동 업데이트 비활성화 토글 (cpm_disable_autoupdate)
+//@version 1.21.2
+//@changes v1.21.2: 자동 업데이트 토글 동작 확인용 테스트 버전
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================
