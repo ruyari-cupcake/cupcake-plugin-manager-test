@@ -1,5 +1,5 @@
 //@name CPM Provider - OpenAI
-//@version 1.5.7
+//@version 1.5.8
 //@description OpenAI provider for Cupcake PM (Streaming, Key Rotation)
 //@icon 🟢
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-provider-openai.js
@@ -250,6 +250,12 @@
                     delete body.top_p;
                 }
 
+                // Copilot API: omit default top_p=1.0 to avoid
+                // "temperature and top_p cannot both be specified" on certain models.
+                if (_isCopilotUrl && body.top_p === 1) {
+                    delete body.top_p;
+                }
+
                 if (config.reasoning && config.reasoning !== 'none' && supportsReasoningEffort(modelName)) {
                     if (_needsResponsesAPI) {
                         // Responses API: reasoning.effort (nested object)
@@ -284,9 +290,9 @@
                     }
                     // Full Copilot header set (aligned with fetchCustom + LBI pre36)
                     headers['Copilot-Integration-Id'] = 'vscode-chat';
-                    headers['Editor-Plugin-Version'] = 'copilot-chat/0.37.4';
-                    headers['Editor-Version'] = 'vscode/1.109.2';
-                    headers['User-Agent'] = 'GitHubCopilotChat/0.37.4';
+                    headers['Editor-Plugin-Version'] = 'copilot-chat/0.40.2026031401';
+                    headers['Editor-Version'] = 'vscode/1.111.0';
+                    headers['User-Agent'] = 'GitHubCopilotChat/0.40.2026031401';
                     headers['Vscode-Machineid'] = window._cpmCopilotMachineId;
                     headers['Vscode-Sessionid'] = window._cpmCopilotSessionId;
                     headers['X-Github-Api-Version'] = '2025-10-01';

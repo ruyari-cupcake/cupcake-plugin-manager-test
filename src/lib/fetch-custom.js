@@ -17,6 +17,7 @@ import {
 import {
     supportsOpenAIReasoningEffort, needsCopilotResponsesAPI,
     shouldStripOpenAISamplingParams, shouldStripGPT54SamplingForReasoning,
+    needsDeveloperRole,
 } from './model-helpers.js';
 import {
     createSSEStream, createOpenAISSEStream, createResponsesAPISSEStream,
@@ -90,7 +91,7 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
         systemPrompt = geminiSys.length > 0 ? geminiSys.join('\n\n') : '';
     } else {
         const modelId = String(config.model || '');
-        config.developerRole = /(?:^|\/)(?:gpt-5|o[2-9]|o1(?!-(?:preview|mini)))/i.test(modelId);
+        config.developerRole = needsDeveloperRole(modelId);
         formattedMessages = formatToOpenAI(messages, config);
     }
 
@@ -231,6 +232,12 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
             delete body.temperature;
             delete body.top_p;
         }
+    }
+
+    // Copilot API: omit top_p when it's the default value (1.0) to avoid
+    // "temperature and top_p cannot both be specified" on certain models.
+    if (config.url && config.url.includes('githubcopilot.com') && body.top_p === 1) {
+        delete body.top_p;
     }
 
     if (config.reasoning && config.reasoning !== 'none') {
@@ -671,10 +678,27 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
     };
 
     // ── Key Rotation dispatch ──
-    if (_useKeyRotation) {
-        const _rotationPoolName = `_cpm_custom_inline_${config.model || 'unknown'}`;
-        /** @type {Record<string, any>} */ (KeyPool._pools)[_rotationPoolName] = { lastRaw: _rawKeys, keys: [..._keyPool], _inline: true };
-        return KeyPool.withRotation(_rotationPoolName, _doCustomFetch);
+    const _dispatchFetch = async () => {
+        if (_useKeyRotation) {
+            const _rotationPoolName = `_cpm_custom_inline_${config.model || 'unknown'}`;
+            /** @type {Record<string, any>} */ (KeyPool._pools)[_rotationPoolName] = { lastRaw: _rawKeys, keys: [..._keyPool], _inline: true };
+            return KeyPool.withRotation(_rotationPoolName, _doCustomFetch);
+        }
+        return _doCustomFetch(_allKeys[0] || '');
+    };
+
+    let _result = await _dispatchFetch();
+
+    // ── temperature+top_p conflict auto-retry (once) ──
+    // Some Copilot-served models reject both parameters simultaneously.
+    // Detect the specific 400 error pattern and retry without top_p.
+    if (_result && !_result.success && _result._status === 400 && body.top_p !== undefined) {
+        if (/temperature.*top_p|top_p.*temperature/i.test(String(_result.content || ''))) {
+            console.warn(`[Cupcake PM] API rejected temperature+top_p for model "${config.model}" — retrying without top_p.`);
+            delete body.top_p;
+            _result = await _dispatchFetch();
+        }
     }
-    return _doCustomFetch(_allKeys[0] || '');
+
+    return _result;
 }

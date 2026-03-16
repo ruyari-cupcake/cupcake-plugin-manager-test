@@ -182,9 +182,8 @@ export async function smartNativeFetch(url, options = {}) {
     if (!_compatMode && _isGoogleApiUrl && (options.method || 'POST') !== 'GET' && Risu && typeof Risu.nativeFetch === 'function') {
         try {
             const nfOptions = { ...options };
-            if (typeof nfOptions.body === 'string') {
-                nfOptions.body = new TextEncoder().encode(nfOptions.body);
-            }
+            // String body passed as-is — fetchNative encodes on HOST side via TextEncoder.
+            // Avoids V3 bridge Uint8Array transferable path (potential buffer neutering on retry).
             const nfRes = await callNativeFetchWithAbortFallback(url, nfOptions);
             if (nfRes && (nfRes.ok || (nfRes.status && nfRes.status !== 0))) {
                 console.log(`[CupcakePM] Google/Vertex nativeFetch succeeded: status=${nfRes.status} for ${url.substring(0, 60)}`);
@@ -206,9 +205,8 @@ export async function smartNativeFetch(url, options = {}) {
     if (_isCopilotUrl && Risu && typeof Risu.nativeFetch === 'function') {
         try {
             const nfOptions = { ...options };
-            if (typeof nfOptions.body === 'string') {
-                nfOptions.body = new TextEncoder().encode(nfOptions.body);
-            }
+            // String body passed as-is — fetchNative encodes on HOST side.
+            // String survives postMessage structured clone perfectly (no transferable needed).
             const nfRes = await callNativeFetchWithAbortFallback(url, nfOptions);
             if (nfRes && nfRes.ok) {
                 console.log(`[CupcakePM] Copilot nativeFetch succeeded: status=${nfRes.status} for ${url.substring(0, 60)}`);
@@ -216,8 +214,22 @@ export async function smartNativeFetch(url, options = {}) {
             }
             if (nfRes && nfRes.status && nfRes.status !== 0) {
                 if ((options.method || 'POST') !== 'GET') {
-                    console.warn(`[CupcakePM] Copilot nativeFetch returned HTTP ${nfRes.status}; returning as-is to avoid duplicate replay.`);
-                    return nfRes;
+                    // Detect body-corruption 400 errors — these should fall through to risuFetch
+                    if (nfRes.status === 400) {
+                        let _errText = '';
+                        try { _errText = await nfRes.clone().text(); } catch (_) { /* ignore clone failure */ }
+                        const _isBodyCorruption = /not valid JSON|invalid_request_body|Could not parse|Unexpected token|unexpected EOF/i.test(_errText);
+                        if (_isBodyCorruption) {
+                            console.warn(`[CupcakePM] Copilot nativeFetch returned 400 body-corruption error; trying risuFetch fallback.`);
+                            // Fall through to risuFetch below instead of returning the 400
+                        } else {
+                            console.warn(`[CupcakePM] Copilot nativeFetch returned HTTP ${nfRes.status}; returning as-is to avoid duplicate replay.`);
+                            return nfRes;
+                        }
+                    } else {
+                        console.warn(`[CupcakePM] Copilot nativeFetch returned HTTP ${nfRes.status}; returning as-is to avoid duplicate replay.`);
+                        return nfRes;
+                    }
                 }
                 if (nfRes.status >= 400 && nfRes.status < 500) {
                     console.warn(`[CupcakePM] Copilot nativeFetch returned client error ${nfRes.status}; returning as-is.`);
@@ -324,9 +336,7 @@ export async function smartNativeFetch(url, options = {}) {
         try {
             console.log(`[CupcakePM] Falling back to nativeFetch (proxy) for ${url.substring(0, 60)}...`);
             const nfOptions = { ...options };
-            if (typeof nfOptions.body === 'string') {
-                nfOptions.body = new TextEncoder().encode(nfOptions.body);
-            }
+            // String body passed as-is — fetchNative encodes on HOST side.
             const res = await callNativeFetchWithAbortFallback(url, nfOptions);
             return res;
         } catch (e) {

@@ -15,9 +15,9 @@
         "changes": "v1.6.6: 전체 서브플러그인 버전 동기화 릴리즈"
     },
     "CPM Provider - OpenAI": {
-        "version": "1.5.7",
+        "version": "1.5.8",
         "file": "cpm-provider-openai.js",
-        "changes": "v1.5.7: GPT-5.4 reasoning sampling 수정 + 전체 동기화"
+        "changes": "v1.5.8: Copilot top_p 기본값 생략으로 temperature 충돌 호환성 개선"
     },
     "CPM Provider - DeepSeek": {
         "version": "1.4.5",
@@ -55,8 +55,8 @@
         "changes": "v2.1.3: 전체 서브플러그인 버전 동기화 릴리즈"
     },
     "Cupcake Provider Manager": {
-        "version": "1.20.14",
+        "version": "1.20.15",
         "file": "provider-manager.js",
-        "changes": "v1.20.14: smartNativeFetch 이중 sanitizeBodyJSON 버그 수정 — 대용량 요청 시 unexpected EOF 에러 해결"
+        "changes": "v1.20.15: Copilot JSON body 전달 안정화 및 temperature+top_p 자동 복구"
     }
 }

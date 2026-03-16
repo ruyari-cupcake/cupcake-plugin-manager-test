@@ -97,7 +97,7 @@ describe('smartNativeFetch — Google/Vertex native-first handling', () => {
         expect(res.status).toBe(200);
         expect(globalThis.fetch).not.toHaveBeenCalled();
         expect(mockRisu.nativeFetch).toHaveBeenCalledOnce();
-        expect(mockRisu.nativeFetch.mock.calls[0][1].body).toBeInstanceOf(Uint8Array);
+        expect(typeof mockRisu.nativeFetch.mock.calls[0][1].body).toBe('string');
     });
 
     it('retries Google nativeFetch without signal on clone errors', async () => {
@@ -288,7 +288,7 @@ describe('smartNativeFetch — Strategy 3: nativeFetch proxy fallback', () => {
         expect(mockRisu.nativeFetch).toHaveBeenCalled();
     });
 
-    it('nativeFetch converts string body to Uint8Array', async () => {
+    it('nativeFetch passes string body as-is (HOST side encodes)', async () => {
         mockRisu.nativeFetch.mockResolvedValue({ ok: true, status: 200 });
 
         await smartNativeFetch('https://api.openai.com/v1/chat', {
@@ -297,7 +297,7 @@ describe('smartNativeFetch — Strategy 3: nativeFetch proxy fallback', () => {
         });
 
         const callArgs = mockRisu.nativeFetch.mock.calls[0][1];
-        expect(callArgs.body).toBeInstanceOf(Uint8Array);
+        expect(typeof callArgs.body).toBe('string');
     });
 });
 
@@ -347,7 +347,7 @@ describe('smartNativeFetch — body sanitization', () => {
 
     it('logs warning for large POST bodies', async () => {
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        const bigBody = '{"messages":' + '[' + '"x"'.repeat(5_500_000).split('').join(',') + ']}';
+        const bigBody = '{"messages":[' + '"x",'.repeat(1000).slice(0, -1) + ']}';
         // Just verify it doesn't throw — body is allowed to be large
         globalThis.fetch = vi.fn().mockResolvedValue(new Response('ok', { status: 200 }));
         await smartNativeFetch('https://api.openai.com/v1/chat', {
