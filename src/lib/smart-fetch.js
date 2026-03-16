@@ -6,10 +6,9 @@
  * Strategy 2: risuFetch (host window, plainFetchForce)
  * Strategy 3: nativeFetch (proxy fallback)
  *
- * Dependency: sanitizeBodyJSON from sanitize.js, Risu from shared-state.js
+ * Dependency: Risu from shared-state.js
  */
 import { Risu, safeGetBoolArg } from './shared-state.js';
-import { sanitizeBodyJSON } from './sanitize.js';
 // checkStreamCapability removed — compat mode is manual-toggle only now
 
 /**

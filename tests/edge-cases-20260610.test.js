@@ -44,7 +44,6 @@ describe('formatToOpenAI — config flag edge cases', () => {
         ];
         const result = formatToOpenAI(messages, { mergesys: true, developerRole: true });
         // mergesys reduces to user + (any), no system or developer role should appear
-        const hasDev = result.some(m => m.role === 'developer');
         const hasSys = result.some(m => m.role === 'system');
         // system was already merged, so developerRole has nothing to convert
         expect(hasSys).toBe(false);

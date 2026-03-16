@@ -2,7 +2,7 @@
  * bugfix-audit-20260609.test.js — Tests for CPM v1.20.16 bug audit fixes.
  * Covers BUG-A001, A002, A003, A004, B001, C003, C004.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { formatToOpenAI } from '../src/lib/format-openai.js';
 import { buildGeminiThinkingConfig } from '../src/lib/format-gemini.js';
 

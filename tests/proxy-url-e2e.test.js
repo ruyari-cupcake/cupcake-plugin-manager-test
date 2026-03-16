@@ -69,7 +69,6 @@ vi.mock('../src/lib/token-toast.js', () => ({
 }));
 
 import { fetchByProviderId } from '../src/lib/router.js';
-import { fetchCustom } from '../src/lib/fetch-custom.js';
 
 if (typeof globalThis.window === 'undefined') {
     globalThis.window = globalThis;

@@ -67,7 +67,7 @@ function installProvider(providerFile, {
             success: true,
             content: data?.candidates?.[0]?.content?.parts?.[0]?.text || 'ok',
         })),
-        buildGeminiThinkingConfig: vi.fn((model, thinking, budget) => {
+        buildGeminiThinkingConfig: vi.fn((model, thinking, _budget) => {
             if (thinking && thinking !== 'off' && thinking !== 'none') {
                 return { thinkingLevel: String(thinking).toUpperCase(), includeThoughts: true };
             }

@@ -19,9 +19,13 @@ AUDIT_REPORT*.html
 AUDIT_REPORT*_FULL.md
 AKARIVE*.html
 BUG_REPORT*.md
+bug/
 INVESTIGATION_REPORT*.md
 
 # Dev artifacts
 backup_before_*/
 pr6_test/
 tsc_check*.txt
+test_*.txt
+vitest-result.json
+*FEASIBILITY*.md
