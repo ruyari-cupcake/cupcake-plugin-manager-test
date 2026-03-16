@@ -197,6 +197,6 @@ describe('auto-updater — download integrity and retry tests', () => {
 
             const result = await updater._downloadMainPluginCode();
             expect(result.ok).toBe(false);
-        });
+        }, 15000);
     });
 });

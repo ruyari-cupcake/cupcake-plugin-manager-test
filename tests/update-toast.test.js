@@ -16,6 +16,7 @@ function createMockDoc(options = {}) {
     const existingToast = options.existingToast || null;
     const existingMainToast = options.existingMainToast || null;
     const existingSubToast = options.existingSubToast || null;
+    const existingAvailToast = options.existingAvailToast || null;
 
     const toast = {
         attrs: {},
@@ -42,6 +43,7 @@ function createMockDoc(options = {}) {
         async querySelector(selector) {
             if (selector === '[x-cpm-toast]') return existingToast || existingSubToast;
             if (selector === '[x-cpm-main-toast]') return existingMainToast;
+            if (selector === '[x-cpm-avail-toast]') return existingAvailToast;
             if (selector === 'body') return body;
             return null;
         },
@@ -384,5 +386,155 @@ describe('updateToastMethods._showMainAutoUpdateResult', () => {
 
         await updateToastMethods._showMainAutoUpdateResult('1.0', '2.0', '', false, 'err');
         expect(doc.toast.styles.borderLeft).toBe('3px solid #f87171');
+    });
+});
+
+describe('updateToastMethods._showMainUpdateAvailableToast', () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+        vi.restoreAllMocks();
+        vi.resetModules();
+        delete window.risuai;
+        delete window.Risuai;
+    });
+
+    it('returns early when getRootDocument returns null', async () => {
+        const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+        const { updateToastMethods } = await loadModule(null);
+
+        await updateToastMethods._showMainUpdateAvailableToast('1.0', '2.0', 'changes');
+
+        expect(debugSpy).toHaveBeenCalledWith('[CPM AvailToast] getRootDocument returned null');
+    });
+
+    it('removes existing avail toast before showing new one', async () => {
+        const existing = { remove: vi.fn().mockResolvedValue(undefined) };
+        const doc = createMockDoc({ existingAvailToast: existing });
+        const { updateToastMethods } = await loadModule(doc);
+
+        await updateToastMethods._showMainUpdateAvailableToast('1.20.0', '1.21.0', 'feat');
+
+        expect(existing.remove).toHaveBeenCalledTimes(1);
+        expect(doc.appended).toHaveLength(1);
+    });
+
+    it('shows update available toast with version info and changes', async () => {
+        const doc = createMockDoc();
+        const { updateToastMethods } = await loadModule(doc);
+
+        await updateToastMethods._showMainUpdateAvailableToast('1.20.0', '1.21.0', 'New feature');
+
+        expect(doc.appended).toHaveLength(1);
+        expect(doc.toast.innerHTML).toContain('업데이트가 있습니다');
+        expect(doc.toast.innerHTML).toContain('1.20.0');
+        expect(doc.toast.innerHTML).toContain('1.21.0');
+        expect(doc.toast.innerHTML).toContain('New feature');
+        expect(doc.toast.innerHTML).toContain('수동 업데이트하세요');
+    });
+
+    it('shows toast without changes section when changes is empty', async () => {
+        const doc = createMockDoc();
+        const { updateToastMethods } = await loadModule(doc);
+
+        await updateToastMethods._showMainUpdateAvailableToast('1.20.0', '1.21.0', '');
+
+        expect(doc.toast.innerHTML).toContain('업데이트가 있습니다');
+        expect(doc.toast.innerHTML).not.toContain('<div style="font-size:11px;color:#9ca3af;margin-top:2px"></div>');
+    });
+
+    it('uses yellow border', async () => {
+        const doc = createMockDoc();
+        const { updateToastMethods } = await loadModule(doc);
+
+        await updateToastMethods._showMainUpdateAvailableToast('1.0', '2.0', '');
+
+        expect(doc.toast.styles.borderLeft).toBe('3px solid #facc15');
+    });
+
+    it('positions toast higher when sub toast exists', async () => {
+        const subToast = {};
+        const doc = createMockDoc({ existingSubToast: subToast });
+        const { updateToastMethods } = await loadModule(doc);
+
+        await updateToastMethods._showMainUpdateAvailableToast('1.0', '2.0', '');
+
+        expect(doc.toast.styles.bottom).toBe('110px');
+    });
+
+    it('positions toast at 20px when no sub toast exists', async () => {
+        const doc = createMockDoc();
+        const { updateToastMethods } = await loadModule(doc);
+
+        await updateToastMethods._showMainUpdateAvailableToast('1.0', '2.0', '');
+
+        expect(doc.toast.styles.bottom).toBe('20px');
+    });
+
+    it('returns early when body is not found', async () => {
+        const doc = createMockDoc({ hasBody: false });
+        const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+        const { updateToastMethods } = await loadModule(doc);
+
+        await updateToastMethods._showMainUpdateAvailableToast('1.0', '2.0', '');
+
+        expect(doc.appended).toHaveLength(0);
+        expect(debugSpy).toHaveBeenCalledWith('[CPM AvailToast] body not found');
+    });
+
+    it('animates toast in after 50ms', async () => {
+        const doc = createMockDoc();
+        const { updateToastMethods } = await loadModule(doc);
+
+        await updateToastMethods._showMainUpdateAvailableToast('1.0', '2.0', '');
+
+        expect(doc.toast.styles.opacity).toBe('0');
+
+        await vi.advanceTimersByTimeAsync(60);
+        expect(doc.toast.styles.opacity).toBe('1');
+        expect(doc.toast.styles.transform).toBe('translateY(0)');
+    });
+
+    it('auto-dismisses after 12 seconds and removes after 350ms', async () => {
+        const doc = createMockDoc();
+        const { updateToastMethods } = await loadModule(doc);
+
+        await updateToastMethods._showMainUpdateAvailableToast('1.0', '2.0', '');
+
+        // Not yet dismissed at 10s
+        await vi.advanceTimersByTimeAsync(10050);
+        expect(doc.toast.removed).toBe(false);
+
+        // Dismissed at 12s
+        await vi.advanceTimersByTimeAsync(2100);
+        expect(doc.toast.styles.opacity).toBe('0');
+
+        await vi.advanceTimersByTimeAsync(400);
+        expect(doc.toast.removed).toBe(true);
+    });
+
+    it('catches and logs debug on overall error', async () => {
+        const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+        const { updateToastMethods } = await loadModule(async () => {
+            throw new Error('avail toast bridge err');
+        });
+
+        await updateToastMethods._showMainUpdateAvailableToast('1.0', '2.0', '');
+
+        expect(debugSpy).toHaveBeenCalledWith(
+            expect.stringContaining('[CPM AvailToast] Failed to show toast:'),
+            expect.anything()
+        );
+    });
+
+    it('sets x-cpm-avail-toast attribute', async () => {
+        const doc = createMockDoc();
+        const { updateToastMethods } = await loadModule(doc);
+
+        await updateToastMethods._showMainUpdateAvailableToast('1.0', '2.0', '');
+
+        expect(doc.toast.attrs['x-cpm-avail-toast']).toBe('1');
     });
 });
