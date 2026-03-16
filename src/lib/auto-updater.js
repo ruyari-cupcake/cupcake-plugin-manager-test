@@ -16,7 +16,7 @@
  *   - Single-bundle sub-plugin update check & apply
  *   - Concurrent dedup via _mainUpdateInFlight
  */
-import { Risu, CPM_VERSION } from './shared-state.js';
+import { Risu, CPM_VERSION, safeGetBoolArg } from './shared-state.js';
 import { validateSchema, schemas } from './schema.js';
 import {
     VERSIONS_URL as _VERSIONS_URL,
@@ -272,6 +272,10 @@ export const autoUpdaterMethods = {
             });
 
             console.log(`[CPM Retry] Retrying pending main update on boot: ${installedVersion || 'unknown'} → ${pending.version}`);
+            if (await safeGetBoolArg('cpm_disable_autoupdate', false)) {
+                console.log(`[CPM Retry] Auto-update disabled by user. Skipping boot retry.`);
+                return false;
+            }
             const result = await this.safeMainPluginUpdate(pending.version, pending.changes || '');
             if (!result.ok) {
                 const latest = await this._readPendingMainUpdate();
@@ -373,6 +377,11 @@ export const autoUpdaterMethods = {
             if (mainUpdateInfo) {
                 const delay = updatesAvailable.length > 0 ? 1500 : 0;
                 setTimeout(async () => {
+                    if (await safeGetBoolArg('cpm_disable_autoupdate', false)) {
+                        console.log(`[CPM AutoCheck] Auto-update disabled by user. Showing notification only.`);
+                        try { await this._showMainUpdateAvailableToast(mainUpdateInfo.localVersion, mainUpdateInfo.remoteVersion, mainUpdateInfo.changes); } catch (e) { console.warn('[CPM AutoCheck] _showMainUpdateAvailableToast failed:', e); }
+                        return;
+                    }
                         try { await this._rememberPendingMainUpdate(mainUpdateInfo.remoteVersion, mainUpdateInfo.changes); } catch (e) { console.warn('[CPM AutoCheck] _rememberPendingMainUpdate failed:', e); }
                     try { await this.safeMainPluginUpdate(mainUpdateInfo.remoteVersion, mainUpdateInfo.changes); } catch (e) { console.warn('[CPM AutoCheck] safeMainPluginUpdate failed:', e); }
                 }, delay);
@@ -453,6 +462,11 @@ export const autoUpdaterMethods = {
 
             if (cmp > 0) {
                 console.log(`[CPM MainAutoCheck] Main update available: ${localVersion}→${remoteVersion}`);
+                if (await safeGetBoolArg('cpm_disable_autoupdate', false)) {
+                    console.log(`[CPM MainAutoCheck] Auto-update disabled by user. Showing notification only.`);
+                    try { await this._showMainUpdateAvailableToast(localVersion, remoteVersion, changes); } catch (_) { }
+                    return;
+                }
                 try { await this._rememberPendingMainUpdate(remoteVersion, changes); } catch (_) { }
                 const installResult = await this._validateAndInstallMainPlugin(code, remoteVersion, changes);
                 if (!installResult.ok) {

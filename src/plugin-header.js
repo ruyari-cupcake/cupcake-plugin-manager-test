@@ -1,7 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.21.0
+//@version 1.21.1
+//@changes v1.21.1: 메인 플러그인 자동 업데이트 비활성화 토글 (cpm_disable_autoupdate)
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================
@@ -87,6 +88,9 @@
 // --- Streaming Settings ---
 //@arg cpm_streaming_enabled string Enable Streaming Pass-Through (true/false)
 //@arg cpm_streaming_show_thinking string Show Anthropic Thinking Tokens in Stream (true/false)
+
+// --- Auto-Update Control ---
+//@arg cpm_disable_autoupdate string Disable Main Plugin Auto-Update (true/false)
 
 // --- Compatibility ---
 //@arg cpm_compatibility_mode string Compatibility Mode — skip nativeFetch, use risuFetch only. Enable if requests hang or fail on iPhone/Safari. (true/false)

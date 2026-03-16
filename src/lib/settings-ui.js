@@ -430,6 +430,17 @@ export async function openCpmSettings() {
                     ${await renderInput('cpm_show_token_usage', '토큰 사용량 표시 (Show Token Usage Toast)', 'checkbox')}
                 </div>
             </div>
+            <div class="mt-10 pt-6 border-t border-gray-700">
+                <h4 class="text-xl font-bold text-yellow-400 mb-4">🔄 자동 업데이트 제어 (Auto-Update Control)</h4>
+                <div class="bg-gray-800/70 border border-yellow-900/50 rounded-lg p-4 mb-6">
+                    <p class="text-xs text-yellow-300 mb-2 font-semibold">🔒 메인 플러그인 자동 업데이트를 비활성화합니다</p>
+                    <p class="text-xs text-gray-400 mb-2">활성화하면 새 버전이 있어도 자동으로 설치하지 않고, 알림만 표시합니다.</p>
+                    <p class="text-xs text-gray-500">💡 리스 설정의 수동 업데이트 (+ 버튼)는 항상 동작합니다. 서브 플러그인 알림에도 영향 없습니다.</p>
+                </div>
+                <div class="space-y-3">
+                    ${await renderInput('cpm_disable_autoupdate', '메인 플러그인 자동 업데이트 비활성화', 'checkbox')}
+                </div>
+            </div>
         </div>
         <div id="tab-other" class="cpm-tab-content hidden">
             <h3 class="text-3xl font-bold mb-6 pb-3 border-b border-gray-700">트리거/루아 백그라운드 설정 (Other)</h3>

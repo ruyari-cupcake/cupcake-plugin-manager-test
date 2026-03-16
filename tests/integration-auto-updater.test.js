@@ -25,6 +25,7 @@ const h = vi.hoisted(() => ({
 vi.mock('../src/lib/shared-state.js', () => ({
     Risu: h.risu,
     CPM_VERSION: h.cpmVersion,
+    safeGetBoolArg: vi.fn(async () => false),
 }));
 vi.mock('../src/lib/endpoints.js', () => ({
     VERSIONS_URL: 'https://test.example.com/versions.json',

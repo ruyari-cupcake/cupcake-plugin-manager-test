@@ -143,4 +143,60 @@ export const updateToastMethods = {
             }, dismissDelay);
         } catch (e) { console.debug('[CPM MainToast] Failed to show toast:', /** @type {Error} */ (e).message || e); }
     },
+
+    /**
+     * Show "main plugin update available" notification (when auto-update is disabled).
+     * @param {string} localVersion
+     * @param {string} remoteVersion
+     * @param {string} changes
+     */
+    async _showMainUpdateAvailableToast(localVersion, remoteVersion, changes) {
+        try {
+            const doc = await Risu.getRootDocument();
+            if (!doc) { console.debug('[CPM AvailToast] getRootDocument returned null'); return; }
+
+            const existing = await doc.querySelector('[x-cpm-avail-toast]');
+            if (existing) { try { await existing.remove(); } catch (_) { } }
+
+            const subToastEl = await doc.querySelector('[x-cpm-toast]');
+            const bottomPos = subToastEl ? '110px' : '20px';
+
+            const toast = await doc.createElement('div');
+            await toast.setAttribute('x-cpm-avail-toast', '1');
+            const styles = {
+                position: 'fixed', bottom: bottomPos, right: '20px', zIndex: '99999',
+                background: '#1f2937', border: '1px solid #374151', borderLeft: '3px solid #facc15',
+                borderRadius: '10px', padding: '12px 14px', maxWidth: '380px', minWidth: '280px',
+                boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                pointerEvents: 'auto', opacity: '0', transform: 'translateY(12px)',
+                transition: 'opacity 0.3s ease, transform 0.3s ease',
+            };
+            for (const [k, v] of Object.entries(styles)) await toast.setStyle(k, v);
+
+            const changesHtml = changes ? `<div style="font-size:11px;color:#9ca3af;margin-top:2px">${escHtml(changes)}</div>` : '';
+            const html = `
+                <div style="display:flex;align-items:flex-start;gap:10px">
+                    <div style="font-size:20px;line-height:1;flex-shrink:0">🧁</div>
+                    <div style="flex:1;min-width:0">
+                        <div style="font-size:13px;font-weight:600;color:#facc15">업데이트가 있습니다</div>
+                        <div style="font-size:11px;color:#9ca3af;margin-top:2px">Cupcake PM <span style="color:#6ee7b7">${escHtml(localVersion)} → ${escHtml(remoteVersion)}</span></div>
+                        ${changesHtml}
+                        <div style="font-size:10px;color:#6b7280;margin-top:4px">리스 설정 → 플러그인 탭 → + 버튼으로 수동 업데이트하세요</div>
+                    </div>
+                </div>`;
+            await toast.setInnerHTML(html);
+
+            const body = await doc.querySelector('body');
+            if (!body) { console.debug('[CPM AvailToast] body not found'); return; }
+            await body.appendChild(toast);
+
+            setTimeout(async () => { try { await toast.setStyle('opacity', '1'); await toast.setStyle('transform', 'translateY(0)'); } catch (_) { } }, 50);
+            setTimeout(async () => {
+                try { await toast.setStyle('opacity', '0'); await toast.setStyle('transform', 'translateY(12px)');
+                    setTimeout(async () => { try { await toast.remove(); } catch (_) { } }, 350);
+                } catch (_) { }
+            }, 12000);
+        } catch (e) { console.debug('[CPM AvailToast] Failed to show toast:', /** @type {Error} */ (e).message || e); }
+    },
 };

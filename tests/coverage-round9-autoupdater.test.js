@@ -48,6 +48,7 @@ vi.mock('../src/lib/shared-state.js', () => ({
         getArgument: vi.fn().mockReturnValue(''),
     },
     CPM_VERSION: '1.19.6',
+    safeGetBoolArg: vi.fn(async () => false),
 }));
 
 vi.mock('../src/lib/endpoints.js', () => ({

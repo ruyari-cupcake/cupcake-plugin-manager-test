@@ -36,6 +36,7 @@ vi.mock('../src/lib/shared-state.js', () => ({
         setArgument: vi.fn(),
     },
     CPM_VERSION: '1.19.6',
+    safeGetBoolArg: vi.fn(async () => false),
     state: { _currentExecutingPluginId: null, ALL_DEFINED_MODELS: [], CUSTOM_MODELS_CACHE: [], vertexTokenCache: { token: null, expiry: 0 } },
     customFetchers: {},
     registeredProviderTabs: [],
