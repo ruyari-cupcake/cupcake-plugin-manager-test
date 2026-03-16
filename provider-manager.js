@@ -6840,7 +6840,7 @@ var CupcakeProviderManager = (function (exports) {
         // ── Key Rotation dispatch ──
         const _dispatchFetch = async () => {
             if (_useKeyRotation) {
-                const _rotationPoolName = `_cpm_custom_inline_${config.url || ''}::${config.model || 'unknown'}`;
+                const _rotationPoolName = `_cpm_custom_inline_${encodeURIComponent(config.url || '')}_${config.model || 'unknown'}`;
                 /** @type {Record<string, any>} */ (KeyPool._pools)[_rotationPoolName] = { lastRaw: _rawKeys, keys: [..._keyPool], _inline: true };
                 return KeyPool.withRotation(_rotationPoolName, _doCustomFetch);
             }

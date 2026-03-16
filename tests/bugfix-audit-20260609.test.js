@@ -290,13 +290,13 @@ describe('[BUG-B001] RisuAI cross-verification — budget→level thresholds', (
 describe('[BUG-A004] Key pool name must include URL to prevent collision', () => {
     it('pool name format includes URL and model separator', () => {
         // The fix changes from `_cpm_custom_inline_${config.model}` to
-        // `_cpm_custom_inline_${config.url}::${config.model}`
+        // `_cpm_custom_inline_${encodeURIComponent(config.url)}_${config.model}`
         const url1 = 'https://api.openai.com';
         const url2 = 'https://custom-proxy.example.com';
         const model = 'gpt-4o';
 
-        const poolName1 = `_cpm_custom_inline_${url1 || ''}::${model || 'unknown'}`;
-        const poolName2 = `_cpm_custom_inline_${url2 || ''}::${model || 'unknown'}`;
+        const poolName1 = `_cpm_custom_inline_${encodeURIComponent(url1 || '')}_${model || 'unknown'}`;
+        const poolName2 = `_cpm_custom_inline_${encodeURIComponent(url2 || '')}_${model || 'unknown'}`;
 
         // Same model but different URLs should produce different pool names
         expect(poolName1).not.toBe(poolName2);
@@ -305,12 +305,12 @@ describe('[BUG-A004] Key pool name must include URL to prevent collision', () =>
     });
 
     it('pool name with empty URL still works', () => {
-        const poolName = `_cpm_custom_inline_${''}::${'gpt-4o'}`;
-        expect(poolName).toBe('_cpm_custom_inline_::gpt-4o');
+        const poolName = `_cpm_custom_inline_${encodeURIComponent('')}_${'gpt-4o'}`;
+        expect(poolName).toBe('_cpm_custom_inline__gpt-4o');
     });
 
     it('pool name with empty model falls back to unknown', () => {
-        const poolName = `_cpm_custom_inline_${'https://api.example.com'}::${'unknown'}`;
+        const poolName = `_cpm_custom_inline_${encodeURIComponent('https://api.example.com')}_${'unknown'}`;
         expect(poolName).toContain('unknown');
     });
 });
