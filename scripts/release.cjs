@@ -173,6 +173,19 @@ if (mismatches.length > 0) {
 log('version', `✓ All ${Object.keys(versions).length} entries in versions.json match file headers`);
 
 // ════════════════════════════════════════════════════════════════
+// Step 3b: Verify settings-backup ↔ @arg key sync
+// ════════════════════════════════════════════════════════════════
+log('settings', 'Verifying @arg ↔ settings-backup key sync...');
+try {
+    execSync('node scripts/verify-settings-sync.cjs', { cwd: ROOT, stdio: 'pipe' });
+    log('settings', '✓ All @arg keys present in settings-backup.js');
+} catch (e) {
+    const stdout = e.stdout?.toString() || '';
+    const stderr = e.stderr?.toString() || '';
+    fail(`Settings key sync check failed:\n${stdout}\n${stderr}`);
+}
+
+// ════════════════════════════════════════════════════════════════
 // Step 4: Regenerate update-bundle.json with SHA-256
 // ════════════════════════════════════════════════════════════════
 const outputPath = p('update-bundle.json');

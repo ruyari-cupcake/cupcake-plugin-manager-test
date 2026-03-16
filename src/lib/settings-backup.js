@@ -50,6 +50,10 @@ export const BASE_SETTING_KEYS = [
     'cpm_streaming_enabled', 'cpm_streaming_show_thinking',
     'cpm_compatibility_mode',
     'cpm_copilot_nodeless_mode',
+    'cpm_copilot_vscode_version',
+    'cpm_copilot_chat_version',
+    'cpm_copilot_chrome_version',
+    'cpm_copilot_electron_version',
 ];
 
 /**

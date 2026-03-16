@@ -1,20 +1,11 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { handleCorsOptions, corsHeaders } from './_shared/cors.js';
 
-const CORS_HEADERS = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Range',
-    'Access-Control-Max-Age': '86400',
-    'Cache-Control': 'no-cache, no-store, must-revalidate',
-};
+const CACHE_POLICY = 'no-cache, no-store, must-revalidate';
 
 export default function handler(req, res) {
-    if (req.method === 'OPTIONS') {
-        res.writeHead(204, CORS_HEADERS);
-        res.end();
-        return;
-    }
+    if (handleCorsOptions(req, res)) return;
 
     try {
         const bundlePath = join(process.cwd(), 'update-bundle.json');
@@ -26,22 +17,22 @@ export default function handler(req, res) {
             throw new Error('provider-manager.js not found in update-bundle.json');
         }
 
-        res.writeHead(200, {
-            ...CORS_HEADERS,
+        res.writeHead(200, corsHeaders(CACHE_POLICY, {
             'Content-Type': 'application/javascript; charset=utf-8',
-        });
+        }));
         res.end(code);
     } catch (bundleErr) {
         try {
             const fallbackPath = join(process.cwd(), 'provider-manager.js');
             const code = readFileSync(fallbackPath, 'utf-8');
-            res.writeHead(200, {
-                ...CORS_HEADERS,
+            res.writeHead(200, corsHeaders(CACHE_POLICY, {
                 'Content-Type': 'application/javascript; charset=utf-8',
-            });
+            }));
             res.end(code);
         } catch (fileErr) {
-            res.writeHead(500, { ...CORS_HEADERS, 'Content-Type': 'application/json; charset=utf-8' });
+            res.writeHead(500, corsHeaders(CACHE_POLICY, {
+                'Content-Type': 'application/json; charset=utf-8',
+            }));
             res.end(JSON.stringify({
                 error: 'Failed to read main plugin code',
                 details: bundleErr?.message || fileErr?.message || 'unknown error',

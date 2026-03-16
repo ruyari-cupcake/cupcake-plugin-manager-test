@@ -362,14 +362,14 @@ describe('validateGeminiParams edge cases', () => {
 //  FORMAT-GEMINI — buildGeminiThinkingConfig
 // ══════════════════════════════════════════════════════════════
 describe('buildGeminiThinkingConfig edge cases', () => {
-    it('Gemini 3 + VertexAI → thinking_level (snake_case)', () => {
+    it('Gemini 3 + VertexAI → thinkingLevel (camelCase, UPPERCASE)', () => {
         const result = buildGeminiThinkingConfig('gemini-3-ultra', 'HIGH', undefined, true);
-        expect(result).toEqual({ includeThoughts: true, thinking_level: 'HIGH' });
+        expect(result).toEqual({ includeThoughts: true, thinkingLevel: 'HIGH' });
     });
 
-    it('Gemini 3 + non-Vertex → thinkingLevel (camelCase lowercase)', () => {
+    it('Gemini 3 + non-Vertex → thinkingLevel (camelCase, UPPERCASE)', () => {
         const result = buildGeminiThinkingConfig('gemini-3-pro', 'HIGH', undefined, false);
-        expect(result).toEqual({ includeThoughts: true, thinkingLevel: 'high' });
+        expect(result).toEqual({ includeThoughts: true, thinkingLevel: 'HIGH' });
     });
 
     it('Gemini 3 + off → null', () => {

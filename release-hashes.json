@@ -1,11 +1,11 @@
 {
-  "timestamp": "2026-03-16T03:01:25.820Z",
-  "version": "1.20.15",
+  "timestamp": "2026-03-16T04:48:07.543Z",
+  "version": "1.20.16",
   "files": {
     "cpm-provider-vertex.js": {
       "version": "1.6.4",
-      "sha256": "f491d8f0158c31f8dfb74d4a4b170b6fd71ebfe17cd9c951d2d62906adccfd91",
-      "size": 39141
+      "sha256": "9789ba9bb96cdd868f8c507d0b5c22d4a456f468753d45ecb2eaa24835f37392",
+      "size": 40606
     },
     "cpm-provider-gemini.js": {
       "version": "1.6.4",
@@ -58,10 +58,10 @@
       "size": 22781
     },
     "provider-manager.js": {
-      "version": "1.20.15",
-      "sha256": "fe9eb6679f0cc813d393e78af73cbab5705156646f6d0161a64f312983f1fe4b",
-      "size": 517292
+      "version": "1.20.16",
+      "sha256": "9ad745456337782a6af522f8c81c8ebeef5ead04f980314674822a4668300c37",
+      "size": 518475
     }
   },
-  "bundleHash": "d3d541f0eb844d6ddea00c40459ed65008cd93e69df4dd1255f27121bba394e9"
+  "bundleHash": "bb67cc79febcc2071a5c11d3e624a18e9c62e4ecabc9e1cb3842104bd6d4ab29"
 }

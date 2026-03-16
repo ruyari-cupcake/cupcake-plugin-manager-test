@@ -109,20 +109,19 @@ export function cleanExperimentalModelParams(generationConfig, modelId) {
  * @param {string} model - Model ID
  * @param {string} level - Thinking level (off/none/MINIMAL/LOW/MEDIUM/HIGH)
  * @param {number|string} [budget] - Explicit token budget
- * @param {boolean} [isVertexAI] - Whether this is for Vertex AI
+ * @param {boolean} [_isVertexAI] - Whether this is for Vertex AI (kept for API compat)
  * @returns {object|null}
  */
-export function buildGeminiThinkingConfig(model, level, budget, isVertexAI) {
+export function buildGeminiThinkingConfig(model, level, budget, _isVertexAI) {
     const isGemini3 = isGemini3Model(model);
     const budgetNum = parseInt(String(budget ?? '0'), 10) || 0;
 
     if (isGemini3) {
         if (level && level !== 'off' && level !== 'none') {
-            if (isVertexAI) {
-                return { includeThoughts: true, thinking_level: level };
-            } else {
-                return { includeThoughts: true, thinkingLevel: String(level).toLowerCase() };
-            }
+            // BUG-F1/F2 FIX: Use camelCase `thinkingLevel` with UPPERCASE enum values
+            // for both Studio and Vertex AI — aligned with RisuAI google.ts L376
+            // and Gemini REST API ThinkingLevel enum (LOW/MEDIUM/HIGH/MINIMAL).
+            return { includeThoughts: true, thinkingLevel: String(level).toUpperCase() };
         }
         return null;
     }

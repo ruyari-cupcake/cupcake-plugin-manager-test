@@ -30,6 +30,7 @@
  *   api-request-log.js    → API request history (ring buffer)
  *   model-helpers.js      → Model detection (reasoning, Responses API)
  *   copilot-token.js      → GitHub Copilot token management
+ *   copilot-version-defaults.js → Single-source default Copilot emulation versions
  *   smart-fetch.js        → smartNativeFetch (CSP-safe fetch with @arg proxy)
  *   csp-exec.js           → CSP-safe script execution
  *
@@ -147,6 +148,11 @@ export {
 
 // ─── Model Helpers ───
 export {
+    isO3O4Family,
+    isGPT5Family,
+    needsDeveloperRole,
+    isGemini3Model,
+    isGeminiNoCivicModel,
     supportsOpenAIReasoningEffort,
     needsCopilotResponsesAPI,
     shouldStripOpenAISamplingParams,
@@ -185,6 +191,14 @@ export {
     setCopilotGetArgFn,
     setCopilotFetchFn,
 } from './lib/copilot-token.js';
+
+// ─── Copilot Version Defaults ───
+export {
+    DEFAULT_COPILOT_CHAT_VERSION,
+    DEFAULT_VSCODE_VERSION,
+    DEFAULT_CHROME_VERSION,
+    DEFAULT_ELECTRON_VERSION,
+} from './lib/copilot-version-defaults.js';
 
 // ─── Smart Fetch ───
 export { smartNativeFetch } from './lib/smart-fetch.js';

@@ -1,9 +1,9 @@
 /**
  * Unit tests for copilot-headers.js — all exported helpers and constants.
  * Covers: normalization, boolean predicates, token exchange header builder,
- * static request header builder, and constant consistency.
+ * static request header builder, constant consistency, and version overrides.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import {
     COPILOT_CHAT_VERSION,
     VSCODE_VERSION,
@@ -15,7 +15,18 @@ import {
     shouldUseLegacyCopilotRequestHeaders,
     buildCopilotTokenExchangeHeaders,
     getCopilotStaticHeaders,
+    setCopilotVersionOverrides,
+    getEffectiveChatVersion,
+    getEffectiveVscodeVersion,
+    getEffectiveChromeVersion,
+    getEffectiveElectronVersion,
 } from '../src/lib/copilot-headers.js';
+import {
+    DEFAULT_COPILOT_CHAT_VERSION,
+    DEFAULT_VSCODE_VERSION,
+    DEFAULT_CHROME_VERSION,
+    DEFAULT_ELECTRON_VERSION,
+} from '../src/lib/copilot-version-defaults.js';
 
 // ── Constants ──
 describe('Copilot header constants', () => {
@@ -267,5 +278,117 @@ describe('Cross-mode consistency', () => {
             const h = getCopilotStaticHeaders(mode);
             expect(h['Copilot-Integration-Id']).toBe('vscode-chat');
         }
+    });
+});
+
+// ── Version override mechanism (setCopilotVersionOverrides) ──
+describe('setCopilotVersionOverrides', () => {
+    afterEach(() => {
+        // Reset all overrides to defaults after each test
+        setCopilotVersionOverrides({});
+    });
+
+    it('getEffective* returns defaults when no overrides are set', () => {
+        setCopilotVersionOverrides({});
+        expect(getEffectiveChatVersion()).toBe(DEFAULT_COPILOT_CHAT_VERSION);
+        expect(getEffectiveVscodeVersion()).toBe(DEFAULT_VSCODE_VERSION);
+        expect(getEffectiveChromeVersion()).toBe(DEFAULT_CHROME_VERSION);
+        expect(getEffectiveElectronVersion()).toBe(DEFAULT_ELECTRON_VERSION);
+    });
+
+    it('overrides chatVersion only, rest stay default', () => {
+        setCopilotVersionOverrides({ chatVersion: '9.99.0' });
+        expect(getEffectiveChatVersion()).toBe('9.99.0');
+        expect(getEffectiveVscodeVersion()).toBe(DEFAULT_VSCODE_VERSION);
+        expect(getEffectiveChromeVersion()).toBe(DEFAULT_CHROME_VERSION);
+        expect(getEffectiveElectronVersion()).toBe(DEFAULT_ELECTRON_VERSION);
+    });
+
+    it('overrides vscodeVersion only', () => {
+        setCopilotVersionOverrides({ vscodeVersion: '2.0.0' });
+        expect(getEffectiveVscodeVersion()).toBe('2.0.0');
+        expect(getEffectiveChatVersion()).toBe(DEFAULT_COPILOT_CHAT_VERSION);
+    });
+
+    it('overrides chromeVersion only', () => {
+        setCopilotVersionOverrides({ chromeVersion: '200.0.0.0' });
+        expect(getEffectiveChromeVersion()).toBe('200.0.0.0');
+        expect(getEffectiveElectronVersion()).toBe(DEFAULT_ELECTRON_VERSION);
+    });
+
+    it('overrides electronVersion only', () => {
+        setCopilotVersionOverrides({ electronVersion: '50.0.0' });
+        expect(getEffectiveElectronVersion()).toBe('50.0.0');
+        expect(getEffectiveChromeVersion()).toBe(DEFAULT_CHROME_VERSION);
+    });
+
+    it('overrides all four versions simultaneously', () => {
+        setCopilotVersionOverrides({
+            chatVersion: '1.0.0',
+            vscodeVersion: '2.0.0',
+            chromeVersion: '3.0.0.0',
+            electronVersion: '4.0.0',
+        });
+        expect(getEffectiveChatVersion()).toBe('1.0.0');
+        expect(getEffectiveVscodeVersion()).toBe('2.0.0');
+        expect(getEffectiveChromeVersion()).toBe('3.0.0.0');
+        expect(getEffectiveElectronVersion()).toBe('4.0.0');
+    });
+
+    it('empty/falsy overrides fall back to defaults', () => {
+        setCopilotVersionOverrides({
+            chatVersion: '',
+            vscodeVersion: undefined,
+            chromeVersion: null,
+            electronVersion: '',
+        });
+        expect(getEffectiveChatVersion()).toBe(DEFAULT_COPILOT_CHAT_VERSION);
+        expect(getEffectiveVscodeVersion()).toBe(DEFAULT_VSCODE_VERSION);
+        expect(getEffectiveChromeVersion()).toBe(DEFAULT_CHROME_VERSION);
+        expect(getEffectiveElectronVersion()).toBe(DEFAULT_ELECTRON_VERSION);
+    });
+
+    it('whitespace-only overrides fall back to defaults', () => {
+        setCopilotVersionOverrides({
+            chatVersion: '   ',
+            vscodeVersion: '  ',
+        });
+        expect(getEffectiveChatVersion()).toBe(DEFAULT_COPILOT_CHAT_VERSION);
+        expect(getEffectiveVscodeVersion()).toBe(DEFAULT_VSCODE_VERSION);
+    });
+
+    it('overrides propagate into buildCopilotTokenExchangeHeaders User-Agent', () => {
+        setCopilotVersionOverrides({
+            vscodeVersion: '9.9.9',
+            chromeVersion: '999.0.0.0',
+            electronVersion: '88.0.0',
+        });
+        const h = buildCopilotTokenExchangeHeaders('ghp_test', 'off');
+        expect(h['User-Agent']).toContain('Code/9.9.9');
+        expect(h['User-Agent']).toContain('Chrome/999.0.0.0');
+        expect(h['User-Agent']).toContain('Electron/88.0.0');
+        expect(h['Editor-Version']).toBe('vscode/9.9.9');
+    });
+
+    it('overrides propagate into getCopilotStaticHeaders', () => {
+        setCopilotVersionOverrides({
+            chatVersion: '7.7.7',
+            vscodeVersion: '8.8.8',
+        });
+        const h = getCopilotStaticHeaders('off');
+        expect(h['Editor-Plugin-Version']).toBe('copilot-chat/7.7.7');
+        expect(h['Editor-Version']).toBe('vscode/8.8.8');
+        expect(h['User-Agent']).toBe('GitHubCopilotChat/7.7.7');
+    });
+
+    it('COPILOT_TOKEN_USER_AGENT (deprecated const) is NOT affected by overrides', () => {
+        const before = COPILOT_TOKEN_USER_AGENT;
+        setCopilotVersionOverrides({
+            vscodeVersion: '99.99.99',
+            chromeVersion: '999.0.0.0',
+        });
+        // Deprecated const uses compile-time defaults — stays unchanged
+        expect(COPILOT_TOKEN_USER_AGENT).toBe(before);
+        expect(COPILOT_TOKEN_USER_AGENT).toContain(DEFAULT_VSCODE_VERSION);
     });
 });

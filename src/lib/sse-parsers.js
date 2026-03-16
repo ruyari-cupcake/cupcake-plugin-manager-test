@@ -16,7 +16,14 @@ export function parseOpenAISSELine(line) {
     if (jsonStr === '[DONE]') return null;
     try {
         const obj = JSON.parse(jsonStr);
-        return obj.choices?.[0]?.delta?.content || null;
+        // BUG-F4 FIX: Also extract reasoning_content/reasoning (o-series, DeepSeek Reasoner)
+        const delta = obj.choices?.[0]?.delta;
+        if (!delta) return null;
+        let out = '';
+        if (delta.reasoning_content) out += delta.reasoning_content;
+        else if (delta.reasoning) out += delta.reasoning;
+        if (delta.content) out += delta.content;
+        return out || null;
     } catch { return null; }
 }
 

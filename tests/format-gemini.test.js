@@ -168,14 +168,14 @@ describe('buildGeminiThinkingConfig', () => {
         expect(config).toEqual({ includeThoughts: true, thinkingBudget: 24576 });
     });
 
-    it('uses thinkingLevel (camelCase) for Gemini 3 (non-Vertex)', () => {
+    it('uses thinkingLevel (camelCase, UPPERCASE) for Gemini 3 (non-Vertex)', () => {
         const config = buildGeminiThinkingConfig('gemini-3-pro-preview', 'MEDIUM');
-        expect(config).toEqual({ includeThoughts: true, thinkingLevel: 'medium' });
+        expect(config).toEqual({ includeThoughts: true, thinkingLevel: 'MEDIUM' });
     });
 
-    it('uses thinking_level (snake_case) for Gemini 3 on Vertex AI', () => {
+    it('uses thinkingLevel (camelCase, UPPERCASE) for Gemini 3 on Vertex AI', () => {
         const config = buildGeminiThinkingConfig('gemini-3-pro', 'HIGH', null, true);
-        expect(config).toEqual({ includeThoughts: true, thinking_level: 'HIGH' });
+        expect(config).toEqual({ includeThoughts: true, thinkingLevel: 'HIGH' });
     });
 
     it('returns null for Gemini 3 with level=off', () => {

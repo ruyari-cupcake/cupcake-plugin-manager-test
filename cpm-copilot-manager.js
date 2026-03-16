@@ -33,8 +33,8 @@
     const LOG_TAG = '[CPM Copilot]';
     const GITHUB_CLIENT_ID = '01ab8ac9400c4e429b23';
     const TOKEN_ARG_KEY = 'tools_githubCopilotToken';
-    const CODE_VERSION = '1.109.2';
-    const CHAT_VERSION = '0.37.4';
+    const CODE_VERSION = '1.111.0';
+    const CHAT_VERSION = '0.40.2026031401';
     const USER_AGENT = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Code/${CODE_VERSION} Chrome/142.0.7444.265 Electron/39.3.0 Safari/537.36`;
     const PREFIX = 'cpm-copilot';
 

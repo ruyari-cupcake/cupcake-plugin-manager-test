@@ -129,14 +129,14 @@ describe('cleanExperimentalModelParams', () => {
 // ─── format-gemini: buildGeminiThinkingConfig ───
 
 describe('buildGeminiThinkingConfig', () => {
-    it('Gemini 3 + VertexAI → snake_case thinking_level', () => {
+    it('Gemini 3 + VertexAI → camelCase thinkingLevel (UPPERCASE)', () => {
         const result = buildGeminiThinkingConfig('gemini-3-pro', 'HIGH', undefined, true);
-        expect(result).toEqual({ includeThoughts: true, thinking_level: 'HIGH' });
+        expect(result).toEqual({ includeThoughts: true, thinkingLevel: 'HIGH' });
     });
 
-    it('Gemini 3 + non-Vertex → camelCase thinkingLevel', () => {
+    it('Gemini 3 + non-Vertex → camelCase thinkingLevel (UPPERCASE)', () => {
         const result = buildGeminiThinkingConfig('gemini-3-pro', 'MEDIUM', undefined, false);
-        expect(result).toEqual({ includeThoughts: true, thinkingLevel: 'medium' });
+        expect(result).toEqual({ includeThoughts: true, thinkingLevel: 'MEDIUM' });
     });
 
     it('Gemini 3 + off level → null', () => {

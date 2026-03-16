@@ -53,12 +53,12 @@ export function formatToAnthropic(messages, config = {}) {
     const systemPrompt = leadingSystem.join('\n\n');
     const remainingMsgs = validMsgs.slice(splitIdx);
 
-    // Non-leading system messages → user role with "system: " prefix
+    // Non-leading system messages → user role with "System: " prefix
     /** @type {any[]} */
     const chatMsgs = remainingMsgs.map(m => {
         if (m.role === 'system') {
             const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
-            return { ...m, role: 'user', content: `system: ${content}` };
+            return { ...m, role: 'user', content: `System: ${content}` };
         }
         return m;
     });
@@ -164,10 +164,13 @@ export function formatToAnthropic(messages, config = {}) {
     }
 
     // Apply cache_control breakpoints
-    // NOTE: Anthropic cache_control only supports { type: 'ephemeral' } (5-min default TTL).
-    // Custom TTL strings are NOT supported by the API and would be silently ignored or rejected.
+    // Anthropic supports { type: 'ephemeral' } for 5-min default TTL.
+    // With extended-cache-ttl-2025-04-11 beta header, { type: 'ephemeral', ttl: '1h' } is supported.
     if (config.caching) {
-        const _cacheCtrl = { type: 'ephemeral' };
+        // Use 1-hour TTL if claude1HourCaching is enabled, otherwise use default 5-min TTL
+        const _cacheCtrl = config.claude1HourCaching
+            ? { type: 'ephemeral', ttl: '1h' }
+            : { type: 'ephemeral' };
         for (let ci = 0; ci < chatMsgs.length; ci++) {
             if (!chatMsgs[ci].cachePoint) continue;
             const fmtIdx = srcToFmtMap[ci];

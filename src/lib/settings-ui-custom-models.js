@@ -109,7 +109,7 @@ export function renderCustomModelEditor(thinkingList, reasoningList, verbosityLi
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">Prompt Cache Retention</label><select id="cpm-cm-prompt-cache-retention" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"><option value="none">None</option><option value="in_memory">In-Memory</option><option value="24h">24h Extended</option></select></div>
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">Reasoning Effort</label><select id="cpm-cm-reasoning" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white">${reasoningList.map(o => `<option value="${o.value}">${o.text}</option>`).join('')}</select></div>
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">Response Verbosity</label><select id="cpm-cm-verbosity" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white">${verbosityList.map(o => `<option value="${o.value}">${o.text}</option>`).join('')}</select></div>
-                <div><label class="block text-sm font-medium text-gray-400 mb-1">Anthropic Effort</label><select id="cpm-cm-effort" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white">${effortList.map(o => `<option value="${o.value}">${o.text}</option>`).join('')}</select><p class="text-[11px] text-amber-400/80 mt-1">⚠️ Effort/적응형 사고 사용 시 응답이 길어질 수 있습니다. 스트리밍을 켜지 않으면 Cloudflare 524 타임아웃으로 응답 실패가 발생할 수 있습니다. 단, RisuAI 로컬리스(localhost) 환경에서는 스트리밍 관련 버그가 있을 수 있으므로 주의하세요.</p></div>
+                <div><label class="block text-sm font-medium text-gray-400 mb-1">Anthropic Effort</label><select id="cpm-cm-effort" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white">${effortList.map(o => `<option value="${o.value}">${o.text}</option>`).join('')}</select><p class="text-[11px] text-amber-400/80 mt-1">⚠️ 적응형 사고 활성화 시 작동. 추론 강도(노력량)를 설정합니다.</p></div>
                 <div class="md:col-span-2 mt-4 border-t border-gray-800 pt-4">
                     <h5 class="text-sm font-bold text-gray-300 mb-3">Formatter Flags</h5>
                     <div class="space-y-2">
@@ -122,7 +122,7 @@ export function renderCustomModelEditor(thinkingList, reasoningList, verbosityLi
                         <p class="text-[11px] text-cyan-400/70 ml-6 -mt-1">ℹ️ 이 옵션은 글로벌 설정의 <strong>스트리밍 패스스루</strong>도 함께 활성화해야 동작합니다. Copilot 등 프록시 경유 API는 스트리밍 필수 (미사용 시 524 타임아웃).</p>
                         <label class="flex items-center space-x-2 text-sm text-gray-300"><input type="checkbox" id="cpm-cm-thought" class="form-checkbox bg-gray-800"> <span>useThoughtSignature</span></label>
                         <label class="flex items-center space-x-2 text-sm text-gray-300"><input type="checkbox" id="cpm-cm-adaptive-thinking" class="form-checkbox bg-gray-800"> <span>useAdaptiveThinking (적응형 사고)</span></label>
-                        <p class="text-[11px] text-amber-400/70 ml-6 -mt-1">⚠️ 적응형 사고 활성화 시 추론 시간이 길어집니다. 프록시 경유 환경에서는 반드시 스트리밍을 켜세요 (524 타임아웃 방지). 로컬리스(localhost)에서는 스트리밍 버그가 있을 수 있으니 주의.</p>
+                        <p class="text-[11px] text-amber-400/70 ml-6 -mt-1">⚠️ 추론 기능의 필수 스위치. 끄면 추론이 작동하지 않습니다. 스트리밍 권장. 로컬리스는 스트리밍 버그 주의.</p>
                     </div>
                 </div>
                 <div class="md:col-span-2 mt-4 border-t border-gray-800 pt-4">

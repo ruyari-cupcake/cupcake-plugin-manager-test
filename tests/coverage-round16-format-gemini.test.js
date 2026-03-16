@@ -180,12 +180,12 @@ describe('format-gemini.js uncovered branches — Round 16', () => {
 
     it('buildGeminiThinkingConfig gemini-3 with level=MEDIUM + isVertexAI', () => {
         const result = buildGeminiThinkingConfig('gemini-3-pro', 'MEDIUM', undefined, true);
-        expect(result.thinking_level).toBe('MEDIUM');
+        expect(result.thinkingLevel).toBe('MEDIUM');
     });
 
     it('buildGeminiThinkingConfig gemini-3 with level=MEDIUM, no vertex', () => {
         const result = buildGeminiThinkingConfig('gemini-3-pro', 'MEDIUM');
-        expect(result.thinkingLevel).toBe('medium');
+        expect(result.thinkingLevel).toBe('MEDIUM');
     });
 
     it('buildGeminiThinkingConfig gemini-2.5 with budget number', () => {

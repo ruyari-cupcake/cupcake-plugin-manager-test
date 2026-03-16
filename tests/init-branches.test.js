@@ -83,7 +83,10 @@ vi.mock('../src/lib/sse-parsers.js', () => ({ parseOpenAISSELine: vi.fn(), parse
 vi.mock('../src/lib/slot-inference.js', () => ({ CPM_SLOT_LIST: ['translation'], inferSlot: vi.fn(async () => 'chat') }));
 vi.mock('../src/lib/aws-signer.js', () => ({ AwsV4Signer: class {} }));
 vi.mock('../src/lib/smart-fetch.js', () => ({ smartNativeFetch: vi.fn() }));
-vi.mock('../src/lib/model-helpers.js', () => ({ needsCopilotResponsesAPI: vi.fn(() => false) }));
+vi.mock('../src/lib/model-helpers.js', async () => {
+    const real = await vi.importActual('../src/lib/model-helpers.js');
+    return { needsCopilotResponsesAPI: vi.fn(() => false), needsDeveloperRole: real.needsDeveloperRole };
+});
 vi.mock('../src/lib/response-parsers.js', () => ({ parseClaudeNonStreamingResponse: vi.fn(), parseGeminiNonStreamingResponse: vi.fn(), parseOpenAINonStreamingResponse: vi.fn(), parseResponsesAPINonStreamingResponse: vi.fn() }));
 vi.mock('../src/lib/stream-builders.js', () => ({ createSSEStream: vi.fn(), createOpenAISSEStream: vi.fn(), createResponsesAPISSEStream: vi.fn(), createAnthropicSSEStream: vi.fn(), saveThoughtSignatureFromStream: vi.fn(), setApiRequestLogger: vi.fn() }));
 vi.mock('../src/lib/stream-utils.js', () => ({ collectStream: vi.fn(), checkStreamCapability: (...a) => h.mockCheckStreamCapability(...a) }));

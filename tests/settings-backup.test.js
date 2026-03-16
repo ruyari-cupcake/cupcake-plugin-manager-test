@@ -57,9 +57,15 @@ describe('SettingsBackup', () => {
             .map((match) => match[1]);
 
         const keys = SettingsBackup.getAllKeys();
-        for (const key of declaredArgKeys) {
-            expect(keys).toContain(key);
-        }
+        const missingKeys = declaredArgKeys.filter((k) => !keys.includes(k));
+
+        expect(
+            missingKeys,
+            `The following @arg keys are declared in plugin-header.js but MISSING from ` +
+            `settings-backup.js managed keys:\n\n` +
+            missingKeys.map((k) => `  + '${k}'  →  Add to BASE_SETTING_KEYS in src/lib/settings-backup.js`).join('\n') +
+            `\n\nTotal @arg keys: ${declaredArgKeys.length}, Managed keys: ${keys.length}`
+        ).toHaveLength(0);
     });
 
     it('filters unrelated dynamic export keys while keeping CPM-owned keys', () => {

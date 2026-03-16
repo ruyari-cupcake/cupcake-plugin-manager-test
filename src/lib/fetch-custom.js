@@ -377,6 +377,9 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
     }
 
     // ── Direct proxy wrapper: intercepts smartNativeFetch in direct mode ──
+    // Direct mode uses plain fetch() to the external proxy — no need to go
+    // through Risu's nativeFetch/risuFetch pipeline (which would cause
+    // double-proxying or header loss).
     /**
      * @param {string} url
      * @param {RequestInit & Record<string, any>} [options]
@@ -388,7 +391,8 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
                 ...(/** @type {Record<string, string>} */ (options.headers) || {}),
                 'X-Target-URL': url,
             };
-            return smartNativeFetch(_proxyUrl, { ...options, headers: directHeaders });
+            console.log(`[Cupcake PM] [direct proxy] → ${_proxyUrl.substring(0, 60)} (target: ${url.substring(0, 60)})`);
+            return fetch(_proxyUrl, { ...options, headers: directHeaders });
         }
         : smartNativeFetch;
 

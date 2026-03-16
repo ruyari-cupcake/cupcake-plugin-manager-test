@@ -1,8 +1,81 @@
 // @ts-check
 /**
- * model-helpers.js — Model detection helpers for OpenAI / Copilot / Gemini.
+ * model-helpers.js — Centralized model detection registry.
+ *
+ * ALL model-name regex patterns live here.  Other modules (init.js,
+ * fetch-custom.js, format-gemini.js, …) import these helpers instead
+ * of maintaining their own inline regex.  When a new model family
+ * ships, this is the SINGLE file to update.
+ *
  * Pure functions, zero side effects.
  */
+
+// ═══════════════════════════════════════════════════════
+//  Base family detectors (building blocks for higher-level checks)
+// ═══════════════════════════════════════════════════════
+
+/**
+ * Detect o3/o4 family models.
+ * Matches all variants: o3, o3-mini, o3-pro, o4-mini, o4-mini-deep-research, etc.
+ * @param {string} modelName
+ * @returns {boolean}
+ */
+export function isO3O4Family(modelName) {
+    if (!modelName) return false;
+    return /(?:^|\/)o(?:3|4)(?:[\w.-]*)$/i.test(String(modelName));
+}
+
+/**
+ * Detect GPT-5 family models (any sub-version, any variant).
+ * Matches: gpt-5, gpt-5.4, gpt-5-mini, gpt-5.4-nano, gpt-5-2025-01-15, etc.
+ * @param {string} modelName
+ * @returns {boolean}
+ */
+export function isGPT5Family(modelName) {
+    if (!modelName) return false;
+    return /(?:^|\/)gpt-5(?:\.\d+)?(?:-(?:mini|nano|pro))?(?:-\d{4}-\d{2}-\d{2})?$/i.test(String(modelName));
+}
+
+/**
+ * Detect models that require the OpenAI "developer" role instead of "system".
+ * GPT-5 family and o-series (o2+, o1 excluding o1-preview/o1-mini) use developer role.
+ * Used by init.js (model registration flags) and fetch-custom.js (formatToOpenAI config).
+ * @param {string} modelName
+ * @returns {boolean}
+ */
+export function needsDeveloperRole(modelName) {
+    if (!modelName) return false;
+    return /(?:^|\/)(?:gpt-5|o[2-9]|o1(?!-(?:preview|mini)))/i.test(String(modelName));
+}
+
+// ═══════════════════════════════════════════════════════
+//  Gemini family detectors
+// ═══════════════════════════════════════════════════════
+
+/**
+ * Detect Gemini 3.x models (version-based thinking config branching).
+ * @param {string} modelId
+ * @returns {boolean}
+ */
+export function isGemini3Model(modelId) {
+    if (!modelId) return false;
+    return /gemini-3/i.test(String(modelId));
+}
+
+/**
+ * Detect Gemini models that do NOT support the CIVIC_INTEGRITY safety category.
+ * Currently: gemini-2.0-flash-lite-preview and gemini-2.0-pro-exp.
+ * @param {string} modelId
+ * @returns {boolean}
+ */
+export function isGeminiNoCivicModel(modelId) {
+    if (!modelId) return false;
+    return /gemini-2\.0-flash-lite-preview|gemini-2\.0-pro-exp/.test(String(modelId).toLowerCase());
+}
+
+// ═══════════════════════════════════════════════════════
+//  OpenAI / Copilot higher-level helpers
+// ═══════════════════════════════════════════════════════
 
 /**
  * Check if a model supports OpenAI reasoning_effort parameter.
@@ -12,10 +85,7 @@
  */
 export function supportsOpenAIReasoningEffort(modelName) {
     if (!modelName) return false;
-    const m = String(modelName).toLowerCase();
-    // o3/o4 family (all variants: o3, o3-mini, o3-pro, o4-mini, etc.)
-    if (/(?:^|\/)o(?:3|4)(?:[\w.-]*)$/i.test(m)) return true;
-    return /(?:^|\/)gpt-5(?:\.\d+)?(?:-(?:mini|nano))?(?:-\d{4}-\d{2}-\d{2})?$/i.test(m);
+    return isO3O4Family(modelName) || isGPT5Family(modelName);
 }
 
 /**
@@ -38,10 +108,7 @@ export function needsCopilotResponsesAPI(modelName) {
  * @returns {boolean}
  */
 export function shouldStripOpenAISamplingParams(modelName) {
-    if (!modelName) return false;
-    const m = String(modelName).toLowerCase();
-    // o3/o4 family: strip all sampling params (temperature, top_p, etc.)
-    return /(?:^|\/)o(?:3|4)(?:[\w.-]*)$/i.test(m);
+    return isO3O4Family(modelName);
 }
 
 /**

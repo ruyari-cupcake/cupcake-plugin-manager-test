@@ -17,6 +17,7 @@ import { SubPluginManager } from './sub-plugin-manager.js';
 import { checkStreamCapability } from './stream-utils.js';
 import { _resetCompatibilityCache } from './smart-fetch.js';
 import { clearCopilotTokenCache } from './copilot-token.js';
+import { COPILOT_CHAT_VERSION, VSCODE_VERSION, setCopilotVersionOverrides } from './copilot-headers.js';
 import { escHtml } from './helpers.js';
 import { renderCustomModelEditor, initCustomModelsManager } from './settings-ui-custom-models.js';
 import { buildPluginsTabRenderer } from './settings-ui-plugins.js';
@@ -99,6 +100,13 @@ export async function openCpmSettings() {
                     console.error('[CupcakePM] Failed to refresh status indicators:', err);
                 });
             });
+        }
+        // Apply Copilot emulation version overrides live
+        if (k === 'cpm_copilot_vscode_version' || k === 'cpm_copilot_chat_version') {
+            const chatVer = await safeGetArg('cpm_copilot_chat_version', '');
+            const codeVer = await safeGetArg('cpm_copilot_vscode_version', '');
+            setCopilotVersionOverrides({ chatVersion: chatVer, vscodeVersion: codeVer });
+            clearCopilotTokenCache();
         }
     };
 
@@ -380,6 +388,21 @@ export async function openCpmSettings() {
                         ])}
                     </div>
                     <p class="text-xs text-cyan-400/90 mt-3">💡 Node-less 실험 모드는 Copilot 전용입니다. 사용자가 1번/2번을 바꿔가며 어떤 조합이 통하는지 직접 테스트할 수 있습니다.</p>
+
+                    <!-- Copilot Emulation Version Overrides -->
+                    <details class="mt-6 pt-4 border-t border-amber-900/40 group">
+                        <summary class="cursor-pointer text-lg font-bold text-amber-300 hover:text-amber-200 transition-colors select-none leading-7">
+                            ⚙️ Copilot 에뮬레이션 버전 오버라이드 (고급)
+                        </summary>
+                        <div class="mt-4 bg-gray-900/60 border border-amber-900/40 rounded-lg p-5 space-y-3">
+                            <p class="text-sm text-gray-300 mb-2 leading-6">비워두면 기본 내장값을 사용합니다. Copilot API에서 <code class="text-amber-300">model_not_supported</code> 오류가 날 때 최신 버전으로 직접 업데이트할 수 있습니다.</p>
+                            ${await renderInput('cpm_copilot_vscode_version', 'VSCode 에뮬레이션 버전', 'text')}
+                            <p class="text-sm text-gray-400 -mt-1">기본값: <code class="text-gray-300">${escHtml(VSCODE_VERSION)}</code></p>
+                            ${await renderInput('cpm_copilot_chat_version', 'Copilot Chat 확장 버전', 'text')}
+                            <p class="text-sm text-gray-400 -mt-1">기본값: <code class="text-gray-300">${escHtml(COPILOT_CHAT_VERSION)}</code></p>
+                            <p class="text-sm text-amber-300/90 mt-2 font-medium">⚠️ 변경 후 Copilot 토큰 캐시가 자동으로 초기화됩니다.</p>
+                        </div>
+                    </details>
                 </div>
             </div>
             <div class="mt-10 pt-6 border-t border-gray-700">

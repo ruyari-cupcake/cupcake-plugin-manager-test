@@ -29,7 +29,7 @@ import { parseOpenAISSELine, parseGeminiSSELine } from './sse-parsers.js';
 import { CPM_SLOT_LIST, inferSlot } from './slot-inference.js';
 import { AwsV4Signer } from './aws-signer.js';
 import { smartNativeFetch } from './smart-fetch.js';
-import { needsCopilotResponsesAPI as _needsCopilotResponsesAPI } from './model-helpers.js';
+import { needsCopilotResponsesAPI as _needsCopilotResponsesAPI, needsDeveloperRole } from './model-helpers.js';
 import {
     parseClaudeNonStreamingResponse, parseGeminiNonStreamingResponse,
     parseOpenAINonStreamingResponse, parseResponsesAPINonStreamingResponse,
@@ -41,6 +41,7 @@ import {
 } from './stream-builders.js';
 import { collectStream, checkStreamCapability } from './stream-utils.js';
 import { ensureCopilotApiToken, setCopilotGetArgFn, setCopilotFetchFn } from './copilot-token.js';
+import { setCopilotVersionOverrides } from './copilot-headers.js';
 import { SettingsBackup } from './settings-backup.js';
 import { parseCustomModelsValue, normalizeCustomModel } from './custom-model-serialization.js';
 import { SubPluginManager, setExposeScopeFunction } from './sub-plugin-manager.js';
@@ -179,7 +180,24 @@ setupCupcakeAPI();
             _phaseDone('settings-restore');
         } catch (e) { _phaseFail('settings-restore', e); }
 
-        // ── Phase: Streaming Bridge Capability Check ──
+        // ── Phase: Copilot Version Overrides ──
+        _phaseStart('copilot-version-overrides');
+        try {
+            const userChatVer = await safeGetArg('cpm_copilot_chat_version', '');
+            const userCodeVer = await safeGetArg('cpm_copilot_vscode_version', '');
+            const userChromeVer = await safeGetArg('cpm_copilot_chrome_version', '');
+            const userElectronVer = await safeGetArg('cpm_copilot_electron_version', '');
+            setCopilotVersionOverrides({
+                chatVersion: userChatVer,
+                vscodeVersion: userCodeVer,
+                chromeVersion: userChromeVer,
+                electronVersion: userElectronVer,
+            });
+            if (userChatVer || userCodeVer || userChromeVer || userElectronVer) {
+                console.log(`[CPM] Copilot version overrides: chat=${userChatVer || '(default)'}, vscode=${userCodeVer || '(default)'}, chrome=${userChromeVer || '(default)'}, electron=${userElectronVer || '(default)'}`);
+            }
+            _phaseDone('copilot-version-overrides');
+        } catch (e) { _phaseFail('copilot-version-overrides', e); }
         _phaseStart('streaming-check');
         try {
             const streamCapable = await checkStreamCapability();
@@ -326,7 +344,7 @@ setupCupcakeAPI();
                 } else {
                     modelFlags.push(6);    // hasFullSystemPrompt
                 }
-                if (isOpenAIFamily && /(?:^|\/)(?:gpt-5|o[2-9]|o1(?!-(?:preview|mini)))/i.test(modelId)) {
+                if (isOpenAIFamily && needsDeveloperRole(modelId)) {
                     modelFlags.push(14);   // DeveloperRole
                 }
 

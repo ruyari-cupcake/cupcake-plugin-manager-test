@@ -253,6 +253,12 @@
         },
         fetcher: async function (modelDef, messages, temp, maxTokens, args, abortSignal, _reqId) {
             const streamingEnabled = await CPM.safeGetBoolArg('cpm_streaming_enabled', false);
+            // BUG-F3 FIX: Add caching args for Vertex Claude (prompt caching via rawPredict)
+            const _vtxCacheEnabled = await CPM.safeGetBoolArg('chat_claude_caching');
+            const _vtxCacheRaw = await CPM.safeGetArg('chat_claude_caching');
+            const _vtxCacheTtl = await CPM.safeGetArg('cpm_vertex_claude_cache_ttl');
+            const _vtxCacheTtlNorm = String(_vtxCacheTtl || '').trim().toLowerCase();
+            const _vtxOneHourCaching = _vtxCacheTtlNorm === '1h' || String(_vtxCacheRaw || '').trim().toLowerCase() === '1h';
             const config = {
                 location: await CPM.safeGetArg('cpm_vertex_location'),
                 model: await CPM.safeGetArg('cpm_vertex_model') || modelDef.id,
@@ -262,6 +268,8 @@
                 preserveSystem: await CPM.safeGetBoolArg('chat_vertex_preserveSystem', true),
                 showThoughtsToken: await CPM.safeGetBoolArg('chat_vertex_showThoughtsToken'),
                 useThoughtSignature: await CPM.safeGetBoolArg('chat_vertex_useThoughtSignature'),
+                caching: !!_vtxCacheEnabled || _vtxOneHourCaching,
+                claude1HourCaching: _vtxOneHourCaching,
             };
 
             // Key Rotation: wrap all fetch logic in doFetch(keyJson) for automatic credential rotation
@@ -349,7 +357,17 @@
                     };
                     if (args.top_p !== undefined && args.top_p !== null) body.top_p = args.top_p;
                     if (args.top_k !== undefined && args.top_k !== null) body.top_k = args.top_k;
-                    if (systemPrompt) body.system = systemPrompt;
+                    // BUG-F3 FIX: Apply system prompt caching (aligned with cpm-provider-anthropic.js)
+                    if (systemPrompt) {
+                        if (config.caching) {
+                            const _sysCache = config.claude1HourCaching
+                                ? { type: 'ephemeral', ttl: '1h' }
+                                : { type: 'ephemeral' };
+                            body.system = [{ type: 'text', text: systemPrompt, cache_control: _sysCache }];
+                        } else {
+                            body.system = systemPrompt;
+                        }
+                    }
 
                     // BUG-C2 FIX: Add adaptive thinking support for Claude 4.6 on Vertex
                     // Claude 4.6 models use adaptive thinking (type: 'adaptive') + output_config.effort
@@ -386,6 +404,8 @@
                     const claudeHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` };
                     const claudeBetas = [];
                     if (body.max_tokens > 8192) claudeBetas.push('output-128k-2025-02-19');
+                    // BUG-F3 FIX: Add extended-cache-ttl beta for 1h caching (aligned with cpm-provider-anthropic.js)
+                    if (config.claude1HourCaching) claudeBetas.push('extended-cache-ttl-2025-04-11');
                     if (claudeBetas.length > 0) claudeHeaders['anthropic-beta'] = claudeBetas.join(',');
 
                     const requestBody = JSON.stringify(body);
