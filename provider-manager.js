@@ -1,7 +1,7 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.20.17
+//@version 1.20.18
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================
@@ -186,7 +186,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.20.17';
+    const CPM_VERSION = '1.20.18';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -1516,7 +1516,7 @@ var CupcakeProviderManager = (function (exports) {
             // BUG-B001 FIX: Translate budget number → thinkingLevel for Gemini 3
             // when level is not explicitly set (aligned with RisuAI google.ts L360-371).
             if (budgetNum > 0) {
-                const isFlash = model && /gemini-3[^.]*flash/i.test(model);
+                const isFlash = model && /gemini-3[\d.]*-?flash/i.test(model);
                 let thinkingLevel = 'HIGH';
                 if (isFlash) {
                     if (budgetNum < 4096) thinkingLevel = 'LOW';

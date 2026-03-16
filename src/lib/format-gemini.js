@@ -126,7 +126,7 @@ export function buildGeminiThinkingConfig(model, level, budget, _isVertexAI) {
         // BUG-B001 FIX: Translate budget number → thinkingLevel for Gemini 3
         // when level is not explicitly set (aligned with RisuAI google.ts L360-371).
         if (budgetNum > 0) {
-            const isFlash = model && /gemini-3[^.]*flash/i.test(model);
+            const isFlash = model && /gemini-3[\d.]*-?flash/i.test(model);
             let thinkingLevel = 'HIGH';
             if (isFlash) {
                 if (budgetNum < 4096) thinkingLevel = 'LOW';
