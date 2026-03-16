@@ -6,6 +6,7 @@
  */
 import { sanitizeMessages, extractNormalizedMessagePayload, stripThoughtDisplayContent, stripInternalTags } from './sanitize.js';
 import { parseBase64DataUri } from './helpers.js';
+import { isGemini3Model, isGeminiNoCivicModel } from './model-helpers.js';
 
 // ─── Gemini Safety Settings ───
 
@@ -14,8 +15,7 @@ import { parseBase64DataUri } from './helpers.js';
  * @param {string} [modelId] - Model ID for model-aware threshold selection
  */
 export function getGeminiSafetySettings(modelId) {
-    const m = (modelId || '').toLowerCase();
-    const noCivic = /gemini-2\.0-flash-lite-preview|gemini-2\.0-pro-exp/.test(m);
+    const noCivic = isGeminiNoCivicModel(modelId || '');
 
     const categories = [
         'HATE_SPEECH',
@@ -113,7 +113,7 @@ export function cleanExperimentalModelParams(generationConfig, modelId) {
  * @returns {object|null}
  */
 export function buildGeminiThinkingConfig(model, level, budget, isVertexAI) {
-    const isGemini3 = /gemini-3/i.test(model || '');
+    const isGemini3 = isGemini3Model(model);
     const budgetNum = parseInt(String(budget ?? '0'), 10) || 0;
 
     if (isGemini3) {
