@@ -1,13 +1,13 @@
 {
   "CPM Provider - Vertex AI": {
-    "version": "1.6.4",
+    "version": "1.6.5",
     "file": "cpm-provider-vertex.js",
-    "changes": "v1.6.4: 전체 서브플러그인 버전 동기화 릴리즈"
+    "changes": "v1.6.5: gemini-3.1-flash-lite-preview 모델 추가"
   },
   "CPM Provider - Gemini Studio": {
-    "version": "1.6.4",
+    "version": "1.6.5",
     "file": "cpm-provider-gemini.js",
-    "changes": "v1.6.4: 전체 서브플러그인 버전 동기화 릴리즈"
+    "changes": "v1.6.5: gemini-3.1-flash-lite-preview 모델 추가"
   },
   "CPM Provider - Anthropic": {
     "version": "1.6.6",
