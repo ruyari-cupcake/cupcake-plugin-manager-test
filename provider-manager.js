@@ -3,7 +3,7 @@
 //@api 3.0
 //@version 1.21.2
 //@changes v1.21.2: 보조모델 슬롯별 생각/추론 오버라이드 + 서브플 패치 + 자동 업데이트 토글
-//@update-url https://cupcake-plugin-manager.vercel.app/api/main-plugin
+//@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================
 // ARGUMENT SCHEMAS (Saved Natively by RisuAI)
@@ -126,7 +126,7 @@ var CupcakeProviderManager = (function (exports) {
         test: 'https://cupcake-plugin-manager-test.vercel.app',
     };
 
-    const _env = 'production';
+    const _env = 'test';
 
     /** @type {string} */
     const CPM_BASE_URL = _URLS[_env];
