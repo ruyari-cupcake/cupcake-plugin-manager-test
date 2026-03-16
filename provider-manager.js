@@ -1,7 +1,7 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.20.18
+//@version 1.21.0
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================
@@ -186,7 +186,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.20.18';
+    const CPM_VERSION = '1.21.0';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -6959,23 +6959,28 @@ var CupcakeProviderManager = (function (exports) {
                     console.log(`[CPM Router] ⚠ proxyUrl is EMPTY for ${cDef.name || cDef.uniqueId} (uniqueId=${cDef.uniqueId}, keys=${Object.keys(cDef).join(',')})`);
                 }
 
+                // Merge slot thinking/reasoning overrides (slot > custom model default)
+                const _so = args._cpmSlotThinkingConfig || {};
+
                 return await fetchCustom({
                     url: cDef.url, key: cDef.key, model: cDef.model, proxyUrl: cDef.proxyUrl || '', proxyDirect: !!cDef.proxyDirect,
                     format: cDef.format || 'openai',
                     sysfirst: !!cDef.sysfirst, altrole: !!cDef.altrole,
                     mustuser: !!cDef.mustuser, maxout: !!cDef.maxout, mergesys: !!cDef.mergesys,
-                    reasoning: cDef.reasoning || 'none', verbosity: cDef.verbosity || 'none',
+                    reasoning: _so.reasoning || cDef.reasoning || 'none',
+                    verbosity: _so.verbosity || cDef.verbosity || 'none',
                     responsesMode: cDef.responsesMode || 'auto',
-                    thinking_level: cDef.thinking || 'none', tok: cDef.tok || 'o200k_base',
-                    thinkingBudget: parseInt(cDef.thinkingBudget) || 0,
+                    thinking_level: _so.thinking_level || cDef.thinking || 'none',
+                    tok: cDef.tok || 'o200k_base',
+                    thinkingBudget: _so.thinkingBudget || parseInt(cDef.thinkingBudget) || 0,
                     maxOutputLimit: parseInt(cDef.maxOutputLimit) || 0,
                     promptCacheRetention: cDef.promptCacheRetention || 'none',
                     decoupled: !!cDef.decoupled, thought: !!cDef.thought,
                     streaming: (cDef.streaming === true) || (cDef.streaming !== false && !cDef.decoupled),
                     showThoughtsToken: !!cDef.thought, useThoughtSignature: !!cDef.thought,
                     customParams: cDef.customParams || '', copilotToken: '',
-                    effort: cDef.effort || 'none',
-                    adaptiveThinking: !!cDef.adaptiveThinking
+                    effort: _so.effort || cDef.effort || 'none',
+                    adaptiveThinking: _so.adaptiveThinking || !!cDef.adaptiveThinking
                 }, messages, temp, maxTokens, args, abortSignal, _reqId);
             }
             return { success: false, content: `[Cupcake PM] Unknown provider selected: ${modelDef.provider}` };
@@ -7032,6 +7037,40 @@ var CupcakeProviderManager = (function (exports) {
                 if (repPen !== '') { const n = _toFiniteFloat(repPen); if (n !== undefined) args.repetition_penalty = n; }
                 if (freqPen !== '') { const n = _toFiniteFloat(freqPen); if (n !== undefined) args.frequency_penalty = n; }
                 if (presPen !== '') { const n = _toFiniteFloat(presPen); if (n !== undefined) args.presence_penalty = n; }
+
+                // Thinking / reasoning slot overrides — bundled into _cpmSlotThinkingConfig
+                // to avoid colliding with RisuAI's own args fields.
+                const slotThinking = await safeGetArg(`cpm_slot_${slot}_thinking`);
+                const slotThinkingBudget = await safeGetArg(`cpm_slot_${slot}_thinking_budget`);
+                const slotReasoning = await safeGetArg(`cpm_slot_${slot}_reasoning`);
+                const slotVerbosity = await safeGetArg(`cpm_slot_${slot}_verbosity`);
+                const slotEffort = await safeGetArg(`cpm_slot_${slot}_effort`);
+                const slotAdaptiveThinking = await safeGetBoolArg(`cpm_slot_${slot}_adaptive_thinking`, false);
+
+                /** @type {Record<string, any>} */
+                const thinkingOverrides = {};
+                if (slotThinking && slotThinking !== 'none' && slotThinking !== 'off') {
+                    thinkingOverrides.thinking_level = slotThinking;
+                }
+                if (slotThinkingBudget) {
+                    const n = _toFiniteInt(slotThinkingBudget);
+                    if (n !== undefined && n > 0) thinkingOverrides.thinkingBudget = n;
+                }
+                if (slotReasoning && slotReasoning !== 'none') {
+                    thinkingOverrides.reasoning = slotReasoning;
+                }
+                if (slotVerbosity && slotVerbosity !== 'none') {
+                    thinkingOverrides.verbosity = slotVerbosity;
+                }
+                if (slotEffort && slotEffort !== 'none') {
+                    thinkingOverrides.effort = slotEffort;
+                }
+                if (slotAdaptiveThinking) {
+                    thinkingOverrides.adaptiveThinking = true;
+                }
+                if (Object.keys(thinkingOverrides).length > 0) {
+                    args._cpmSlotThinkingConfig = thinkingOverrides;
+                }
             }
         }
 
@@ -8472,6 +8511,20 @@ var CupcakeProviderManager = (function (exports) {
             ${await renderInput(`cpm_slot_${slot}_rep_pen`, 'Repetition Penalty (반복 페널티)', 'number')}
             ${await renderInput(`cpm_slot_${slot}_freq_pen`, 'Frequency Penalty (빈도 페널티)', 'number')}
             ${await renderInput(`cpm_slot_${slot}_pres_pen`, 'Presence Penalty (존재 페널티)', 'number')}
+        </div>
+        <div class="mt-8 pt-6 border-t border-gray-800 space-y-2">
+            <h4 class="text-xl font-bold text-gray-300 mb-2">Thinking / Reasoning Settings (생각·추론 설정)</h4>
+            <p class="text-xs text-blue-400 font-semibold mb-4 border-l-2 border-blue-500 pl-2">
+                프로바이더별 생각/추론 설정입니다. 비워두면(None/Off) CPM이 건드리지 않습니다.<br/>
+                Gemini = Thinking Level/Budget, OpenAI = Reasoning/Verbosity, Anthropic = Effort/Adaptive<br/>
+                <span class="text-gray-500">(CPM slot override &gt; Custom model default &gt; RisuAI params)</span>
+            </p>
+            ${await renderInput(`cpm_slot_${slot}_thinking`, 'Thinking Level (Gemini 생각 수준)', 'select', thinkingList)}
+            ${await renderInput(`cpm_slot_${slot}_thinking_budget`, 'Thinking Budget Tokens (Gemini 2.5 생각 토큰, 0=끄기)', 'number')}
+            ${await renderInput(`cpm_slot_${slot}_reasoning`, 'Reasoning Effort (OpenAI o1/o3)', 'select', reasoningList)}
+            ${await renderInput(`cpm_slot_${slot}_verbosity`, 'Response Verbosity (OpenAI)', 'select', verbosityList)}
+            ${await renderInput(`cpm_slot_${slot}_effort`, 'Anthropic Effort (적응형 추론)', 'select', effortList)}
+            ${await renderInput(`cpm_slot_${slot}_adaptive_thinking`, 'Adaptive Thinking (Anthropic 적응형 추론)', 'checkbox')}
         </div>
     `;
 

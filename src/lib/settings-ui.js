@@ -251,6 +251,20 @@ export async function openCpmSettings() {
             ${await renderInput(`cpm_slot_${slot}_freq_pen`, 'Frequency Penalty (빈도 페널티)', 'number')}
             ${await renderInput(`cpm_slot_${slot}_pres_pen`, 'Presence Penalty (존재 페널티)', 'number')}
         </div>
+        <div class="mt-8 pt-6 border-t border-gray-800 space-y-2">
+            <h4 class="text-xl font-bold text-gray-300 mb-2">Thinking / Reasoning Settings (생각·추론 설정)</h4>
+            <p class="text-xs text-blue-400 font-semibold mb-4 border-l-2 border-blue-500 pl-2">
+                프로바이더별 생각/추론 설정입니다. 비워두면(None/Off) CPM이 건드리지 않습니다.<br/>
+                Gemini = Thinking Level/Budget, OpenAI = Reasoning/Verbosity, Anthropic = Effort/Adaptive<br/>
+                <span class="text-gray-500">(CPM slot override &gt; Custom model default &gt; RisuAI params)</span>
+            </p>
+            ${await renderInput(`cpm_slot_${slot}_thinking`, 'Thinking Level (Gemini 생각 수준)', 'select', thinkingList)}
+            ${await renderInput(`cpm_slot_${slot}_thinking_budget`, 'Thinking Budget Tokens (Gemini 2.5 생각 토큰, 0=끄기)', 'number')}
+            ${await renderInput(`cpm_slot_${slot}_reasoning`, 'Reasoning Effort (OpenAI o1/o3)', 'select', reasoningList)}
+            ${await renderInput(`cpm_slot_${slot}_verbosity`, 'Response Verbosity (OpenAI)', 'select', verbosityList)}
+            ${await renderInput(`cpm_slot_${slot}_effort`, 'Anthropic Effort (적응형 추론)', 'select', effortList)}
+            ${await renderInput(`cpm_slot_${slot}_adaptive_thinking`, 'Adaptive Thinking (Anthropic 적응형 추론)', 'checkbox')}
+        </div>
     `;
 
     const slotCollisionWarning = `

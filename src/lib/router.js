@@ -106,23 +106,28 @@ export async function fetchByProviderId(modelDef, args, abortSignal, _reqId) {
                 console.log(`[CPM Router] ⚠ proxyUrl is EMPTY for ${cDef.name || cDef.uniqueId} (uniqueId=${cDef.uniqueId}, keys=${Object.keys(cDef).join(',')})`);
             }
 
+            // Merge slot thinking/reasoning overrides (slot > custom model default)
+            const _so = args._cpmSlotThinkingConfig || {};
+
             return await fetchCustom({
                 url: cDef.url, key: cDef.key, model: cDef.model, proxyUrl: cDef.proxyUrl || '', proxyDirect: !!cDef.proxyDirect,
                 format: cDef.format || 'openai',
                 sysfirst: !!cDef.sysfirst, altrole: !!cDef.altrole,
                 mustuser: !!cDef.mustuser, maxout: !!cDef.maxout, mergesys: !!cDef.mergesys,
-                reasoning: cDef.reasoning || 'none', verbosity: cDef.verbosity || 'none',
+                reasoning: _so.reasoning || cDef.reasoning || 'none',
+                verbosity: _so.verbosity || cDef.verbosity || 'none',
                 responsesMode: cDef.responsesMode || 'auto',
-                thinking_level: cDef.thinking || 'none', tok: cDef.tok || 'o200k_base',
-                thinkingBudget: parseInt(cDef.thinkingBudget) || 0,
+                thinking_level: _so.thinking_level || cDef.thinking || 'none',
+                tok: cDef.tok || 'o200k_base',
+                thinkingBudget: _so.thinkingBudget || parseInt(cDef.thinkingBudget) || 0,
                 maxOutputLimit: parseInt(cDef.maxOutputLimit) || 0,
                 promptCacheRetention: cDef.promptCacheRetention || 'none',
                 decoupled: !!cDef.decoupled, thought: !!cDef.thought,
                 streaming: (cDef.streaming === true) || (cDef.streaming !== false && !cDef.decoupled),
                 showThoughtsToken: !!cDef.thought, useThoughtSignature: !!cDef.thought,
                 customParams: cDef.customParams || '', copilotToken: '',
-                effort: cDef.effort || 'none',
-                adaptiveThinking: !!cDef.adaptiveThinking
+                effort: _so.effort || cDef.effort || 'none',
+                adaptiveThinking: _so.adaptiveThinking || !!cDef.adaptiveThinking
             }, messages, temp, maxTokens, args, abortSignal, _reqId);
         }
         return { success: false, content: `[Cupcake PM] Unknown provider selected: ${modelDef.provider}` };
@@ -179,6 +184,40 @@ export async function handleRequest(args, activeModelDef, abortSignal) {
             if (repPen !== '') { const n = _toFiniteFloat(repPen); if (n !== undefined) args.repetition_penalty = n; }
             if (freqPen !== '') { const n = _toFiniteFloat(freqPen); if (n !== undefined) args.frequency_penalty = n; }
             if (presPen !== '') { const n = _toFiniteFloat(presPen); if (n !== undefined) args.presence_penalty = n; }
+
+            // Thinking / reasoning slot overrides — bundled into _cpmSlotThinkingConfig
+            // to avoid colliding with RisuAI's own args fields.
+            const slotThinking = await safeGetArg(`cpm_slot_${slot}_thinking`);
+            const slotThinkingBudget = await safeGetArg(`cpm_slot_${slot}_thinking_budget`);
+            const slotReasoning = await safeGetArg(`cpm_slot_${slot}_reasoning`);
+            const slotVerbosity = await safeGetArg(`cpm_slot_${slot}_verbosity`);
+            const slotEffort = await safeGetArg(`cpm_slot_${slot}_effort`);
+            const slotAdaptiveThinking = await safeGetBoolArg(`cpm_slot_${slot}_adaptive_thinking`, false);
+
+            /** @type {Record<string, any>} */
+            const thinkingOverrides = {};
+            if (slotThinking && slotThinking !== 'none' && slotThinking !== 'off') {
+                thinkingOverrides.thinking_level = slotThinking;
+            }
+            if (slotThinkingBudget) {
+                const n = _toFiniteInt(slotThinkingBudget);
+                if (n !== undefined && n > 0) thinkingOverrides.thinkingBudget = n;
+            }
+            if (slotReasoning && slotReasoning !== 'none') {
+                thinkingOverrides.reasoning = slotReasoning;
+            }
+            if (slotVerbosity && slotVerbosity !== 'none') {
+                thinkingOverrides.verbosity = slotVerbosity;
+            }
+            if (slotEffort && slotEffort !== 'none') {
+                thinkingOverrides.effort = slotEffort;
+            }
+            if (slotAdaptiveThinking) {
+                thinkingOverrides.adaptiveThinking = true;
+            }
+            if (Object.keys(thinkingOverrides).length > 0) {
+                args._cpmSlotThinkingConfig = thinkingOverrides;
+            }
         }
     }
 
