@@ -160,6 +160,57 @@ describe('buildPluginsTabRenderer', () => {
         expect(globalThis.alert).toHaveBeenCalledWith("서브 플러그인 'InstalledPlugin' 설치 완료!");
     });
 
+    it('upload shows Error.message when install rejects with Error', async () => {
+        document.body.innerHTML = '<div id="cpm-plugins-list"></div>';
+        buildPluginsTabRenderer(vi.fn())();
+        mockSubPluginManager.install.mockRejectedValueOnce(new Error('invalid header'));
+
+        class MockFR { readAsText() { this.onload({ target: { result: '// code' } }); } }
+        vi.stubGlobal('FileReader', MockFR);
+
+        const input = document.getElementById('cpm-file-plugin');
+        Object.defineProperty(input, 'files', { value: [{ name: 'p.js' }], configurable: true });
+        input.dispatchEvent(new Event('change'));
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(globalThis.alert).toHaveBeenCalledWith('⚠️ 설치 실패: invalid header');
+    });
+
+    it('upload shows string when install rejects with string', async () => {
+        document.body.innerHTML = '<div id="cpm-plugins-list"></div>';
+        buildPluginsTabRenderer(vi.fn())();
+        mockSubPluginManager.install.mockRejectedValueOnce('bad format');
+
+        class MockFR { readAsText() { this.onload({ target: { result: '// code' } }); } }
+        vi.stubGlobal('FileReader', MockFR);
+
+        const input = document.getElementById('cpm-file-plugin');
+        Object.defineProperty(input, 'files', { value: [{ name: 'p.js' }], configurable: true });
+        input.dispatchEvent(new Event('change'));
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(globalThis.alert).toHaveBeenCalledWith('⚠️ 설치 실패: bad format');
+    });
+
+    it('upload shows fallback message when install rejects with null', async () => {
+        document.body.innerHTML = '<div id="cpm-plugins-list"></div>';
+        buildPluginsTabRenderer(vi.fn())();
+        mockSubPluginManager.install.mockRejectedValueOnce(null);
+
+        class MockFR { readAsText() { this.onload({ target: { result: '// code' } }); } }
+        vi.stubGlobal('FileReader', MockFR);
+
+        const input = document.getElementById('cpm-file-plugin');
+        Object.defineProperty(input, 'files', { value: [{ name: 'p.js' }], configurable: true });
+        input.dispatchEvent(new Event('change'));
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(globalThis.alert).toHaveBeenCalledWith('⚠️ 설치 실패: 알 수 없는 오류');
+    });
+
     it('toggle handler updates enabled state and hot reloads', async () => {
         mockSubPluginManager.plugins = [{ id: 'sp1', name: 'Alpha', enabled: true }];
         document.body.innerHTML = '<div id="cpm-plugins-list"></div>';

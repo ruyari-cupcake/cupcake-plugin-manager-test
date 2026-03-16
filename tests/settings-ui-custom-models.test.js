@@ -624,4 +624,82 @@ describe('initCustomModelsManager', () => {
         expect(listHtml).toContain('No model ID');
         expect(listHtml).toContain('No URL');
     });
+
+    // ── _persistCustomModels verification block coverage ──
+
+    it('verifies proxyUrl round-trip when save includes proxyUrl', async () => {
+        const { initCustomModelsManager } = await import('../src/lib/settings-ui-custom-models.js');
+
+        mockState.CUSTOM_MODELS_CACHE = [];
+        initCustomModelsManager(vi.fn(), vi.fn());
+
+        // Mock getArgument to return JSON with the proxyUrl
+        mockRisu.getArgument.mockResolvedValueOnce(
+            JSON.stringify([{ proxyUrl: 'https://proxy.test.com', name: 'PM', model: 'x', url: 'http://x' }])
+        );
+
+        const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+        document.getElementById('cpm-add-custom-btn').click();
+        /** @type {HTMLInputElement} */ (document.getElementById('cpm-cm-name')).value = 'PM';
+        /** @type {HTMLInputElement} */ (document.getElementById('cpm-cm-model')).value = 'x';
+        /** @type {HTMLInputElement} */ (document.getElementById('cpm-cm-url')).value = 'http://x';
+        /** @type {HTMLInputElement} */ (document.getElementById('cpm-cm-proxy-url')).value = 'https://proxy.test.com';
+
+        document.getElementById('cpm-cm-save').click();
+        await vi.waitFor(() => expect(mockRisu.setArgument).toHaveBeenCalled());
+
+        // Wait for the async verification to complete
+        await new Promise(r => setTimeout(r, 50));
+
+        expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Verified'));
+        logSpy.mockRestore();
+    });
+
+    it('logs error when proxyUrl verification fails (not found in readback)', async () => {
+        const { initCustomModelsManager } = await import('../src/lib/settings-ui-custom-models.js');
+
+        mockState.CUSTOM_MODELS_CACHE = [];
+        initCustomModelsManager(vi.fn(), vi.fn());
+
+        // Mock getArgument to return JSON WITHOUT the proxyUrl
+        mockRisu.getArgument.mockResolvedValueOnce('{"name":"PM"}');
+
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        document.getElementById('cpm-add-custom-btn').click();
+        /** @type {HTMLInputElement} */ (document.getElementById('cpm-cm-name')).value = 'PM';
+        /** @type {HTMLInputElement} */ (document.getElementById('cpm-cm-model')).value = 'x';
+        /** @type {HTMLInputElement} */ (document.getElementById('cpm-cm-url')).value = 'http://x';
+        /** @type {HTMLInputElement} */ (document.getElementById('cpm-cm-proxy-url')).value = 'https://proxy.missing.com';
+
+        document.getElementById('cpm-cm-save').click();
+        await vi.waitFor(() => expect(mockRisu.setArgument).toHaveBeenCalled());
+
+        await new Promise(r => setTimeout(r, 50));
+
+        expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('VERIFICATION FAILED'));
+        errorSpy.mockRestore();
+    });
+
+    it('handles setArgument rejection gracefully during persist', async () => {
+        const { initCustomModelsManager } = await import('../src/lib/settings-ui-custom-models.js');
+
+        mockState.CUSTOM_MODELS_CACHE = [];
+        initCustomModelsManager(vi.fn(), vi.fn());
+
+        mockRisu.setArgument.mockRejectedValueOnce(new Error('Storage quota exceeded'));
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        document.getElementById('cpm-add-custom-btn').click();
+        /** @type {HTMLInputElement} */ (document.getElementById('cpm-cm-name')).value = 'ErrModel';
+        /** @type {HTMLInputElement} */ (document.getElementById('cpm-cm-model')).value = 'x';
+        /** @type {HTMLInputElement} */ (document.getElementById('cpm-cm-url')).value = 'http://x';
+
+        document.getElementById('cpm-cm-save').click();
+        await new Promise(r => setTimeout(r, 50));
+
+        expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Risu.setArgument FAILED'), expect.anything());
+        errorSpy.mockRestore();
+    });
 });

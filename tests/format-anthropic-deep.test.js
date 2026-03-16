@@ -501,4 +501,15 @@ describe('formatToAnthropic — branch gap coverage', () => {
         // With extended-cache-ttl-2025-04-11 beta header, 1h TTL is supported
         expect(lastBlock.cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
     });
+
+    it('skips cachePoint when source message was filtered (fmtIdx = -1)', () => {
+        // Empty-content message gets srcToFmtMap[ci] = -1 (skipped).
+        // Its cachePoint should be silently ignored (no crash).
+        const messages = [
+            { role: 'user', content: 'Valid' },
+            { role: 'assistant', content: '', cachePoint: true },
+            { role: 'user', content: 'Also valid' },
+        ];
+        expect(() => formatToAnthropic(messages, { caching: true })).not.toThrow();
+    });
 });
