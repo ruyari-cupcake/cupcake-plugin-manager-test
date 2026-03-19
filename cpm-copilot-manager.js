@@ -1,6 +1,6 @@
 //@name CPM Component - Copilot Token Manager
 //@display-name Cupcake Copilot Manager
-//@version 1.7.7
+//@version 1.7.8
 //@author Cupcake
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager-test/main/cpm-copilot-manager.js
 
@@ -940,7 +940,7 @@
     actions.autoConfig = async () => {
         const token = await getToken();
         if (!token) { showError('저장된 토큰이 없습니다. 먼저 토큰을 생성하세요.'); return; }
-        if (!confirm(`GitHub Copilot 자동 설정을 진행하시겠습니까?\n\nCustom Model에 다음 설정이 자동 추가됩니다:\n  URL: https://api.githubcopilot.com/chat/completions\n  모델: gpt-4.1\n  포맷: OpenAI\n\n기존 Copilot 커스텀 모델이 있으면 덮어씁니다.`)) return;
+        if (!confirm(`GitHub Copilot 자동 설정을 진행하시겠습니까?\n\nCustom Model에 다음 설정이 추가됩니다:\n  URL: https://api.githubcopilot.com/chat/completions\n  모델: gpt-4.1\n  포맷: OpenAI\n\n기본으로 GPT-4.1로 설정됩니다. 다른 모델을 설정하고 싶다면 커스텀 모델에서 모델을 추가하거나 편집을 이용해 모델 목록을 변경하세요.`)) return;
         showLoading('자동 설정 적용 중...');
         try {
             // Check if addCustomModel API is available
@@ -967,11 +967,12 @@
                 tok: 'o200k_base',
                 customParams: '',
             };
-            const result = CPM.addCustomModel(modelDef, 'copilot-auto');
+            // 기존 모델 덮어쓰지 않고 항상 새로 생성
+            const result = CPM.addCustomModel(modelDef);
             if (result.success) {
                 toast('Copilot 커스텀 모델이 추가되었습니다!');
                 showSuccess(`<strong>✅ 자동 설정 완료!</strong>
-                    <p class="mt-2 text-sm">다음 Custom Model이 ${result.created ? '생성' : '업데이트'}되었습니다:</p>
+                    <p class="mt-2 text-sm">다음 Custom Model이 생성되었습니다:</p>
                     <div class="bg-gray-900 rounded p-3 mt-2 text-xs font-mono text-gray-300 space-y-1">
                         <div><strong>이름:</strong> ${escapeHtml(modelDef.name)}</div>
                         <div><strong>URL:</strong> ${escapeHtml(modelDef.url)}</div>
@@ -979,7 +980,7 @@
                         <div><strong>Key:</strong> Copilot 토큰 자동 사용 (githubcopilot.com URL 감지)</div>
                     </div>
                     <p class="mt-3 text-xs text-yellow-300">💡 RisuAI 메인 UI에서 [Cupcake PM] [Custom] 🤖 Copilot (GPT-4.1) 을 선택하면 사용할 수 있습니다.<br>변경사항을 적용하려면 설정을 닫고 플러그인을 다시 로드하세요.</p>
-                    <p class="mt-2 text-xs text-gray-400">⚠️ 자동 설정은 <strong>GPT-4.1</strong> 모델만 추가합니다. Claude, o3, o4-mini 등 다른 Copilot 모델을 사용하려면 <strong>커스텀 모델</strong> 탭에서 동일한 URL(<code class="text-gray-300">https://api.githubcopilot.com/chat/completions</code>)로 원하는 모델을 직접 추가하세요.</p>`);
+                    <p class="mt-2 text-xs text-gray-400">⚠️ 기본으로 <strong>GPT-4.1</strong> 모델만 추가합니다. Claude, o3, o4-mini 등 다른 Copilot 모델을 설정하고 싶다면 <strong>커스텀 모델</strong> 탭에서 모델을 추가하거나 편집을 이용해 모델 목록을 변경하세요.<br>URL은 동일하게 <code class="text-gray-300">https://api.githubcopilot.com/chat/completions</code>를 사용합니다.</p>`);
             } else {
                 showError('커스텀 모델 추가에 실패했습니다: ' + (result.error || '알 수 없는 오류'));
             }
@@ -1294,5 +1295,5 @@
         }
     });
 
-    console.log(`${LOG_TAG} Settings tab registered (v1.7.7) — sidebar: 🔑 Copilot`);
+    console.log(`${LOG_TAG} Settings tab registered (v1.7.8) — sidebar: 🔑 Copilot`);
 })();

@@ -40,9 +40,9 @@
     "changes": "v0.3.6: 전체 서브플러그인 버전 동기화 릴리즈"
   },
   "CPM Component - Copilot Token Manager": {
-    "version": "1.7.7",
+    "version": "1.7.8",
     "file": "cpm-copilot-manager.js",
-    "changes": "v1.7.7: v1.7.6 구문 오류 수정 (actions.quota 선언부 누락)"
+    "changes": "v1.7.8: 자동설정 안내문구 개선, 기존 모델 덮어쓰지 않고 새로 생성"
   },
   "CPM Component - Translation Cache Manager": {
     "version": "1.4.0",
