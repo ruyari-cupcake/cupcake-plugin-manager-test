@@ -913,7 +913,8 @@
                         <div><strong>모델:</strong> ${escapeHtml(modelDef.model)}</div>
                         <div><strong>Key:</strong> Copilot 토큰 자동 사용 (githubcopilot.com URL 감지)</div>
                     </div>
-                    <p class="mt-3 text-xs text-yellow-300">💡 RisuAI 메인 UI에서 [Cupcake PM] [Custom] 🤖 Copilot (GPT-4.1) 을 선택하면 사용할 수 있습니다.<br>변경사항을 적용하려면 설정을 닫고 플러그인을 다시 로드하세요.</p>`);
+                    <p class="mt-3 text-xs text-yellow-300">💡 RisuAI 메인 UI에서 [Cupcake PM] [Custom] 🤖 Copilot (GPT-4.1) 을 선택하면 사용할 수 있습니다.<br>변경사항을 적용하려면 설정을 닫고 플러그인을 다시 로드하세요.</p>
+                    <p class="mt-2 text-xs text-gray-400">⚠️ 자동 설정은 <strong>GPT-4.1</strong> 모델만 추가합니다. Claude, o3, o4-mini 등 다른 Copilot 모델을 사용하려면 <strong>커스텀 모델</strong> 탭에서 동일한 URL(<code class="text-gray-300">https://api.githubcopilot.com/chat/completions</code>)로 원하는 모델을 직접 추가하세요.</p>`);
             } else {
                 showError('커스텀 모델 추가에 실패했습니다: ' + (result.error || '알 수 없는 오류'));
             }
@@ -1019,11 +1020,37 @@
         const resultEl = document.getElementById(`${PREFIX}-result`);
         if (resultEl) { resultEl.style.display = 'block'; resultEl.innerHTML = '<div class="text-blue-300 text-sm p-4">📊 할당량 조회 중...</div>'; }
         try {
-            // checkQuota는 기존 함수를 그대로 사용 (actions.quota 로직 재활용)
             const q = await checkQuota(token);
             let html = `<div class="bg-gray-800 border border-gray-700 rounded-lg p-4"><h4 class="text-white font-bold mb-3">📊 토큰 #${idx + 1} 할당량</h4>`;
             html += `<div class="text-xs text-gray-400 mb-2">플랜: <span class="text-blue-300 font-bold">${escapeHtml(q.plan || 'unknown')}</span></div>`;
-            if (q.limited_user_quotas) {
+
+            const hasOld = !!q.quota_snapshots;
+            const hasNew = !!q.limited_user_quotas;
+
+            if (hasOld) {
+                const snap = q.quota_snapshots;
+                if (snap.premium_interactions) {
+                    const pi = snap.premium_interactions;
+                    const rem = pi.remaining ?? 0;
+                    const ent = pi.entitlement ?? 0;
+                    const used = ent - rem;
+                    const pct = pi.percent_remaining ?? (ent > 0 ? (rem / ent * 100) : 0);
+                    const clr = pct > 70 ? '#4ade80' : (pct > 30 ? '#facc15' : '#f87171');
+                    html += `<div class="mb-2"><div class="flex justify-between text-xs mb-1"><span class="text-gray-300">프리미엄 요청</span><span style="color:${clr}; font-weight:bold;">${rem} / ${ent}</span></div><div class="bg-gray-700 rounded-full h-2"><div style="background:${clr}; width:${Math.min(pct, 100)}%; height:100%; border-radius:9999px;"></div></div><div class="text-xs text-gray-500 mt-1">사용: ${used}회 · ${pct.toFixed(1)}% 남음${pi.reset_date ? ' · 리셋: ' + new Date(pi.reset_date).toLocaleString('ko-KR') : ''}</div></div>`;
+                }
+                const others = Object.entries(snap).filter(([k]) => k !== 'premium_interactions');
+                for (const [key, quota] of others) {
+                    const label = key.replace(/_/g, ' ');
+                    if (quota.unlimited) {
+                        html += `<div class="flex justify-between text-xs py-1"><span class="text-gray-300 capitalize">${escapeHtml(label)}</span><span class="text-green-400 font-bold">♾️</span></div>`;
+                    } else {
+                        const r = quota.remaining ?? 0; const e = quota.entitlement ?? 0;
+                        const p = quota.percent_remaining ?? (e > 0 ? (r / e * 100) : 0);
+                        const c = p > 70 ? '#4ade80' : (p > 30 ? '#facc15' : '#f87171');
+                        html += `<div class="py-1"><div class="flex justify-between text-xs"><span class="text-gray-300 capitalize">${escapeHtml(label)}</span><span style="color:${c}">${r}/${e}</span></div><div class="bg-gray-700 rounded-full h-1.5 mt-1"><div style="background:${c}; width:${Math.min(p, 100)}%; height:100%; border-radius:9999px;"></div></div></div>`;
+                    }
+                }
+            } else if (hasNew) {
                 const luq = q.limited_user_quotas;
                 const arr = Array.isArray(luq) ? luq : Object.entries(luq).map(([k, v]) => ({ name: k, ...(typeof v === 'object' ? v : { value: v }) }));
                 for (const item of arr) {
@@ -1038,7 +1065,7 @@
                 }
                 if (q.limited_user_reset_date) html += `<div class="text-gray-500 text-xs mt-2">리셋: ${new Date(q.limited_user_reset_date).toLocaleString('ko-KR')}</div>`;
             } else {
-                html += `<div class="text-xs text-gray-500">할당량 정보를 가져올 수 없습니다.</div>`;
+                html += `<div class="text-xs text-yellow-400">이 토큰에서 할당량 정보를 가져올 수 없습니다. 토큰이 만료되었거나 권한이 부족할 수 있습니다.</div>`;
             }
             html += '</div>';
             if (resultEl) resultEl.innerHTML = html;
