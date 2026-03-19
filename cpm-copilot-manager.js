@@ -1,6 +1,6 @@
 //@name CPM Component - Copilot Token Manager
 //@display-name Cupcake Copilot Manager
-//@version 1.7.6
+//@version 1.7.7
 //@author Cupcake
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager-test/main/cpm-copilot-manager.js
 
@@ -729,6 +729,9 @@
             showError(e.message + hint);
         }
     };
+
+    actions.quota = async () => {
+        const tokens = await getTokens();
         if (tokens.length === 0) { showError('저장된 토큰이 없습니다. 먼저 토큰을 생성하세요.'); return; }
         showLoading('모든 토큰 할당량 조회 중...');
         try {
@@ -1291,5 +1294,5 @@
         }
     });
 
-    console.log(`${LOG_TAG} Settings tab registered (v1.7.6) — sidebar: 🔑 Copilot`);
+    console.log(`${LOG_TAG} Settings tab registered (v1.7.7) — sidebar: 🔑 Copilot`);
 })();
