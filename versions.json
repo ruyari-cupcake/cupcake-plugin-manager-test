@@ -40,9 +40,9 @@
     "changes": "v0.3.6: 전체 서브플러그인 버전 동기화 릴리즈"
   },
   "CPM Component - Copilot Token Manager": {
-    "version": "1.7.5",
+    "version": "1.7.6",
     "file": "cpm-copilot-manager.js",
-    "changes": "v1.7.5: 토큰 목록 초기 렌더링 수정, 토큰별 할당량 old/new 형식 지원, 자동설정 다른 모델 안내 추가"
+    "changes": "v1.7.6: 구독상태 기반 활성 배지, 전체 토큰 할당량 통합 조회, 활성키 우선 회전, 웹 모델목록 CORS 안내"
   },
   "CPM Component - Translation Cache Manager": {
     "version": "1.4.0",

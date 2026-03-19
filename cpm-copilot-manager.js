@@ -1,6 +1,6 @@
 //@name CPM Component - Copilot Token Manager
 //@display-name Cupcake Copilot Manager
-//@version 1.7.5
+//@version 1.7.6
 //@author Cupcake
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager-test/main/cpm-copilot-manager.js
 
@@ -110,14 +110,59 @@
         setTokens(tokens);
     }
 
-    /** 실패한 토큰을 뒤로 보내기 (키 회전) */
+    // ==========================================
+    // TOKEN STATUS CACHE (subscription check)
+    // ==========================================
+    const _tokenStatusCache = new Map(); // token → { sku, active, checkedAt }
+
+    const ACTIVE_SKUS = new Set([
+        'monthly_subscriber',
+        'copilot_for_individuals_subscriber',
+        'copilot_for_individuals_pro_subscriber',
+        'plus_monthly_subscriber_quota',
+        'plus_yearly_subscriber_quota',
+    ]);
+
+    function _isActiveSubscription(sku) {
+        if (!sku) return false;
+        if (ACTIVE_SKUS.has(sku)) return true;
+        // 포괄적으로 subscriber/pro 포함 시 활성 처리
+        return /subscriber|pro/i.test(sku);
+    }
+
+    /** 토큰 상태 확인 (캐시 사용, 5분 TTL) */
+    async function _checkTokenStatusCached(token) {
+        const cached = _tokenStatusCache.get(token);
+        if (cached && (Date.now() - cached.checkedAt) < 5 * 60 * 1000) return cached;
+        try {
+            const data = await checkTokenStatus(token);
+            const info = { sku: data.sku || 'unknown', active: _isActiveSubscription(data.sku), checkedAt: Date.now() };
+            _tokenStatusCache.set(token, info);
+            return info;
+        } catch {
+            const info = { sku: 'error', active: false, checkedAt: Date.now() };
+            _tokenStatusCache.set(token, info);
+            return info;
+        }
+    }
+
+    /** 실패한 토큰을 뒤로 보내기 (키 회전, 활성 토큰 우선) */
     async function rotateFailedToken(failedToken) {
         const tokens = await getTokens();
         const idx = tokens.indexOf(sanitizeToken(failedToken));
         if (idx > -1 && tokens.length > 1) {
             tokens.push(tokens.splice(idx, 1)[0]); // 뒤로 보냄
-            setTokens(tokens);
-            console.log(LOG_TAG, `Key rotation: failed token moved to end (${tokens.length} tokens total)`);
+            // 활성 토큰을 앞쪽으로 우선 배치
+            const active = [];
+            const inactive = [];
+            for (const t of tokens) {
+                const cached = _tokenStatusCache.get(t);
+                if (!cached || cached.active !== false) active.push(t);
+                else inactive.push(t);
+            }
+            const reordered = [...active, ...inactive];
+            setTokens(reordered);
+            console.log(LOG_TAG, `Key rotation: failed token moved to end, active-first reorder (${active.length} active, ${inactive.length} inactive)`);
             return tokens[0]; // 다음 토큰 반환
         }
         return null; // 회전할 토큰 없음
@@ -678,15 +723,29 @@
                     <summary class="p-4 text-white font-bold cursor-pointer select-none">모델 상세 정보 (클릭하여 펼치기)</summary>
                     <div class="px-4 pb-4"><div class="bg-gray-900 p-3 rounded max-h-72 overflow-y-auto font-mono text-[11px] text-gray-500 whitespace-pre-wrap break-all">${escapeHtml(JSON.stringify(data, null, 2))}</div></div>
                 </details>`);
-        } catch (e) { showError(e.message); }
+        } catch (e) {
+            const isWeb = typeof window !== 'undefined' && !window.__TAURI__ && !window.electron;
+            const hint = isWeb ? '<br><br><span class="text-yellow-400 text-xs">💡 웹 버전(risuai.xyz)에서는 api.githubcopilot.com이 CORS를 지원하지 않아 모델 목록 조회가 실패할 수 있습니다. 데스크탑(Electron/Tauri) 버전을 사용하세요.</span>' : '';
+            showError(e.message + hint);
+        }
     };
-
-    actions.quota = async () => {
-        const token = await getToken();
-        if (!token) { showError('저장된 토큰이 없습니다. 먼저 토큰을 생성하세요.'); return; }
-        showLoading('할당량 정보 조회 중...');
+        if (tokens.length === 0) { showError('저장된 토큰이 없습니다. 먼저 토큰을 생성하세요.'); return; }
+        showLoading('모든 토큰 할당량 조회 중...');
         try {
-            const q = await checkQuota(token);
+            // 모든 토큰 병렬 조회
+            const quotaResults = await Promise.allSettled(tokens.map(t => checkQuota(t)));
+            let fullHtml = '';
+
+            for (let ti = 0; ti < tokens.length; ti++) {
+                const result = quotaResults[ti];
+                if (result.status !== 'fulfilled') {
+                    fullHtml += `<div class="bg-red-950 border border-red-800 rounded-lg p-4 mb-3"><h4 class="text-red-300 font-bold mb-1">🔑 토큰 #${ti + 1}</h4><div class="text-red-400 text-xs">${escapeHtml(result.reason?.message || '조회 실패')}</div></div>`;
+                    continue;
+                }
+                const q = result.value;
+                const statusInfo = _tokenStatusCache.get(tokens[ti]);
+                const isActive = statusInfo?.active;
+                const headerColor = isActive ? 'text-green-400' : 'text-gray-400';
 
             // === 1. Subscription plan ===
             const planLabels = {
@@ -697,7 +756,7 @@
             };
             const planDisplay = planLabels[q.plan] || q.plan;
             let html = `<div class="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-3">
-                <h4 class="text-white font-bold mb-3">📊 구독 플랜</h4>
+                <h4 class="text-white font-bold mb-3"><span class="${headerColor}">🔑 토큰 #${ti + 1}</span> ${isActive ? '<span class="text-[10px] bg-green-600 text-white px-1.5 py-0.5 rounded font-bold ml-2">활성</span>' : ''} — 📊 ${escapeHtml(planDisplay)}</h4>
                 <div class="bg-gray-900 p-3 rounded text-sm text-gray-200">
                     <div class="mb-1"><strong>플랜:</strong> ${escapeHtml(planDisplay)}</div>
                     <div class="text-gray-500 text-xs">(SKU: ${escapeHtml(q.plan)})</div>
@@ -863,12 +922,15 @@
             // === 4. Raw API response (collapsible) ===
             if (q.copilot_user) {
                 html += `<details class="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
-                    <summary class="p-4 text-gray-400 font-bold cursor-pointer select-none text-sm">🔍 API 원본 응답 (클릭하여 펼치기)</summary>
+                    <summary class="p-4 text-gray-400 font-bold cursor-pointer select-none text-sm">🔍 토큰 #${ti + 1} API 원본 응답</summary>
                     <div class="px-4 pb-4"><div class="bg-gray-900 p-3 rounded max-h-72 overflow-y-auto font-mono text-[11px] text-gray-500 whitespace-pre-wrap break-all">${escapeHtml(JSON.stringify(q.copilot_user, null, 2))}</div></div>
                 </details>`;
             }
 
-            showResult(html || `<div class="bg-gray-800 border border-gray-700 rounded-lg p-4 text-yellow-300">할당량 정보를 가져올 수 없습니다.</div>`);
+            fullHtml += html;
+            } // end for loop
+
+            showResult(fullHtml || `<div class="bg-gray-800 border border-gray-700 rounded-lg p-4 text-yellow-300">할당량 정보를 가져올 수 없습니다.</div>`);
         } catch (e) { showError(e.message); }
     };
 
@@ -1072,7 +1134,7 @@
         } catch (e) { if (resultEl) resultEl.innerHTML = `<div class="text-red-400 text-sm p-4">❌ ${escapeHtml(e.message)}</div>`; }
     }
 
-    // 토큰 리스트 UI 새로고침
+    // 토큰 리스트 UI 새로고침 (비동기 상태 확인 포함)
     async function _refreshTokenList() {
         const container = document.getElementById(`${PREFIX}-token-list`);
         if (!container) return;
@@ -1081,22 +1143,17 @@
             container.innerHTML = '<div class="text-gray-500 text-sm p-3 text-center">저장된 토큰이 없습니다. 아래에서 토큰을 생성하거나 직접 입력하세요.</div>';
             return;
         }
-        let html = '';
-        for (let i = 0; i < tokens.length; i++) {
-            const t = tokens[i];
-            const masked = t.length > 16 ? t.substring(0, 6) + '••••' + t.substring(t.length - 4) : t;
-            const isFirst = i === 0;
-            html += `<div class="flex items-center gap-2 p-2 rounded ${isFirst ? 'bg-blue-900/30 border border-blue-700/50' : 'bg-gray-800/50 border border-gray-700/50'}">
-                <span class="text-xs font-bold ${isFirst ? 'text-blue-400' : 'text-gray-500'} w-6 text-center">#${i + 1}</span>
-                <span class="flex-1 font-mono text-xs ${isFirst ? 'text-blue-300' : 'text-gray-400'} truncate">${escapeHtml(masked)}</span>
-                ${isFirst ? '<span class="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded font-bold">활성</span>' : ''}
-                <button data-action="tokenCopy" data-token-idx="${i}" class="text-xs text-gray-400 hover:text-white px-1.5 py-0.5 rounded bg-gray-700 hover:bg-gray-600" title="복사">📋</button>
-                <button data-action="tokenModels" data-token-idx="${i}" class="text-xs text-gray-400 hover:text-white px-1.5 py-0.5 rounded bg-gray-700 hover:bg-gray-600" title="모델 조회">📋</button>
-                <button data-action="tokenQuota" data-token-idx="${i}" class="text-xs text-gray-400 hover:text-white px-1.5 py-0.5 rounded bg-gray-700 hover:bg-gray-600" title="할당량">📊</button>
-                <button data-action="removeToken" data-token-idx="${i}" class="text-xs text-red-400 hover:text-red-200 px-1.5 py-0.5 rounded bg-gray-700 hover:bg-red-700" title="제거">🗑️</button>
-            </div>`;
+        // 먼저 캐시된 상태로 빠르게 표시
+        const cachedStatuses = tokens.map(t => _tokenStatusCache.get(t) || null);
+        container.innerHTML = _buildTokenListHtml(tokens, cachedStatuses);
+        // 병렬로 실제 상태 확인 후 업데이트
+        const results = await Promise.allSettled(tokens.map(t => _checkTokenStatusCached(t)));
+        const statuses = results.map(r => r.status === 'fulfilled' ? r.value : null);
+        // DOM이 아직 있는지 확인 (탭 전환했을 수 있으므로)
+        const containerAgain = document.getElementById(`${PREFIX}-token-list`);
+        if (containerAgain) {
+            containerAgain.innerHTML = _buildTokenListHtml(tokens, statuses);
         }
-        container.innerHTML = html;
     }
 
     // window에 노출
@@ -1110,7 +1167,7 @@
     const BTN_RED_CLASS = 'w-full flex flex-col items-center justify-center p-4 rounded-lg bg-gray-800 hover:bg-red-600 text-gray-200 transition-colors border border-gray-700 cursor-pointer text-sm font-medium';
 
     /** 토큰 리스트 HTML을 직접 생성 (renderContent에서 사용) */
-    function _buildTokenListHtml(tokens) {
+    function _buildTokenListHtml(tokens, statuses = []) {
         if (tokens.length === 0) {
             return '<div class="text-gray-500 text-sm p-3 text-center">저장된 토큰이 없습니다. 아래에서 토큰을 생성하거나 직접 입력하세요.</div>';
         }
@@ -1118,11 +1175,29 @@
         for (let i = 0; i < tokens.length; i++) {
             const t = tokens[i];
             const masked = t.length > 16 ? t.substring(0, 6) + '••••' + t.substring(t.length - 4) : t;
+            const status = statuses[i];
+            const isActive = status ? status.active : false;
             const isFirst = i === 0;
-            html += `<div class="flex items-center gap-2 p-2 rounded ${isFirst ? 'bg-blue-900/30 border border-blue-700/50' : 'bg-gray-800/50 border border-gray-700/50'}">
-                <span class="text-xs font-bold ${isFirst ? 'text-blue-400' : 'text-gray-500'} w-6 text-center">#${i + 1}</span>
-                <span class="flex-1 font-mono text-xs ${isFirst ? 'text-blue-300' : 'text-gray-400'} truncate">${escapeHtml(masked)}</span>
-                ${isFirst ? '<span class="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded font-bold">활성</span>' : ''}
+            const borderClass = isActive ? 'bg-green-900/20 border border-green-700/50' : (isFirst ? 'bg-blue-900/30 border border-blue-700/50' : 'bg-gray-800/50 border border-gray-700/50');
+
+            let badge = '';
+            if (status) {
+                if (status.sku === 'error') {
+                    badge = '<span class="text-[10px] bg-red-700 text-white px-1.5 py-0.5 rounded font-bold">만료/오류</span>';
+                } else if (isActive) {
+                    const planLabel = status.sku.includes('plus') ? 'Pro+' : 'Pro';
+                    badge = `<span class="text-[10px] bg-green-600 text-white px-1.5 py-0.5 rounded font-bold">활성 ${planLabel}</span>`;
+                } else {
+                    badge = '<span class="text-[10px] bg-gray-600 text-white px-1.5 py-0.5 rounded font-bold">비활성</span>';
+                }
+            } else {
+                badge = '<span class="text-[10px] bg-gray-700 text-gray-400 px-1.5 py-0.5 rounded">미확인</span>';
+            }
+
+            html += `<div class="flex items-center gap-2 p-2 rounded ${borderClass}">
+                <span class="text-xs font-bold ${isActive ? 'text-green-400' : (isFirst ? 'text-blue-400' : 'text-gray-500')} w-6 text-center">#${i + 1}</span>
+                <span class="flex-1 font-mono text-xs ${isActive ? 'text-green-300' : (isFirst ? 'text-blue-300' : 'text-gray-400')} truncate">${escapeHtml(masked)}</span>
+                ${badge}
                 <button data-action="tokenCopy" data-token-idx="${i}" class="text-xs text-gray-400 hover:text-white px-1.5 py-0.5 rounded bg-gray-700 hover:bg-gray-600" title="복사">📋</button>
                 <button data-action="tokenModels" data-token-idx="${i}" class="text-xs text-gray-400 hover:text-white px-1.5 py-0.5 rounded bg-gray-700 hover:bg-gray-600" title="모델 조회">📋</button>
                 <button data-action="tokenQuota" data-token-idx="${i}" class="text-xs text-gray-400 hover:text-white px-1.5 py-0.5 rounded bg-gray-700 hover:bg-gray-600" title="할당량">📊</button>
@@ -1143,7 +1218,13 @@
             renderContent: async (renderInput) => {
                 const tokens = await getTokens();
                 const tokenCount = tokens.length;
-                const tokenListHtml = _buildTokenListHtml(tokens);
+                // 병렬로 모든 토큰 구독 상태 확인
+                let statuses = [];
+                if (tokenCount > 0) {
+                    const results = await Promise.allSettled(tokens.map(t => _checkTokenStatusCached(t)));
+                    statuses = results.map(r => r.status === 'fulfilled' ? r.value : null);
+                }
+                const tokenListHtml = _buildTokenListHtml(tokens, statuses);
 
                 return `
                     <h3 class="text-3xl font-bold text-blue-400 mb-6 pb-3 border-b border-gray-700">🔑 GitHub Copilot 토큰 관리자</h3>
@@ -1210,5 +1291,5 @@
         }
     });
 
-    console.log(`${LOG_TAG} Settings tab registered (v1.7.5) — sidebar: 🔑 Copilot`);
+    console.log(`${LOG_TAG} Settings tab registered (v1.7.6) — sidebar: 🔑 Copilot`);
 })();
