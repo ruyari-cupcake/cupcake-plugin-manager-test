@@ -1,6 +1,6 @@
 //@name CPM Component - Copilot Token Manager
 //@display-name Cupcake Copilot Manager
-//@version 1.7.10
+//@version 1.7.11
 //@author Cupcake
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager-test/main/cpm-copilot-manager.js
 
@@ -115,15 +115,19 @@
     // ==========================================
     const _tokenStatusCache = new Map(); // token → { sku, active, planLabel, checkedAt }
 
-    /** API에서 성공 응답이 와서 SKU가 있으면 활성, free/community만 제외 */
+    /**
+     * Pro/Pro+/Business/Enterprise 구독만 '활성' 처리.
+     * SKU에 'pro','plus','business','enterprise' 키워드가 포함된 경우만 true.
+     * - copilot_for_individuals_subscriber (무료/레거시) → false (pro 미포함)
+     * - copilot_for_individuals_pro_subscriber → true (pro 포함)
+     * - plus_monthly_subscriber_quota → true (plus 포함)
+     * - copilot_for_business_seat → true (business 포함)
+     */
     function _isActiveSubscription(sku) {
         if (!sku || sku === 'unknown' || sku === 'error') return false;
         const lower = sku.toLowerCase();
-        // 명확히 무료/비활성인 경우만 제외
-        if (lower === 'none' || lower === 'free' || lower === 'expired' || lower === 'disabled') return false;
-        if (lower.includes('free') || lower.includes('community')) return false;
-        // API가 유효한 SKU를 반환했으면 활성 토큰
-        return true;
+        return lower.includes('pro') || lower.includes('plus') ||
+               lower.includes('business') || lower.includes('enterprise');
     }
 
     /** SKU에서 플랜 표시 라벨 추출 */
@@ -146,7 +150,7 @@
             const sku = data.sku || 'unknown';
             const active = _isActiveSubscription(sku);
             const planLabel = active ? _getPlanLabel(sku) : '';
-            console.log(LOG_TAG, `Token status: sku=${sku}, active=${active}, planLabel=${planLabel}`);
+            console.log(LOG_TAG, `Token status: sku="${sku}", active=${active}, planLabel="${planLabel}", raw keys=${Object.keys(data).join(',')}`);
             const info = { sku, active, planLabel, checkedAt: Date.now() };
             _tokenStatusCache.set(token, info);
             return info;
@@ -1307,5 +1311,5 @@
         }
     });
 
-    console.log(`${LOG_TAG} Settings tab registered (v1.7.10) — sidebar: 🔑 Copilot`);
+    console.log(`${LOG_TAG} Settings tab registered (v1.7.11) — sidebar: 🔑 Copilot`);
 })();
