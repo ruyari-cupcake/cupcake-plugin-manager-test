@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ── Worker 모듈의 핸들러를 테스트하기 위한 최소 환경 구성 ──
 // Cloudflare Workers의 fetch() 전역 함수를 시뮬레이션
-const mockFetchResponse = (body, status = 200, headers = {}) => ({
+const _mockFetchResponse = (body, status = 200, headers = {}) => ({
   ok: status >= 200 && status < 300,
   status,
   statusText: status === 200 ? 'OK' : 'Error',

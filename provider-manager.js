@@ -6736,7 +6736,7 @@ var CupcakeProviderManager = (function (exports) {
         const _isProxied = !!_proxyUrl;
         const _proxyDirect = !!config.proxyDirect;
         // 범용 프록시 지원: Rewrite 전 원래 대상 URL 저장 (X-Target-URL 헤더로 전달)
-        let _originalTargetUrl = effectiveUrl || '';
+        const _originalTargetUrl = effectiveUrl || '';
         if (_proxyUrl && effectiveUrl) {
             if (_proxyDirect) {
                 // Direct mode: 프록시 URL로 직접 요청, effectiveUrl은 X-Target-URL 헤더로 전달
