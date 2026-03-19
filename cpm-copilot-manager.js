@@ -1,6 +1,6 @@
 //@name CPM Component - Copilot Token Manager
 //@display-name Cupcake Copilot Manager
-//@version 1.7.3
+//@version 1.7.4
 //@author Cupcake
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager-test/main/cpm-copilot-manager.js
 
@@ -1082,6 +1082,29 @@
     const BTN_CLASS = 'w-full flex flex-col items-center justify-center p-4 rounded-lg bg-gray-800 hover:bg-blue-600 text-gray-200 transition-colors border border-gray-700 cursor-pointer text-sm font-medium';
     const BTN_RED_CLASS = 'w-full flex flex-col items-center justify-center p-4 rounded-lg bg-gray-800 hover:bg-red-600 text-gray-200 transition-colors border border-gray-700 cursor-pointer text-sm font-medium';
 
+    /** 토큰 리스트 HTML을 직접 생성 (renderContent에서 사용) */
+    function _buildTokenListHtml(tokens) {
+        if (tokens.length === 0) {
+            return '<div class="text-gray-500 text-sm p-3 text-center">저장된 토큰이 없습니다. 아래에서 토큰을 생성하거나 직접 입력하세요.</div>';
+        }
+        let html = '';
+        for (let i = 0; i < tokens.length; i++) {
+            const t = tokens[i];
+            const masked = t.length > 16 ? t.substring(0, 6) + '••••' + t.substring(t.length - 4) : t;
+            const isFirst = i === 0;
+            html += `<div class="flex items-center gap-2 p-2 rounded ${isFirst ? 'bg-blue-900/30 border border-blue-700/50' : 'bg-gray-800/50 border border-gray-700/50'}">
+                <span class="text-xs font-bold ${isFirst ? 'text-blue-400' : 'text-gray-500'} w-6 text-center">#${i + 1}</span>
+                <span class="flex-1 font-mono text-xs ${isFirst ? 'text-blue-300' : 'text-gray-400'} truncate">${escapeHtml(masked)}</span>
+                ${isFirst ? '<span class="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded font-bold">활성</span>' : ''}
+                <button data-action="tokenCopy" data-token-idx="${i}" class="text-xs text-gray-400 hover:text-white px-1.5 py-0.5 rounded bg-gray-700 hover:bg-gray-600" title="복사">📋</button>
+                <button data-action="tokenModels" data-token-idx="${i}" class="text-xs text-gray-400 hover:text-white px-1.5 py-0.5 rounded bg-gray-700 hover:bg-gray-600" title="모델 조회">📋</button>
+                <button data-action="tokenQuota" data-token-idx="${i}" class="text-xs text-gray-400 hover:text-white px-1.5 py-0.5 rounded bg-gray-700 hover:bg-gray-600" title="할당량">📊</button>
+                <button data-action="removeToken" data-token-idx="${i}" class="text-xs text-red-400 hover:text-red-200 px-1.5 py-0.5 rounded bg-gray-700 hover:bg-red-700" title="제거">🗑️</button>
+            </div>`;
+        }
+        return html;
+    }
+
     CPM.registerProvider({
         name: 'Copilot',
         // No models or fetcher — this is a tool, not a provider
@@ -1093,6 +1116,7 @@
             renderContent: async (renderInput) => {
                 const tokens = await getTokens();
                 const tokenCount = tokens.length;
+                const tokenListHtml = _buildTokenListHtml(tokens);
 
                 return `
                     <h3 class="text-3xl font-bold text-blue-400 mb-6 pb-3 border-b border-gray-700">🔑 GitHub Copilot 토큰 관리자</h3>
@@ -1107,7 +1131,7 @@
                     <div class="mb-4">
                         <label class="block text-sm font-medium text-gray-400 mb-2">저장된 토큰 (${tokenCount}개) ${tokenCount > 1 ? '<span class="text-green-400 text-xs ml-2">🔄 키 회전 활성</span>' : ''}</label>
                         <div id="${PREFIX}-token-list" class="space-y-2 mb-3 max-h-60 overflow-y-auto">
-                            ${tokenCount === 0 ? '<div class="text-gray-500 text-sm p-3 text-center">저장된 토큰이 없습니다. 아래에서 토큰을 생성하거나 직접 입력하세요.</div>' : ''}
+                            ${tokenListHtml}
                         </div>
                         ${tokenCount > 1 ? `<button data-action="tokensRemoveAll" class="text-xs text-red-400 hover:text-red-300 underline">모든 토큰 제거</button>` : ''}
                     </div>
@@ -1154,11 +1178,10 @@
 
                     <!-- Result Container -->
                     <div id="${PREFIX}-result" style="display:none;" class="space-y-3"></div>
-                    <script>setTimeout(() => { if (window._cpmCopilotRefreshTokens) window._cpmCopilotRefreshTokens(); }, 50);</script>
                 `;
             }
         }
     });
 
-    console.log(`${LOG_TAG} Settings tab registered (v1.7.3) — sidebar: 🔑 Copilot`);
+    console.log(`${LOG_TAG} Settings tab registered (v1.7.4) — sidebar: 🔑 Copilot`);
 })();
