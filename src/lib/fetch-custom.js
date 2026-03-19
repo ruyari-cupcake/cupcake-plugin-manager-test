@@ -122,7 +122,11 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
     }
 
     const _rawKeys = (config.key || '').trim();
-    const _allKeys = _rawKeys.split(/\s+/).filter((/** @type {string} */ k) => k.length > 0);
+    // Service Account JSON contains whitespace/newlines — don't split it.
+    const _looksLikeJson = _rawKeys.startsWith('{');
+    const _allKeys = _looksLikeJson
+        ? (_rawKeys ? [_rawKeys] : [])
+        : _rawKeys.split(/\s+/).filter((/** @type {string} */ k) => k.length > 0);
     const _useKeyRotation = _allKeys.length > 1;
     const _keyPool = [..._allKeys];
 
@@ -502,10 +506,15 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
         const _isVertexEndpointForAuth = effectiveUrl && (
             effectiveUrl.includes('aiplatform.googleapis.com') || config.authType === 'service_account'
         );
-        if (_isVertexEndpointForAuth && looksLikeServiceAccountJson(_initialApiKey)) {
+        const _looksLikeSA = looksLikeServiceAccountJson(_initialApiKey);
+        if (_isVertexEndpointForAuth) {
+            console.log(`[Cupcake PM] Vertex auth check: endpoint=true, looksLikeSA=${_looksLikeSA}, keyLen=${_initialApiKey.length}, keyStart=${_initialApiKey.substring(0, 30)}...`);
+        }
+        if (_isVertexEndpointForAuth && _looksLikeSA) {
             try {
                 const vertexToken = await getVertexBearerToken(_initialApiKey);
                 headers['Authorization'] = `Bearer ${vertexToken}`;
+                console.log(`[Cupcake PM] Vertex OAuth 토큰 교환 성공 (token length: ${vertexToken.length})`);
             } catch (vertexErr) {
                 return {
                     success: false,

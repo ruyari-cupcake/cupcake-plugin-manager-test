@@ -148,6 +148,16 @@ describe('looksLikeServiceAccountJson', () => {
     it('returns false for invalid JSON starting with {', () => {
         expect(looksLikeServiceAccountJson('{invalid json}')).toBe(false);
     });
+
+    it('returns true for pretty-printed SA JSON (with whitespace/newlines)', () => {
+        const prettyJson = JSON.stringify(JSON.parse(VALID_SA), null, 2);
+        expect(prettyJson).toContain('\n');
+        expect(looksLikeServiceAccountJson(prettyJson)).toBe(true);
+    });
+
+    it('returns true for SA JSON with leading/trailing whitespace', () => {
+        expect(looksLikeServiceAccountJson('  \n' + VALID_SA + '\n  ')).toBe(true);
+    });
 });
 
 // ────────────────────────────────────────────

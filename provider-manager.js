@@ -1,7 +1,7 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.1
+//@version 1.22.2
 //@changes v1.22.1: 프리페치 검색 개선, Copilot 멀티토큰 회전, Tool Use 중복 검색 방지
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
@@ -190,7 +190,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.22.1';
+    const CPM_VERSION = '1.22.2';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -6452,7 +6452,11 @@ var CupcakeProviderManager = (function (exports) {
         }
 
         const _rawKeys = (config.key || '').trim();
-        const _allKeys = _rawKeys.split(/\s+/).filter((/** @type {string} */ k) => k.length > 0);
+        // Service Account JSON contains whitespace/newlines — don't split it.
+        const _looksLikeJson = _rawKeys.startsWith('{');
+        const _allKeys = _looksLikeJson
+            ? (_rawKeys ? [_rawKeys] : [])
+            : _rawKeys.split(/\s+/).filter((/** @type {string} */ k) => k.length > 0);
         const _useKeyRotation = _allKeys.length > 1;
         const _keyPool = [..._allKeys];
 
@@ -6832,10 +6836,15 @@ var CupcakeProviderManager = (function (exports) {
             const _isVertexEndpointForAuth = effectiveUrl && (
                 effectiveUrl.includes('aiplatform.googleapis.com') || config.authType === 'service_account'
             );
-            if (_isVertexEndpointForAuth && looksLikeServiceAccountJson(_initialApiKey)) {
+            const _looksLikeSA = looksLikeServiceAccountJson(_initialApiKey);
+            if (_isVertexEndpointForAuth) {
+                console.log(`[Cupcake PM] Vertex auth check: endpoint=true, looksLikeSA=${_looksLikeSA}, keyLen=${_initialApiKey.length}, keyStart=${_initialApiKey.substring(0, 30)}...`);
+            }
+            if (_isVertexEndpointForAuth && _looksLikeSA) {
                 try {
                     const vertexToken = await getVertexBearerToken(_initialApiKey);
                     headers['Authorization'] = `Bearer ${vertexToken}`;
+                    console.log(`[Cupcake PM] Vertex OAuth 토큰 교환 성공 (token length: ${vertexToken.length})`);
                 } catch (vertexErr) {
                     return {
                         success: false,
