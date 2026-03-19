@@ -451,6 +451,9 @@ export async function openCpmSettings() {
         </div>
         <div id="tab-tools" class="cpm-tab-content hidden">
             <h3 class="text-3xl font-bold text-orange-400 mb-6 pb-3 border-b border-gray-700">🔧 도구 사용 (Tool Use)</h3>
+            <div class="bg-yellow-900/60 border-2 border-yellow-500 rounded-lg p-4 mb-6">
+                <h4 class="text-lg font-bold text-yellow-300 mb-1">🚧 아직 제작자가 테스트 안했음. 시험용임. 사용하지 마세요.</h4>
+            </div>
             <p class="text-orange-300 font-semibold mb-4 border-l-4 border-orange-500 pl-4 py-1">AI가 실시간으로 날짜 확인, 계산, 주사위 굴림, 웹 검색 등 도구를 호출할 수 있게 합니다.</p>
             <div class="bg-red-900/60 border-2 border-red-500 rounded-lg p-4 mb-6">
                 <h4 class="text-lg font-bold text-red-300 mb-2">⚠️ 메인 모델 2회 이상 호출 주의</h4>
