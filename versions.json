@@ -40,9 +40,9 @@
     "changes": "v0.3.6: 전체 서브플러그인 버전 동기화 릴리즈"
   },
   "CPM Component - Copilot Token Manager": {
-    "version": "1.7.11",
+    "version": "1.7.12",
     "file": "cpm-copilot-manager.js",
-    "changes": "v1.7.11: 화이트리스트 방식 활성 판정 (pro/plus/business/enterprise 키워드만 활성), SKU 분류 테스트 29개 추가"
+    "changes": "v1.7.12: 토큰별 상세 로깅 (인덱스+마스크+sku+individual+chat+quotas) 추가, 캐시 히트 로깅 포함"
   },
   "CPM Component - Translation Cache Manager": {
     "version": "1.4.0",

@@ -1,6 +1,6 @@
 //@name CPM Component - Copilot Token Manager
 //@display-name Cupcake Copilot Manager
-//@version 1.7.11
+//@version 1.7.12
 //@author Cupcake
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager-test/main/cpm-copilot-manager.js
 
@@ -142,20 +142,27 @@
     }
 
     /** 토큰 상태 확인 (캐시 사용, 5분 TTL) */
-    async function _checkTokenStatusCached(token) {
+    async function _checkTokenStatusCached(token, tokenIdx) {
         const cached = _tokenStatusCache.get(token);
-        if (cached && (Date.now() - cached.checkedAt) < 5 * 60 * 1000) return cached;
+        if (cached && (Date.now() - cached.checkedAt) < 5 * 60 * 1000) {
+            console.log(LOG_TAG, `Token #${tokenIdx ?? '?'} [cached] sku="${cached.sku}", active=${cached.active}`);
+            return cached;
+        }
+        const masked = token.length > 12 ? token.substring(0, 6) + '…' + token.substring(token.length - 4) : '***';
         try {
             const data = await checkTokenStatus(token);
             const sku = data.sku || 'unknown';
+            const individual = data.individual;
+            const chatEnabled = data.chat_enabled;
+            const quotaCount = Array.isArray(data.limited_user_quotas) ? data.limited_user_quotas.length : 0;
             const active = _isActiveSubscription(sku);
             const planLabel = active ? _getPlanLabel(sku) : '';
-            console.log(LOG_TAG, `Token status: sku="${sku}", active=${active}, planLabel="${planLabel}", raw keys=${Object.keys(data).join(',')}`);
-            const info = { sku, active, planLabel, checkedAt: Date.now() };
+            console.log(LOG_TAG, `Token #${tokenIdx ?? '?'} [${masked}] sku="${sku}", individual=${individual}, chat=${chatEnabled}, quotas=${quotaCount}, active=${active}, label="${planLabel}"`);
+            const info = { sku, active, planLabel, individual, checkedAt: Date.now() };
             _tokenStatusCache.set(token, info);
             return info;
         } catch (e) {
-            console.log(LOG_TAG, `Token status check failed: ${e.message}`);
+            console.log(LOG_TAG, `Token #${tokenIdx ?? '?'} [${masked}] FAILED: ${e.message}`);
             const info = { sku: 'error', active: false, planLabel: '', checkedAt: Date.now() };
             _tokenStatusCache.set(token, info);
             return info;
@@ -1167,7 +1174,7 @@
         const cachedStatuses = tokens.map(t => _tokenStatusCache.get(t) || null);
         container.innerHTML = _buildTokenListHtml(tokens, cachedStatuses);
         // 병렬로 실제 상태 확인 후 업데이트
-        const results = await Promise.allSettled(tokens.map(t => _checkTokenStatusCached(t)));
+        const results = await Promise.allSettled(tokens.map((t, i) => _checkTokenStatusCached(t, i + 1)));
         const statuses = results.map(r => r.status === 'fulfilled' ? r.value : null);
         // DOM이 아직 있는지 확인 (탭 전환했을 수 있으므로)
         const containerAgain = document.getElementById(`${PREFIX}-token-list`);
@@ -1241,7 +1248,7 @@
                 // 병렬로 모든 토큰 구독 상태 확인
                 let statuses = [];
                 if (tokenCount > 0) {
-                    const results = await Promise.allSettled(tokens.map(t => _checkTokenStatusCached(t)));
+                    const results = await Promise.allSettled(tokens.map((t, i) => _checkTokenStatusCached(t, i + 1)));
                     statuses = results.map(r => r.status === 'fulfilled' ? r.value : null);
                 }
                 const tokenListHtml = _buildTokenListHtml(tokens, statuses);
@@ -1311,5 +1318,5 @@
         }
     });
 
-    console.log(`${LOG_TAG} Settings tab registered (v1.7.11) — sidebar: 🔑 Copilot`);
+    console.log(`${LOG_TAG} Settings tab registered (v1.7.12) — sidebar: 🔑 Copilot`);
 })();
