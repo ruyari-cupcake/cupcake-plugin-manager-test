@@ -157,17 +157,17 @@ describe('sanitize.js targeted branches', () => {
     // ─── sanitizeBodyJSON ───
 
     // L194-196: contents array filtering (Gemini format)
-    it('sanitizeBodyJSON filters null entries from contents array', () => {
+    it('sanitizeBodyJSON validates but does not filter contents array (validate-only)', () => {
         const input = JSON.stringify({
-            contents: [null, { role: 'user', parts: [{ text: 'hi' }] }, undefined, { role: 'model', parts: [{ text: 'hello' }] }],
+            contents: [null, { role: 'user', parts: [{ text: 'hi' }] }, null, { role: 'model', parts: [{ text: 'hello' }] }],
         });
         const result = JSON.parse(sanitizeBodyJSON(input));
-        expect(result.contents.length).toBe(2);
-        expect(result.contents[0].role).toBe('user');
+        // validate-only: 원본 그대로 반환 (필터링 안 함)
+        expect(result.contents.length).toBe(4);
     });
 
     // sanitizeBodyJSON with messages that have invalid entries
-    it('sanitizeBodyJSON filters invalid messages', () => {
+    it('sanitizeBodyJSON validates but does not filter messages (validate-only)', () => {
         const input = JSON.stringify({
             messages: [
                 null,
@@ -178,7 +178,8 @@ describe('sanitize.js targeted branches', () => {
             ],
         });
         const result = JSON.parse(sanitizeBodyJSON(input));
-        expect(result.messages.length).toBe(2); // only valid ones
+        // validate-only: 원본 그대로 반환 (필터링 안 함)
+        expect(result.messages.length).toBe(5);
     });
 
     // sanitizeBodyJSON with non-JSON string

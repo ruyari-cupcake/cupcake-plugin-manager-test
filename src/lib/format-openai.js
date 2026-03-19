@@ -82,6 +82,10 @@ export function formatToOpenAI(messages, config = {}) {
             }
             msg.content = contentParts.length > 0 ? contentParts : (textContent || '');
         } else if (typeof m.content === 'string') {
+            // NOTE: RisuAI's <tool_call>{UUID}\uf100{name}</tool_call> tags pass through
+            // as-is in the content string. Decoding them into native tool_calls format
+            // requires decodeToolCall() which is not exposed in the V3 plugin API.
+            // The API will receive these tags as plain text (harmless).
             msg.content = m.content;
         } else if (Array.isArray(m.content)) {
             const mappedParts = [];

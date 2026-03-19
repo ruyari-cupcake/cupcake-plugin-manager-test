@@ -3,7 +3,7 @@
  * sanitize.js — Message sanitization and content normalization.
  * Strips internal RisuAI tags, filters null entries, normalizes multimodal payloads.
  */
-import { hasNonEmptyMessageContent, hasAttachedMultimodals, safeStringify } from './helpers.js';
+import { hasNonEmptyMessageContent, hasAttachedMultimodals } from './helpers.js';
 
 /**
  * @typedef {{ type: string, base64?: string, url?: string, mimeType?: string }} NormalizedMultimodal
@@ -165,61 +165,40 @@ export function sanitizeMessages(messages) {
         const m = messages[i];
         if (m == null || typeof m !== 'object') continue;
         if (typeof m.role !== 'string' || !m.role) continue;
-        if (m.content === null || m.content === undefined) continue;
+        // tool_calls/tool_call_id/function_call 메시지는 content:null이 정상 (OpenAI/Anthropic tool-use)
+        const _hasToolProps = !!(m.tool_calls || m.tool_call_id || m.function_call);
+        if ((m.content === null || m.content === undefined) && !_hasToolProps) continue;
         const cleaned = { ...m };
         if (typeof cleaned.toJSON === 'function') delete cleaned.toJSON;
         if (typeof cleaned.content === 'string') {
             cleaned.content = stripInternalTags(cleaned.content);
             cleaned.content = stripStaleAutoCaption(cleaned.content, cleaned);
         }
-        if (!hasNonEmptyMessageContent(cleaned.content) && !hasAttachedMultimodals(cleaned)) continue;
+        if (!hasNonEmptyMessageContent(cleaned.content) && !_hasToolProps && !hasAttachedMultimodals(cleaned)) continue;
         result.push(cleaned);
     }
     return result;
 }
 
 /**
- * Last-line-of-defense: parse JSON body, filter null entries from messages/contents,
- * re-stringify via safeStringify to catch any remaining nulls.
+ * Lightweight JSON validation guard. Upstream sanitizeMessages + _deepSanitizeBody
+ * already handle message filtering and IPC safety. This only validates that the
+ * final JSON string is parseable before sending to the network.
  * @param {string} jsonStr
  * @returns {string}
  */
 export function sanitizeBodyJSON(jsonStr) {
+    // Lightweight validate-only: sanitizeMessages + _deepSanitizeBody가 이미
+    // 메시지 필터링/IPC safety를 처리하므로, 여기서는 JSON 유효성만 검증.
+    // 기존: parse → filter → stringify → validate (JSON 3회) → 경량화: parse 1회 검증만
+    if (typeof jsonStr !== 'string') return jsonStr;
+    const trimmed = jsonStr.trimStart();
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return jsonStr;
     try {
-        const obj = JSON.parse(jsonStr);
-        if (Array.isArray(obj.messages)) {
-            const before = obj.messages.length;
-            obj.messages = obj.messages.filter((/** @type {any} */ m) => {
-                if (m == null || typeof m !== 'object') return false;
-                if (!hasNonEmptyMessageContent(m.content) && !hasAttachedMultimodals(m)) return false;
-                if (typeof m.role !== 'string' || !m.role) return false;
-                if (typeof m.toJSON === 'function') delete m.toJSON;
-                return true;
-            });
-            if (obj.messages.length < before) {
-                console.warn(`[Cupcake PM] sanitizeBodyJSON: removed ${before - obj.messages.length} invalid entries from messages`);
-            }
-        }
-        if (Array.isArray(obj.contents)) {
-            const before = obj.contents.length;
-            obj.contents = obj.contents.filter((/** @type {any} */ m) => m != null && typeof m === 'object');
-            if (obj.contents.length < before) {
-                console.warn(`[Cupcake PM] sanitizeBodyJSON: removed ${before - obj.contents.length} null entries from contents`);
-            }
-        }
-        const result = safeStringify(obj);
-        try {
-            JSON.parse(result);
-        } catch {
-            console.error('[Cupcake PM] sanitizeBodyJSON: output validation failed — returning original');
-            return jsonStr;
-        }
-        return result;
+        JSON.parse(jsonStr);
+        return jsonStr;
     } catch (e) {
-        if (typeof jsonStr === 'string' && !jsonStr.trimStart().startsWith('{') && !jsonStr.trimStart().startsWith('[')) {
-            return jsonStr;
-        }
-        console.error('[Cupcake PM] sanitizeBodyJSON: JSON parse/stringify failed:', /** @type {Error} */ (e).message);
+        console.error('[Cupcake PM] sanitizeBodyJSON: JSON validation failed:', /** @type {Error} */ (e).message);
         return jsonStr;
     }
 }

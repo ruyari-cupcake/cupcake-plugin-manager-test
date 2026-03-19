@@ -201,6 +201,7 @@ export async function openCpmSettings() {
             <div class="flex-1 overflow-y-auto py-2 pr-2" id="cpm-tab-list">
             <div class="px-4 text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2 mt-2">Common</div>
             <button class="w-full text-left px-5 py-2 text-sm hover:bg-gray-800 transition-colors focus:outline-none tab-btn text-cyan-300 font-semibold" data-target="tab-global">🎛️ 글로벌 기본값</button>
+            <button class="w-full text-left px-5 py-2 text-sm hover:bg-gray-800 transition-colors focus:outline-none tab-btn" data-target="tab-tools">🔧 도구 사용 (Tool Use)</button>
             <div class="px-4 text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2 mt-4">Aux Slots (Map Mode)</div>
             <button class="w-full text-left px-5 py-2 text-sm hover:bg-gray-800 transition-colors focus:outline-none tab-btn" data-target="tab-trans">🌐 번역 (Trans)</button>
             <button class="w-full text-left px-5 py-2 text-sm hover:bg-gray-800 transition-colors focus:outline-none tab-btn" data-target="tab-emo">😊 감정 판독 (Emotion)</button>
@@ -447,6 +448,95 @@ export async function openCpmSettings() {
             ${await renderInput('cpm_slot_other', 'Lua 스크립트 등 무거운 유틸 전담 모델 (Other/Trigger)', 'select', providersList)}
             ${slotCollisionWarning}
             ${await renderAuxParams('other')}
+        </div>
+        <div id="tab-tools" class="cpm-tab-content hidden">
+            <h3 class="text-3xl font-bold text-orange-400 mb-6 pb-3 border-b border-gray-700">🔧 도구 사용 (Tool Use)</h3>
+            <p class="text-orange-300 font-semibold mb-4 border-l-4 border-orange-500 pl-4 py-1">AI가 실시간으로 날짜 확인, 계산, 주사위 굴림, 웹 검색 등 도구를 호출할 수 있게 합니다.</p>
+            <div class="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-6">
+                <h4 class="text-sm font-bold text-gray-300 mb-3">📋 동작 방식</h4>
+                <div class="text-xs text-gray-400 space-y-1">
+                    <div class="flex items-start"><span class="bg-orange-600 text-white w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold mr-2 shrink-0 mt-0.5">1</span> <span>네이티브 프로바이더(OpenAI/Anthropic/Gemini) → RisuAI MCP 시스템에 도구 등록 (Layer 1)</span></div>
+                    <div class="flex items-start"><span class="bg-orange-600 text-white w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold mr-2 shrink-0 mt-0.5">2</span> <span>CPM 커스텀 모델 → CPM 자체 도구 루프 실행 (Layer 2)</span></div>
+                    <div class="flex items-start"><span class="bg-orange-600 text-white w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold mr-2 shrink-0 mt-0.5">3</span> <span>AI가 도구 호출 → CPM이 실행 후 결과 주입 → AI가 최종 응답 생성</span></div>
+                </div>
+            </div>
+
+            <div class="space-y-3 mb-8">
+                ${await renderInput('cpm_tool_use_enabled', '🔧 도구 사용 활성화 (Enable Tool Use)', 'checkbox')}
+            </div>
+
+            <div class="mt-6 pt-6 border-t border-gray-700">
+                <h4 class="text-xl font-bold text-gray-300 mb-4">개별 도구 설정 (Individual Tools)</h4>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="bg-gray-800/50 border border-gray-700 rounded-lg p-4">
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="text-lg">🕐</span>
+                            <span class="text-sm font-bold text-gray-300">현재 날짜/시간</span>
+                        </div>
+                        <p class="text-xs text-gray-500 mb-3">AI가 현재 날짜, 시간, 요일 등을 확인할 수 있습니다.</p>
+                        ${await renderInput('cpm_tool_datetime', '날짜/시간 도구 활성화', 'checkbox')}
+                    </div>
+                    <div class="bg-gray-800/50 border border-gray-700 rounded-lg p-4">
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="text-lg">🧮</span>
+                            <span class="text-sm font-bold text-gray-300">계산기</span>
+                        </div>
+                        <p class="text-xs text-gray-500 mb-3">수학 계산을 정확하게 수행합니다. (사칙연산, 삼각함수 등)</p>
+                        ${await renderInput('cpm_tool_calculator', '계산기 도구 활성화', 'checkbox')}
+                    </div>
+                    <div class="bg-gray-800/50 border border-gray-700 rounded-lg p-4">
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="text-lg">🎲</span>
+                            <span class="text-sm font-bold text-gray-300">주사위 굴림</span>
+                        </div>
+                        <p class="text-xs text-gray-500 mb-3">TRPG 스타일 주사위 굴림 (예: 2d6+3, 1d20)</p>
+                        ${await renderInput('cpm_tool_dice', '주사위 도구 활성화', 'checkbox')}
+                    </div>
+                    <div class="bg-gray-800/50 border border-gray-700 rounded-lg p-4">
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="text-lg">🔍</span>
+                            <span class="text-sm font-bold text-gray-300">웹 검색</span>
+                        </div>
+                        <p class="text-xs text-gray-500 mb-3">외부 검색 API로 실시간 정보를 가져옵니다.</p>
+                        ${await renderInput('cpm_tool_web_search', '웹 검색 도구 활성화', 'checkbox')}
+                    </div>
+                    <div class="bg-gray-800/50 border border-gray-700 rounded-lg p-4">
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="text-lg">🌐</span>
+                            <span class="text-sm font-bold text-gray-300">URL 가져오기</span>
+                        </div>
+                        <p class="text-xs text-gray-500 mb-3">웹 페이지의 텍스트 내용을 가져옵니다. (최대 8KB)</p>
+                        ${await renderInput('cpm_tool_fetch_url', 'URL 가져오기 도구 활성화', 'checkbox')}
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-8 pt-6 border-t border-gray-700">
+                <h4 class="text-xl font-bold text-blue-400 mb-4">🔍 웹 검색 설정 (Web Search Provider)</h4>
+                <div class="bg-gray-800/70 border border-blue-900/50 rounded-lg p-4 mb-4">
+                    <p class="text-xs text-blue-300 mb-2 font-semibold">커스텀 모델처럼 검색 프로바이더를 설정합니다</p>
+                    <p class="text-xs text-gray-400">Brave Search, SerpAPI, Google CSE 등에서 API Key를 받아 입력하세요. Custom URL을 지정하면 어떤 검색 API든 사용 가능합니다.</p>
+                </div>
+                <div class="space-y-3">
+                    ${await renderInput('cpm_tool_websearch_provider', '검색 프로바이더 (Search Provider)', 'select', [
+                        { value: 'brave', text: 'Brave Search API' },
+                        { value: 'serpapi', text: 'SerpAPI (Google Search)' },
+                        { value: 'google_cse', text: 'Google Custom Search Engine' },
+                        { value: 'custom', text: 'Custom URL (직접 입력)' },
+                    ])}
+                    ${await renderInput('cpm_tool_websearch_url', '검색 API URL (Custom용, 비워두면 프로바이더 기본값)', 'text')}
+                    ${await renderInput('cpm_tool_websearch_key', '검색 API Key', 'password')}
+                    ${await renderInput('cpm_tool_websearch_cx', 'Google CSE ID (cx, Google CSE 전용)', 'text')}
+                </div>
+            </div>
+
+            <div class="mt-8 pt-6 border-t border-gray-700">
+                <h4 class="text-xl font-bold text-gray-400 mb-4">⚙️ 고급 설정 (Advanced)</h4>
+                <div class="space-y-3">
+                    ${await renderInput('cpm_tool_max_depth', '최대 도구 루프 깊이 (Max Depth, 기본 5, 최대 20)', 'number')}
+                    ${await renderInput('cpm_tool_timeout', '도구 실행 타임아웃 ms (기본 10000, 최대 60000)', 'number')}
+                </div>
+            </div>
         </div>
         <div id="cpm-dynamic-provider-content"></div>
         <div id="tab-customs" class="cpm-tab-content hidden">

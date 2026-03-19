@@ -48,6 +48,7 @@ import { SubPluginManager, setExposeScopeFunction } from './sub-plugin-manager.j
 import { fetchCustom } from './fetch-custom.js';
 import { handleRequest, fetchByProviderId } from './router.js';
 import { updateApiRequest } from './api-request-log.js';
+import { registerCpmTools } from './tool-use/tool-mcp-bridge.js';
 import { setupCupcakeAPI } from './cupcake-api.js';
 import { openCpmSettings } from './settings-ui.js';
 
@@ -363,6 +364,16 @@ setupCupcakeAPI();
         } catch (regErr) {
             _phaseFail('model-registration', regErr);
             console.error(`[CPM] Model registration stopped at ${_modelRegCount}/${state.ALL_DEFINED_MODELS.length}`);
+        }
+
+        // ── Phase: Tool-Use MCP Registration (Layer 1) ──
+        try {
+            _phaseStart('tool-use-mcp');
+            await registerCpmTools(CPM_VERSION);
+            _phaseDone('tool-use-mcp');
+        } catch (toolErr) {
+            // Non-fatal: Layer 2 (CPM loop) still works without Layer 1
+            console.warn('[CPM] Tool-Use MCP registration skipped:', /** @type {Error} */(toolErr).message);
         }
 
         // ── Phase: Silent Update Check (deferred 5s) ──

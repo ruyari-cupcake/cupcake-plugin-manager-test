@@ -80,6 +80,23 @@ function getDatasetIndex(eventTarget) {
     return typeof idx === 'string' ? parseInt(idx, 10) : -1;
 }
 
+// ── Helper: Auth type UI toggle ──
+/** @param {string} authType */
+function _updateAuthTypeUI(authType) {
+    const hint = document.getElementById('cpm-cm-auth-type-hint');
+    const label = document.getElementById('cpm-cm-key-label');
+    const keyField = /** @type {HTMLTextAreaElement} */ (document.getElementById('cpm-cm-key'));
+    if (authType === 'service_account') {
+        if (hint) hint.classList.remove('hidden');
+        if (label) label.textContent = 'Service Account JSON';
+        if (keyField) { keyField.rows = 6; keyField.placeholder = '{"type":"service_account","project_id":"...","private_key":"...","client_email":"..."}'; }
+    } else {
+        if (hint) hint.classList.add('hidden');
+        if (label) label.textContent = 'API Key (여러 개 → 공백/줄바꿈 구분 → 자동 키회전)';
+        if (keyField) { keyField.rows = 2; keyField.placeholder = 'sk-xxxx'; }
+    }
+}
+
 // ── Helper: Custom model editor HTML ──
 /**
  * @param {Array<{value: string, text: string}>} thinkingList
@@ -97,7 +114,8 @@ export function renderCustomModelEditor(thinkingList, reasoningList, verbosityLi
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">Display Name</label><input type="text" id="cpm-cm-name" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"></div>
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">Model Name</label><input type="text" id="cpm-cm-model" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"></div>
                 <div class="md:col-span-2"><label class="block text-sm font-medium text-gray-400 mb-1">Base URL</label><input type="text" id="cpm-cm-url" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"></div>
-                <div class="md:col-span-2"><label class="block text-sm font-medium text-gray-400 mb-1">API Key (여러 개 → 공백/줄바꿈 구분 → 자동 키회전)</label><textarea id="cpm-cm-key" rows="2" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white font-mono text-sm" spellcheck="false" placeholder="sk-xxxx"></textarea></div>
+                <div class="md:col-span-2"><label class="block text-sm font-medium text-gray-400 mb-1">인증 방식 (Auth Type)</label><select id="cpm-cm-auth-type" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"><option value="api_key">API Key</option><option value="service_account">Service Account JSON (Vertex AI)</option></select><p id="cpm-cm-auth-type-hint" class="text-[11px] text-amber-400/70 mt-1 hidden">⚠️ Google Cloud Service Account JSON 전체를 아래 필드에 붙여넣으세요. Vertex AI 엔드포인트 전용입니다.</p></div>
+                <div class="md:col-span-2"><label class="block text-sm font-medium text-gray-400 mb-1" id="cpm-cm-key-label">API Key (여러 개 → 공백/줄바꿈 구분 → 자동 키회전)</label><textarea id="cpm-cm-key" rows="2" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white font-mono text-sm" spellcheck="false" placeholder="sk-xxxx"></textarea></div>
                 <div class="md:col-span-2"><label class="block text-sm font-medium text-gray-400 mb-1">CORS Proxy URL <span class="text-xs text-yellow-400">(선택사항 — 모든 API에 적용 가능)</span></label><input type="text" id="cpm-cm-proxy-url" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white font-mono text-sm" placeholder="https://my-proxy.example.com/proxy (비워두면 직접 요청)"><label class="flex items-center space-x-2 text-xs text-gray-400 mt-2 cursor-pointer"><input type="checkbox" id="cpm-cm-proxy-direct" class="form-checkbox bg-gray-800"> <span>Direct 모드 <span class="text-yellow-400">(프록시 URL로 직접 요청, 원본 URL은 X-Target-URL 헤더로 전달. 기본값은 도메인 교체 방식)</span></span></label></div>
                 <div class="md:col-span-2 mt-4 border-t border-gray-800 pt-4"><h5 class="text-sm font-bold text-gray-300 mb-3">Model Parameters</h5></div>
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">API Format</label><select id="cpm-cm-format" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"><option value="openai">OpenAI</option><option value="anthropic">Anthropic Claude</option><option value="google">Google Gemini</option></select></div>
@@ -146,6 +164,8 @@ export function populateEditor(m) {
     getField('cpm-cm-model').value = m.model || '';
     getField('cpm-cm-url').value = m.url || '';
     getField('cpm-cm-key').value = m.key || '';
+    getField('cpm-cm-auth-type').value = m.authType || 'api_key';
+    _updateAuthTypeUI(m.authType || 'api_key');
     getField('cpm-cm-proxy-url').value = m.proxyUrl || '';
     getCheckbox('cpm-cm-proxy-direct').checked = !!m.proxyDirect;
     getField('cpm-cm-format').value = m.format || 'openai';
@@ -172,6 +192,8 @@ export function populateEditor(m) {
 // ── Clear all editor fields ──
 export function clearEditor() {
     ['name', 'model', 'url', 'key', 'proxy-url'].forEach(f => { getField(`cpm-cm-${f}`).value = ''; });
+    getField('cpm-cm-auth-type').value = 'api_key';
+    _updateAuthTypeUI('api_key');
     getCheckbox('cpm-cm-proxy-direct').checked = false;
     getField('cpm-cm-format').value = 'openai';
     getField('cpm-cm-tok').value = 'o200k_base';
@@ -196,6 +218,7 @@ export function readEditorValues(uid) {
         model: getField('cpm-cm-model').value,
         url: getField('cpm-cm-url').value,
         key: getField('cpm-cm-key').value,
+        authType: getField('cpm-cm-auth-type').value || 'api_key',
         proxyUrl: getField('cpm-cm-proxy-url').value.trim(),
         proxyDirect: getCheckbox('cpm-cm-proxy-direct').checked,
         format: getField('cpm-cm-format').value,
@@ -315,6 +338,11 @@ export function initCustomModelsManager(_setVal, _openCpmSettings) {
         getContainer('cpm-cm-editor-title').innerText = 'Add New Model';
         cmList.prepend(cmEditor);
         cmEditor.classList.remove('hidden');
+    });
+
+    // Auth type toggle
+    getField('cpm-cm-auth-type').addEventListener('change', (e) => {
+        _updateAuthTypeUI(/** @type {HTMLSelectElement} */ (e.target).value);
     });
 
     getButton('cpm-cm-cancel').addEventListener('click', () => {

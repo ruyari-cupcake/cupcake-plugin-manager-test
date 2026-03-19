@@ -57,6 +57,9 @@ function setupDom() {
                 <input type="text" id="cpm-cm-model" value="">
                 <input type="text" id="cpm-cm-url" value="">
                 <textarea id="cpm-cm-key"></textarea>
+                <select id="cpm-cm-auth-type"><option value="api_key">API Key</option><option value="service_account">Service Account</option></select>
+                <span id="cpm-cm-auth-type-hint" class="hidden"></span>
+                <span id="cpm-cm-key-label"></span>
                 <input type="text" id="cpm-cm-proxy-url" value="">
                 <input type="checkbox" id="cpm-cm-proxy-direct">
                 <select id="cpm-cm-format"><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="google">Google</option></select>

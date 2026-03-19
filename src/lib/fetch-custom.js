@@ -10,6 +10,7 @@ import { sanitizeMessages, sanitizeBodyJSON } from './sanitize.js';
 import { safeStringify, hasNonEmptyMessageContent, hasAttachedMultimodals, safeUUID } from './helpers.js';
 import { formatToOpenAI } from './format-openai.js';
 import { formatToAnthropic } from './format-anthropic.js';
+import { looksLikeServiceAccountJson, getVertexBearerToken } from './vertex-auth.js';
 import {
     formatToGemini, buildGeminiThinkingConfig, getGeminiSafetySettings,
     validateGeminiParams, cleanExperimentalModelParams,
@@ -277,6 +278,26 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
         body.prompt_cache_retention = config.promptCacheRetention;
     }
 
+    // ── Tool-Use: inject tools into body (internal CPM logic, NOT customParams) ──
+    if (config._cpmActiveTools && Array.isArray(config._cpmActiveTools) && config._cpmActiveTools.length > 0) {
+        if (format === 'openai') {
+            body.tools = config._cpmActiveTools.map(t => ({
+                type: 'function',
+                function: { name: t.name, description: t.description, parameters: t.inputSchema }
+            }));
+            body.tool_choice = 'auto';
+        } else if (format === 'anthropic') {
+            body.tools = config._cpmActiveTools.map(t => ({
+                name: t.name, description: t.description, input_schema: t.inputSchema
+            }));
+            body.tool_choice = { type: 'auto' };
+        } else if (format === 'google') {
+            body.tools = [{ function_declarations: config._cpmActiveTools.map(t => ({
+                name: t.name, description: t.description, parameters: t.inputSchema
+            })) }];
+        }
+    }
+
     if (config.customParams && config.customParams.trim() !== '') {
         try {
             const extra = JSON.parse(config.customParams);
@@ -475,6 +496,22 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
         if (format === 'anthropic' && effectiveUrl && effectiveUrl.includes('api.anthropic.com')) {
             delete headers['Authorization'];
             headers['x-api-key'] = _initialApiKey;
+        }
+
+        // Vertex AI: Service Account JSON → OAuth Bearer token
+        const _isVertexEndpointForAuth = effectiveUrl && (
+            effectiveUrl.includes('aiplatform.googleapis.com') || config.authType === 'service_account'
+        );
+        if (_isVertexEndpointForAuth && looksLikeServiceAccountJson(_initialApiKey)) {
+            try {
+                const vertexToken = await getVertexBearerToken(_initialApiKey);
+                headers['Authorization'] = `Bearer ${vertexToken}`;
+            } catch (vertexErr) {
+                return {
+                    success: false,
+                    content: `[Cupcake PM] Vertex AI 인증 실패: ${/** @type {Error} */(vertexErr).message}`
+                };
+            }
         }
 
         // Copilot via CORS proxy still needs the raw GitHub OAuth token so the worker can
@@ -761,6 +798,11 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
             return { success: false, content: `[Custom API Error] Response is not JSON (${contentType}): ${_rawResponseText.substring(0, 1000)}`, _status: res.status };
         }
         if (_reqId) _updateApiRequest(_reqId, { response: data });
+
+        // Tool-use round: return raw parsed JSON so tool-loop can inspect tool_calls
+        if (config._cpmReturnRawJSON) {
+            return { success: true, content: _rawResponseText, _rawData: data, _status: res.status };
+        }
 
         return _parseNonStreamingData(data);
     };

@@ -16,6 +16,9 @@ import {
 import { _takeTokenUsage } from './token-usage.js';
 import { showTokenUsageToast as _showTokenUsageToast } from './token-toast.js';
 import { collectStream, checkStreamCapability } from './stream-utils.js';
+import { isToolUseEnabled } from './tool-use/tool-config.js';
+import { getActiveToolList } from './tool-use/tool-definitions.js';
+import { runToolLoop } from './tool-use/tool-loop.js';
 
 /**
  * @typedef {Object} ModelDef
@@ -109,9 +112,10 @@ export async function fetchByProviderId(modelDef, args, abortSignal, _reqId) {
             // Merge slot thinking/reasoning overrides (slot > custom model default)
             const _so = args._cpmSlotThinkingConfig || {};
 
-            return await fetchCustom({
+            const _fetchConfig = {
                 url: cDef.url, key: cDef.key, model: cDef.model, proxyUrl: cDef.proxyUrl || '', proxyDirect: !!cDef.proxyDirect,
                 format: cDef.format || 'openai',
+                authType: cDef.authType || 'api_key',
                 sysfirst: !!cDef.sysfirst, altrole: !!cDef.altrole,
                 mustuser: !!cDef.mustuser, maxout: !!cDef.maxout, mergesys: !!cDef.mergesys,
                 reasoning: _so.reasoning || cDef.reasoning || 'none',
@@ -128,7 +132,41 @@ export async function fetchByProviderId(modelDef, args, abortSignal, _reqId) {
                 customParams: cDef.customParams || '', copilotToken: '',
                 effort: _so.effort || cDef.effort || 'none',
                 adaptiveThinking: _so.adaptiveThinking || !!cDef.adaptiveThinking
-            }, messages, temp, maxTokens, args, abortSignal, _reqId);
+            };
+
+            // ── Tool-Use Layer 2: CPM standalone tool-use loop ──
+            const _toolEnabled = await isToolUseEnabled();
+            if (_toolEnabled) {
+                const _activeTools = await getActiveToolList();
+                if (_activeTools.length > 0) {
+                    const _toolConfig = {
+                        ..._fetchConfig,
+                        streaming: false,
+                        _cpmReturnRawJSON: true,
+                        _cpmActiveTools: _activeTools
+                    };
+                    const _initialResult = await fetchCustom(
+                        _toolConfig, messages, temp, maxTokens, args, abortSignal, _reqId
+                    );
+                    if (_initialResult && _initialResult.success && _initialResult._rawData) {
+                        return await runToolLoop({
+                            initialResult: _initialResult,
+                            messages,
+                            config: _fetchConfig,
+                            temp, maxTokens, args, abortSignal, _reqId,
+                            fetchFn: fetchCustom
+                        });
+                    }
+                    // No _rawData or not success — fall through to normal parsing
+                    if (!_initialResult || typeof _initialResult !== 'object') {
+                        return { success: false, content: '[CPM] Tool-use initial request returned invalid result' };
+                    }
+                    const { _rawData, ...cleanResult } = _initialResult;
+                    return cleanResult;
+                }
+            }
+
+            return await fetchCustom(_fetchConfig, messages, temp, maxTokens, args, abortSignal, _reqId);
         }
         return { success: false, content: `[Cupcake PM] Unknown provider selected: ${modelDef.provider}` };
     } catch (_e) {

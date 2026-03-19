@@ -641,7 +641,8 @@ describe('smartNativeFetch — internal helpers coverage', () => {
             return { status: 200, data: new Uint8Array([123, 125]) };
         });
 
-        const body = { messages: [{ role: 'user', content: 'hello' }], nested: {} };
+        // Body WITHOUT messages/contents: IPC safety round-trip runs → strips non-serializable
+        const body = { model: 'gpt-4', temperature: 0.7, nested: {} };
         body.self = body;
         body.fn = () => {};
         body.nested.parent = body;
@@ -654,7 +655,6 @@ describe('smartNativeFetch — internal helpers coverage', () => {
         });
 
         expect(result.status).toBe(200);
-        expect(capturedBody.messages).toEqual([{ role: 'user', content: 'hello' }]);
         expect(capturedBody.fn).toBeUndefined();
         expect(capturedBody.nested.ok).toBe('kept');
     });
@@ -766,5 +766,188 @@ describe('smartNativeFetch — internal helpers coverage', () => {
         await smartNativeFetch('https://api.openai.com/v1/chat', { method: 'POST', body: '{}' });
 
         expect(h.safeGetBoolArg).toHaveBeenCalledTimes(1);
+    });
+});
+
+// ═══════════════════════════════════════════════════════
+//  Tool-use message body-corruption regression tests
+//  Verifies: content:null preservation, body-corruption 400 fallback
+// ═══════════════════════════════════════════════════════
+
+describe('smartNativeFetch — tool-use message 400 error regression', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        _resetCompatibilityCache();
+        h.sanitizeBodyJSON.mockImplementation((x) => x);
+        h.safeGetBoolArg.mockResolvedValue(false);
+        h.risuFetch.mockReset();
+        h.nativeFetch.mockReset();
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('CORS blocked')));
+    });
+
+    it('preserves tool_calls assistant messages with content:null in risuFetch path', async () => {
+        let capturedBody = null;
+        h.risuFetch.mockImplementation(async (_url, opts) => {
+            capturedBody = opts.body;
+            return { status: 200, data: new Uint8Array([123, 125]) };
+        });
+
+        const body = JSON.stringify({
+            messages: [
+                { role: 'user', content: 'Call the weather tool' },
+                { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'get_weather', arguments: '{"city":"Seoul"}' } }] },
+                { role: 'tool', content: '{"temp": 15}', tool_call_id: 'call_1' },
+                { role: 'assistant', content: 'Seoul is 15°C.' },
+            ],
+        });
+
+        await smartNativeFetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST', body,
+            headers: { 'Content-Type': 'application/json' },
+        });
+
+        expect(capturedBody).toBeTruthy();
+        expect(capturedBody.messages).toHaveLength(4);
+        // The assistant message with content:null + tool_calls MUST be preserved
+        const toolCallMsg = capturedBody.messages[1];
+        expect(toolCallMsg.role).toBe('assistant');
+        expect(toolCallMsg.tool_calls).toBeDefined();
+        expect(toolCallMsg.tool_calls[0].id).toBe('call_1');
+        // tool_call_id message must also be preserved
+        expect(capturedBody.messages[2].tool_call_id).toBe('call_1');
+    });
+
+    it('preserves function_call assistant messages with content:null', async () => {
+        let capturedBody = null;
+        h.risuFetch.mockImplementation(async (_url, opts) => {
+            capturedBody = opts.body;
+            return { status: 200, data: new Uint8Array([123, 125]) };
+        });
+
+        const body = JSON.stringify({
+            messages: [
+                { role: 'user', content: 'What is 2+2?' },
+                { role: 'assistant', content: null, function_call: { name: 'calculator', arguments: '{"expr":"2+2"}' } },
+                { role: 'function', content: '4', name: 'calculator' },
+            ],
+        });
+
+        await smartNativeFetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST', body,
+            headers: { 'Content-Type': 'application/json' },
+        });
+
+        expect(capturedBody).toBeTruthy();
+        expect(capturedBody.messages).toHaveLength(3);
+        const fnCallMsg = capturedBody.messages[1];
+        expect(fnCallMsg.role).toBe('assistant');
+        expect(fnCallMsg.function_call).toBeDefined();
+        expect(fnCallMsg.function_call.name).toBe('calculator');
+    });
+
+    it('still filters out non-tool messages with content:null', async () => {
+        let capturedBody = null;
+        h.risuFetch.mockImplementation(async (_url, opts) => {
+            capturedBody = opts.body;
+            return { status: 200, data: new Uint8Array([123, 125]) };
+        });
+
+        const body = JSON.stringify({
+            messages: [
+                { role: 'user', content: 'Hi' },
+                { role: 'assistant', content: null },  // No tool props → should be filtered
+                { role: 'assistant', content: 'Hello!' },
+            ],
+        });
+
+        await smartNativeFetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST', body,
+            headers: { 'Content-Type': 'application/json' },
+        });
+
+        expect(capturedBody).toBeTruthy();
+        // content:null without tool props should be removed
+        expect(capturedBody.messages).toHaveLength(2);
+        expect(capturedBody.messages[0].content).toBe('Hi');
+        expect(capturedBody.messages[1].content).toBe('Hello!');
+    });
+
+    it('Google nativeFetch body-corruption 400 falls through to risuFetch', async () => {
+        _resetCompatibilityCache();
+        const errorBody = '{"error":{"message":"request body is not valid JSON","code":"invalid_request_body"}}';
+
+        h.nativeFetch.mockResolvedValue({
+            ok: false,
+            status: 400,
+            clone: () => ({ text: async () => errorBody }),
+            text: async () => errorBody,
+        });
+        h.risuFetch.mockResolvedValue({
+            status: 200,
+            data: new Uint8Array(new TextEncoder().encode('{"candidates":[]}')),
+            headers: {},
+        });
+
+        const res = await smartNativeFetch('https://generativelanguage.googleapis.com/v1/models/gemini:generateContent', {
+            method: 'POST',
+            body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'hi' }] }] }),
+            headers: { 'Content-Type': 'application/json' },
+        });
+
+        // Should have fallen through from nativeFetch 400 to risuFetch
+        expect(h.nativeFetch).toHaveBeenCalledOnce();
+        expect(h.risuFetch).toHaveBeenCalledOnce();
+        expect(res.status).toBe(200);
+    });
+
+    it('Google nativeFetch non-corruption 400 returns as-is', async () => {
+        _resetCompatibilityCache();
+        const authError = '{"error":{"message":"API key not valid","code":"invalid_api_key"}}';
+
+        h.nativeFetch.mockResolvedValue({
+            ok: false,
+            status: 400,
+            clone: () => ({ text: async () => authError }),
+            text: async () => authError,
+        });
+
+        const res = await smartNativeFetch('https://generativelanguage.googleapis.com/v1/models/gemini:generateContent', {
+            method: 'POST',
+            body: JSON.stringify({ contents: [] }),
+            headers: { 'Content-Type': 'application/json' },
+        });
+
+        // Non-corruption 400 should be returned directly, no risuFetch fallback
+        expect(h.nativeFetch).toHaveBeenCalledOnce();
+        expect(h.risuFetch).not.toHaveBeenCalled();
+        expect(res.status).toBe(400);
+    });
+
+    it('nativeFetch fallback (Strategy 3) logs body-corruption on 400', async () => {
+        _resetCompatibilityCache();
+        const errorBody = '{"error":"unexpected EOF"}';
+        const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        // Skip direct fetch (CORS), skip risuFetch (non-JSON content type), hit nativeFetch fallback
+        h.nativeFetch.mockResolvedValue({
+            ok: false,
+            status: 400,
+            clone: () => ({ text: async () => errorBody }),
+            text: async () => errorBody,
+        });
+
+        const res = await smartNativeFetch('https://custom-api.example.com/v1/chat', {
+            method: 'POST',
+            body: JSON.stringify({ messages: [{ role: 'user', content: 'test' }] }),
+            headers: { 'Content-Type': 'application/json' },
+        });
+
+        expect(res.status).toBe(400);
+        // Verify body-corruption was logged
+        const corpLogCall = consoleSpy.mock.calls.find(c =>
+            typeof c[0] === 'string' && c[0].includes('body-corruption 400')
+        );
+        expect(corpLogCall).toBeDefined();
+        consoleSpy.mockRestore();
     });
 });

@@ -183,15 +183,33 @@ export async function smartNativeFetch(url, options = {}) {
             const nfOptions = { ...options };
             // String body passed as-is — fetchNative encodes on HOST side via TextEncoder.
             // Avoids V3 bridge Uint8Array transferable path (potential buffer neutering on retry).
+            console.log(`[CupcakePM] [Strategy:Google-nativeFetch] Attempting for ${url.substring(0, 60)}...`);
             const nfRes = await callNativeFetchWithAbortFallback(url, nfOptions);
-            if (nfRes && (nfRes.ok || (nfRes.status && nfRes.status !== 0))) {
-                console.log(`[CupcakePM] Google/Vertex nativeFetch succeeded: status=${nfRes.status} for ${url.substring(0, 60)}`);
+            if (nfRes && nfRes.ok) {
+                console.log(`[CupcakePM] [Strategy:Google-nativeFetch] ✅ succeeded: status=${nfRes.status}`);
                 return nfRes;
             }
-            console.log(`[CupcakePM] Google/Vertex nativeFetch returned unusable response, trying fallbacks: status=${nfRes?.status || 'unknown'}`);
+            // Detect body-corruption 400 for Google/Vertex
+            if (nfRes && nfRes.status === 400 && (options.method || 'POST') !== 'GET') {
+                let _gErrText = '';
+                try { _gErrText = await nfRes.clone().text(); } catch (_) { /* ignore clone failure */ }
+                const _gIsBodyCorruption = /not valid JSON|invalid_request_body|Could not parse|Unexpected token|unexpected EOF|Invalid JSON/i.test(_gErrText);
+                if (_gIsBodyCorruption) {
+                    console.warn(`[CupcakePM] [Strategy:Google-nativeFetch] ❌ body-corruption 400 detected; falling through to risuFetch. Error: ${_gErrText.substring(0, 200)}`);
+                    // Fall through to risuFetch below
+                } else {
+                    console.warn(`[CupcakePM] [Strategy:Google-nativeFetch] ❌ HTTP 400 (not body-corruption); returning as-is. Error: ${_gErrText.substring(0, 200)}`);
+                    return nfRes;
+                }
+            } else if (nfRes && nfRes.status && nfRes.status !== 0) {
+                console.log(`[CupcakePM] [Strategy:Google-nativeFetch] ❌ HTTP ${nfRes.status}; returning as-is`);
+                return nfRes;
+            } else {
+                console.log(`[CupcakePM] [Strategy:Google-nativeFetch] ❌ unusable response, trying fallbacks: status=${nfRes?.status || 'unknown'}`);
+            }
         } catch (e) {
             if (_isAbortError(e)) throw e;
-            console.log(`[CupcakePM] Google/Vertex nativeFetch error: ${/** @type {Error} */ (e).message}`);
+            console.log(`[CupcakePM] [Strategy:Google-nativeFetch] ❌ error: ${/** @type {Error} */ (e).message}`);
         }
     }
 
@@ -263,23 +281,28 @@ export async function smartNativeFetch(url, options = {}) {
 
     if (!_isCopilotUrl && _isJsonBody && Risu && typeof Risu.risuFetch === 'function') {
         try {
+            console.log(`[CupcakePM] [Strategy:risuFetch] Attempting for ${url.substring(0, 60)}... (body type: ${typeof options.body}, len: ${typeof options.body === 'string' ? options.body.length : 'N/A'})`);
             let bodyObj = _parseBodyForRisuFetch(options.body);
             if (bodyObj === undefined && options.body) {
                 throw new Error('Body JSON parse failed — cannot safely pass to risuFetch');
             }
 
-            // Deep-sanitize body object before it crosses the postMessage bridge
+            // Deep-sanitize body object before it crosses the postMessage bridge.
+            // _deepSanitizeBody already does JSON.parse(JSON.stringify()) internally
+            // for messages/contents, so we skip the separate IPC safety round-trip
+            // to avoid redundant serialization overhead (~2x memory savings on large bodies).
             if (bodyObj && typeof bodyObj === 'object') {
                 bodyObj = _deepSanitizeBody(bodyObj);
-            }
-
-            // Final IPC safety: ensure bodyObj is serializable
-            if (bodyObj && typeof bodyObj === 'object') {
-                try {
-                    bodyObj = JSON.parse(JSON.stringify(bodyObj));
-                } catch (serErr) {
-                    console.warn('[CupcakePM] bodyObj JSON round-trip failed, stripping non-serializable keys:', /** @type {Error} */ (serErr).message);
-                    try { bodyObj = _stripNonSerializable(bodyObj, 0); } catch (_) { }
+                // Only do IPC safety round-trip if _deepSanitizeBody didn't already
+                // clone the arrays (i.e., body has neither messages nor contents)
+                const _alreadyCloned = Array.isArray(bodyObj.messages) || Array.isArray(bodyObj.contents);
+                if (!_alreadyCloned) {
+                    try {
+                        bodyObj = JSON.parse(JSON.stringify(bodyObj));
+                    } catch (serErr) {
+                        console.warn('[CupcakePM] bodyObj JSON round-trip failed, stripping non-serializable keys:', /** @type {Error} */ (serErr).message);
+                        try { bodyObj = _stripNonSerializable(bodyObj, 0); } catch (_) { }
+                    }
                 }
             }
 
@@ -314,14 +337,14 @@ export async function smartNativeFetch(url, options = {}) {
 
             const responseBody = _extractResponseBody(result);
             if (responseBody) {
-                console.log(`[CupcakePM] risuFetch succeeded: status=${result.status} for ${url.substring(0, 60)}`);
+                console.log(`[CupcakePM] [Strategy:risuFetch] ✅ succeeded: status=${result.status} for ${url.substring(0, 60)}`);
                 return new Response(/** @type {any} */ (responseBody), {
                     status: result.status || 200,
                     headers: new Headers(result.headers || {}),
                 });
             }
             const errPreview = typeof result?.data === 'string' ? result.data.substring(0, 120) : 'unknown';
-            console.log(`[CupcakePM] risuFetch not a real response: ${errPreview}`);
+            console.log(`[CupcakePM] [Strategy:risuFetch] ❌ not a real response: ${errPreview}`);
         } catch (e) {
             if (_isAbortError(e)) throw e;
             console.log(`[CupcakePM] risuFetch error: ${/** @type {Error} */ (e).message}`);
@@ -333,14 +356,25 @@ export async function smartNativeFetch(url, options = {}) {
     // nativeFetch returns Response(ReadableStream) which may fail on Safari < 16.4.
     if (!_compatMode) {
         try {
-            console.log(`[CupcakePM] Falling back to nativeFetch (proxy) for ${url.substring(0, 60)}...`);
+            console.log(`[CupcakePM] [Strategy:nativeFetch-fallback] Attempting for ${url.substring(0, 60)}... (body type: ${typeof options.body}, len: ${typeof options.body === 'string' ? options.body.length : 'N/A'})`);
             const nfOptions = { ...options };
             // String body passed as-is — fetchNative encodes on HOST side.
             const res = await callNativeFetchWithAbortFallback(url, nfOptions);
+            if (res && res.status === 400) {
+                let _nfErrText = '';
+                try { _nfErrText = await res.clone().text(); } catch (_) { /* ignore */ }
+                const _nfIsBodyCorruption = /not valid JSON|invalid_request_body|Could not parse|Unexpected token|unexpected EOF|Invalid JSON/i.test(_nfErrText);
+                if (_nfIsBodyCorruption) {
+                    console.error(`[CupcakePM] [Strategy:nativeFetch-fallback] ❌ body-corruption 400 detected (last resort). Error: ${_nfErrText.substring(0, 200)}`);
+                }
+            }
+            if (res) {
+                console.log(`[CupcakePM] [Strategy:nativeFetch-fallback] ${res.ok ? '✅' : '❌'} status=${res.status}`);
+            }
             return res;
         } catch (e) {
             if (_isAbortError(e)) throw e;
-            console.error(`[CupcakePM] nativeFetch also failed: ${/** @type {Error} */ (e).message}`);
+            console.error(`[CupcakePM] [Strategy:nativeFetch-fallback] ❌ error: ${/** @type {Error} */ (e).message}`);
         }
     }
 
@@ -371,15 +405,21 @@ function _parseBodyForRisuFetch(body) {
 function _deepSanitizeBody(bodyObj) {
     if (Array.isArray(bodyObj.messages)) {
         try {
+            // Single clone pass: JSON round-trip ensures IPC serializability
+            // AND filters invalid entries in one go (avoids separate IPC safety step)
             const rawMsgs = JSON.parse(JSON.stringify(bodyObj.messages));
             bodyObj.messages = [];
             for (let _ri = 0; _ri < rawMsgs.length; _ri++) {
                 const _rm = rawMsgs[_ri];
                 if (_rm == null || typeof _rm !== 'object') continue;
                 if (typeof _rm.role !== 'string' || !_rm.role) continue;
-                if (_rm.content === null || _rm.content === undefined) continue;
+                // tool_calls/tool_call_id/function_call 메시지는 content:null이 정상 (OpenAI/Anthropic tool-use)
+                const _hasToolProps = !!(_rm.tool_calls || _rm.tool_call_id || _rm.function_call);
+                if ((_rm.content === null || _rm.content === undefined) && !_hasToolProps) continue;
                 /** @type {Record<string, any>} */
-                const safeMsg = { role: _rm.role, content: _rm.content };
+                const safeMsg = { role: _rm.role };
+                // content가 null이어도 tool 메시지면 명시적으로 포함
+                if (_rm.content !== undefined) safeMsg.content = _rm.content;
                 if (_rm.name && typeof _rm.name === 'string') safeMsg.name = _rm.name;
                 // Preserve tool-calling properties required by OpenAI/Anthropic tool-use flows
                 if (_rm.tool_calls) safeMsg.tool_calls = _rm.tool_calls;

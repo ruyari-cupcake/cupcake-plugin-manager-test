@@ -1,6 +1,6 @@
 //@name CPM Component - Translation Cache Manager
 //@display-name Cupcake Translation Cache
-//@version 1.3.2
+//@version 1.4.0
 //@author Cupcake
 //@description 번역 캐시를 검색·조회·수정하고, 사용자 번역 사전으로 표시 번역을 교정하는 관리 도구입니다.
 //@icon 💾
@@ -54,6 +54,7 @@
     const ENABLED_ARG_KEY = 'cpm_transcache_display_enabled';
     const PAGE_SIZE = 50;
     const TIMESTAMPS_KEY = 'cpm_transcache_timestamps';
+    const EXPORT_FORMAT_VERSION = 2;
 
     // ==========================================
     // API Feature Detection
@@ -205,12 +206,115 @@
         // after retranslation updates the cache.
         const all = await loadAllCache(true);
         if (!all) return null;
-        if (!query) return all;
+        const merged = buildDisplayEntries(all);
+        return filterDisplayEntries(merged, query);
+    }
+
+    function isPlainObject(value) {
+        return !!value && typeof value === 'object' && !Array.isArray(value);
+    }
+
+    function validateStringMap(value, fieldName) {
+        if (!isPlainObject(value)) {
+            throw new Error(`${fieldName} must be an object map`);
+        }
+        const out = {};
+        for (const [key, itemValue] of Object.entries(value)) {
+            if (typeof key !== 'string' || typeof itemValue !== 'string') {
+                throw new Error(`${fieldName} must contain only string keys and values`);
+            }
+            out[key] = itemValue;
+        }
+        return out;
+    }
+
+    function validateCorrectionMap(value) {
+        if (!isPlainObject(value)) {
+            throw new Error('corrections must be an object map');
+        }
+        const out = {};
+        for (const [key, itemValue] of Object.entries(value)) {
+            if (typeof key !== 'string') {
+                throw new Error('corrections must contain only string keys');
+            }
+            if (typeof itemValue === 'string') {
+                out[key] = { old: '', new: itemValue };
+                continue;
+            }
+            if (!isPlainObject(itemValue) || typeof itemValue.old !== 'string' || typeof itemValue.new !== 'string') {
+                throw new Error('corrections entries must be { old, new } objects');
+            }
+            out[key] = { old: itemValue.old, new: itemValue.new };
+        }
+        return out;
+    }
+
+    function buildDisplayEntries(cacheEntries) {
+        const merged = new Map();
+        for (const entry of cacheEntries || []) {
+            const correction = _corrections[entry.key];
+            merged.set(entry.key, {
+                ...entry,
+                _baseValue: entry.value,
+                _effectiveValue: correction ? correction.new : entry.value,
+                _hasCorrection: !!correction,
+                _source: correction ? 'cache+overlay' : 'cache'
+            });
+        }
+        for (const [key, data] of Object.entries(_corrections)) {
+            if (merged.has(key)) continue;
+            merged.set(key, {
+                key,
+                value: data.old || '',
+                _baseValue: data.old || '',
+                _effectiveValue: data.new,
+                _hasCorrection: true,
+                _source: 'overlay',
+                _timestamp: _timestampIndex[key]?.ts || 0
+            });
+        }
+        return Array.from(merged.values());
+    }
+
+    function filterDisplayEntries(entries, query) {
+        if (!query) return entries;
         const lq = query.toLowerCase();
-        return all.filter(entry =>
-            entry.key.toLowerCase().includes(lq) ||
-            entry.value.toLowerCase().includes(lq)
-        );
+        return entries.filter((entry) => {
+            const haystacks = [
+                entry.key,
+                entry.value,
+                entry._baseValue,
+                entry._effectiveValue
+            ].filter((item) => typeof item === 'string');
+            return haystacks.some((item) => item.toLowerCase().includes(lq));
+        });
+    }
+
+    function normalizeImportedEntries(data) {
+        if (!isPlainObject(data)) {
+            throw new Error('올바른 번역 캐시 JSON 형식이 아닙니다. ({ 원문: 번역문 } 객체 또는 CPM 포맷 필요)');
+        }
+
+        if (data._cpmTransCacheFormat === EXPORT_FORMAT_VERSION) {
+            const mergedMap = validateStringMap(data.merged || {}, 'merged');
+            const cacheMap = validateStringMap(data.cache || {}, 'cache');
+            const correctionsMap = validateCorrectionMap(data.corrections || {});
+            const entries = Object.entries(mergedMap).map(([key, newValue]) => {
+                const correction = correctionsMap[key];
+                return {
+                    key,
+                    old: correction ? correction.old : (cacheMap[key] || ''),
+                    newValue
+                };
+            });
+            return { entries, source: 'cpm-envelope' };
+        }
+
+        const legacyMap = validateStringMap(data, 'legacy import');
+        return {
+            entries: Object.entries(legacyMap).map(([key, newValue]) => ({ key, old: '', newValue })),
+            source: 'legacy-map'
+        };
     }
 
     // ==========================================
@@ -453,13 +557,15 @@
 
         for (let i = start; i < end; i++) {
             const item = results[i];
-            const correction = _corrections[item.key];
-            // Show corrected translation if exists
-            const displayValue = correction ? correction.new : item.value;
+            const correction = item._hasCorrection ? { old: item._baseValue || '', new: item._effectiveValue || '' } : null;
+            const displayValue = item._effectiveValue ?? item.value;
             const keyPreview = escapeHtml(item.key.length > 80 ? item.key.substring(0, 80) + '…' : item.key);
             const valPreview = escapeHtml(displayValue.length > 80 ? displayValue.substring(0, 80) + '…' : displayValue);
             const badge = correction
                 ? '<span class="ml-2 px-2 py-0.5 bg-yellow-600/30 text-yellow-300 rounded text-xs">수정됨</span>'
+                : '';
+            const sourceBadge = item._source === 'overlay'
+                ? '<span class="ml-2 px-2 py-0.5 bg-sky-600/30 text-sky-200 rounded text-xs">오버레이 전용</span>'
                 : '';
             const timeStr = relativeTime(item._timestamp);
             const timeBadge = timeStr ? `<span class="ml-auto text-xs text-gray-600 shrink-0">${timeStr}</span>` : '';
@@ -468,7 +574,7 @@
                 <div class="bg-gray-800 border ${correction ? 'border-yellow-600/50' : 'border-gray-700'} rounded-lg p-3 hover:border-blue-500 transition-colors">
                     <div class="flex items-start justify-between gap-2">
                         <div class="flex-1 min-w-0">
-                            <div class="flex items-center text-xs text-gray-500 mb-1"><span>원문${badge}</span>${timeBadge}</div>
+                            <div class="flex items-center text-xs text-gray-500 mb-1"><span>원문${badge}${sourceBadge}</span>${timeBadge}</div>
                             <div class="text-sm text-gray-200 break-words font-mono leading-relaxed">${keyPreview}</div>
                             <div class="text-xs text-gray-500 mt-2 mb-1">번역</div>
                             <div class="text-sm ${correction ? 'text-yellow-300' : 'text-green-300'} break-words font-mono leading-relaxed">${valPreview}</div>
@@ -567,12 +673,22 @@
                 if (results === null) {
                     showStatus('번역 캐시를 불러올 수 없습니다.', 'error');
                 } else if (results.length === 0) {
-                    showStatus('번역 캐시가 비어 있습니다.', 'warn');
+                    const mergedOnly = buildDisplayEntries([]);
+                    if (mergedOnly.length === 0) {
+                        showStatus('번역 캐시가 비어 있습니다.', 'warn');
+                    } else {
+                        applySortAndRender(mergedOnly);
+                    }
                 } else {
-                    applySortAndRender(results);
+                    applySortAndRender(buildDisplayEntries(results));
                 }
             } else {
-                showStatus('searchTranslationCache API를 사용할 수 없습니다.<br>RisuAI 버전을 확인해주세요. (수정 사전 보기는 아래 버튼 사용)', 'warn');
+                const overlayEntries = buildDisplayEntries([]);
+                if (overlayEntries.length > 0) {
+                    renderResults(overlayEntries);
+                } else {
+                    showStatus('searchTranslationCache API를 사용할 수 없습니다.<br>RisuAI 버전을 확인해주세요. (수정 사전 보기는 아래 버튼 사용)', 'warn');
+                }
             }
         } catch (err) {
             console.error(LOG_TAG, 'Browse error:', err);
@@ -586,16 +702,16 @@
     api.viewEntry = (idx) => {
         const item = _searchResults[idx];
         if (!item) return;
-        const correction = _corrections[item.key];
-        const displayValue = correction ? correction.new : item.value;
-        const originalCached = correction ? correction.old : item.value;
+        const displayValue = item._effectiveValue ?? item.value;
+        const originalCached = item._baseValue ?? item.value;
+        const correction = item._hasCorrection ? { old: originalCached, new: displayValue } : null;
 
         let correctionInfo = '';
         if (correction) {
             correctionInfo = `
                 <div class="mb-3 bg-yellow-900/20 border border-yellow-700/50 rounded p-3">
-                    <div class="text-xs text-yellow-400 mb-1">⚠️ 사용자 수정 적용됨 (원래 캐시 번역:)</div>
-                    <div class="text-sm text-gray-400 font-mono whitespace-pre-wrap break-words">${escapeHtml(originalCached)}</div>
+                    <div class="text-xs text-yellow-400 mb-1">⚠️ 사용자 수정 적용됨 ${item._source === 'overlay' ? '(가져온 오버레이 항목)' : '(원래 캐시 번역 참고)'}</div>
+                    <div class="text-sm text-gray-400 font-mono whitespace-pre-wrap break-words">${escapeHtml(originalCached || '원본 캐시 없음')}</div>
                 </div>
             `;
         }
@@ -627,8 +743,8 @@
     api.editEntry = (idx) => {
         const item = _searchResults[idx];
         if (!item) return;
-        const correction = _corrections[item.key];
-        const currentValue = correction ? correction.new : item.value;
+        const currentValue = item._effectiveValue ?? item.value;
+        const baseValue = item._baseValue ?? item.value;
 
         setResult(`
             <div class="bg-gray-800 border border-yellow-600 rounded-lg p-4">
@@ -642,7 +758,7 @@
                 </div>
                 <div class="mb-2">
                     <div class="text-xs text-gray-500 mb-1">RisuAI 캐시 원본 번역 (참고용)</div>
-                    <div class="bg-gray-900 border border-gray-700 rounded p-2 text-xs text-gray-500 font-mono whitespace-pre-wrap break-words max-h-24 overflow-y-auto">${escapeHtml(item.value)}</div>
+                    <div class="bg-gray-900 border border-gray-700 rounded p-2 text-xs text-gray-500 font-mono whitespace-pre-wrap break-words max-h-24 overflow-y-auto">${escapeHtml(baseValue || '원본 캐시 없음')}</div>
                 </div>
                 <div class="mb-4">
                     <div class="text-xs text-gray-500 mb-1">수정할 번역 — 아래에서 편집 후 저장</div>
@@ -664,8 +780,9 @@
         const textarea = document.getElementById(`${PREFIX}-edit-value`);
         if (!textarea) return;
         const newValue = textarea.value;
+        const baseValue = item._baseValue ?? item.value ?? '';
 
-        if (newValue === item.value) {
+        if (newValue === baseValue) {
             // Same as original cache — remove correction if exists
             if (_corrections[item.key]) {
                 delete _corrections[item.key];
@@ -679,7 +796,7 @@
 
         try {
             _corrections[item.key] = {
-                old: item.value,   // original cached translation
+                old: baseValue,
                 new: newValue      // user's corrected translation
             };
             await saveCorrections();
@@ -718,26 +835,35 @@
                 if (all) entries = all;
             }
 
-            // Build merged object: cache entries overridden by corrections
-            const obj = {};
+            const cacheObject = {};
             for (const { key, value } of entries) {
-                const correction = _corrections[key];
-                obj[key] = correction ? correction.new : value;
+                cacheObject[key] = value;
             }
-            // Also include corrections for entries not in cache
+            const mergedObject = {};
+            for (const entry of buildDisplayEntries(entries)) {
+                mergedObject[entry.key] = entry._effectiveValue ?? entry.value;
+            }
+            const correctionsObject = {};
             for (const [key, data] of Object.entries(_corrections)) {
-                if (!(key in obj)) {
-                    obj[key] = data.new;
-                }
+                correctionsObject[key] = { old: data.old || '', new: data.new };
             }
 
-            const total = Object.keys(obj).length;
+            const total = Object.keys(mergedObject).length;
             if (total === 0) {
                 showStatus('내보낼 데이터가 없습니다.', 'warn');
                 return;
             }
 
-            const jsonStr = JSON.stringify(obj, null, 2);
+            const payload = {
+                _cpmTransCacheFormat: EXPORT_FORMAT_VERSION,
+                exportedAt: new Date().toISOString(),
+                note: 'RisuAI 번역 캐시는 v3 플러그인 API에서 읽기 전용이므로, 가져오기는 수정 사전 오버레이로 복원됩니다.',
+                cache: cacheObject,
+                corrections: correctionsObject,
+                merged: mergedObject
+            };
+
+            const jsonStr = JSON.stringify(payload, null, 2);
             const blob = new Blob([jsonStr], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -748,7 +874,7 @@
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
-            showStatus(`✅ ${total}건을 내보냈습니다. (캐시 ${entries.length}건 + 수정 ${Object.keys(_corrections).length}건 병합)`, 'success');
+            showStatus(`✅ ${total}건을 내보냈습니다. (캐시 ${entries.length}건 + 수정 ${Object.keys(_corrections).length}건 병합, CPM 포맷 v${EXPORT_FORMAT_VERSION})`, 'success');
         } catch (err) {
             console.error(LOG_TAG, 'Export error:', err);
             showStatus(`내보내기 오류: ${escapeHtml(err.message)}`, 'error');
@@ -799,37 +925,26 @@
                 const text = await file.text();
                 const data = JSON.parse(text);
 
-                if (typeof data !== 'object' || data === null || Array.isArray(data)) {
-                    showStatus('올바른 번역 캐시 JSON 형식이 아닙니다. ({ 원문: 번역문 } 객체 필요)', 'error');
-                    return;
-                }
-                for (const [key, value] of Object.entries(data)) {
-                    if (typeof key !== 'string' || typeof value !== 'string') {
-                        showStatus('파일에 문자열이 아닌 키/값이 포함되어 있습니다.', 'error');
-                        return;
-                    }
-                }
-
-                const entryCount = Object.keys(data).length;
-                if (!confirm(`${entryCount}건을 수정 사전에 가져오시겠습니까?\n\n기존 수정 사전에 병합됩니다.\n같은 원문이면 새 값으로 덮어씁니다.`)) return;
+                const normalized = normalizeImportedEntries(data);
+                const entryCount = normalized.entries.length;
+                if (!confirm(`${entryCount}건을 수정 사전에 가져오시겠습니까?\n\n실제 RisuAI 캐시는 복원되지 않으며, 수정 사전 오버레이로 병합됩니다.\n같은 원문이면 새 값으로 덮어씁니다.`)) return;
 
                 let added = 0;
-                for (const [key, newTranslation] of Object.entries(data)) {
-                    // Try to look up original cache value
-                    let oldValue = '';
-                    if (canGetCache) {
+                for (const { key, old, newValue } of normalized.entries) {
+                    let oldValue = old || '';
+                    if (!oldValue && canGetCache) {
                         try {
                             oldValue = (await risuai.getTranslationCache(key)) || '';
                         } catch (e) { /* ignore */ }
                     }
                     _corrections[key] = {
                         old: oldValue || _corrections[key]?.old || '',
-                        new: newTranslation
+                        new: newValue
                     };
                     added++;
                 }
                 await saveCorrections();
-                showStatus(`✅ ${added}건을 수정 사전에 가져왔습니다.`, 'success');
+                showStatus(`✅ ${added}건을 수정 사전에 가져왔습니다. (${normalized.source === 'cpm-envelope' ? 'CPM 포맷' : '레거시 포맷'})`, 'success');
                 updateCorrectionCount();
             } catch (err) {
                 console.error(LOG_TAG, 'Import error:', err);
@@ -861,10 +976,7 @@
     /** Browse corrections only */
     api.browseCorrections = async () => {
         await loadCorrections();
-        const results = Object.entries(_corrections).map(([key, data]) => ({
-            key,
-            value: data.old || ''
-        }));
+        const results = buildDisplayEntries([]);
         if (results.length === 0) {
             showStatus('수정 사전이 비어 있습니다.', 'warn');
             return;
@@ -987,11 +1099,17 @@
                 return `
                     <h3 class="text-3xl font-bold text-blue-400 mb-6 pb-3 border-b border-gray-700">💾 번역 캐시 관리자</h3>
                     <p class="text-blue-300 font-semibold mb-4 border-l-4 border-blue-500 pl-4 py-1">
-                        RisuAI 번역 캐시를 검색·확인하고, 사용자 수정 사전으로 번역을 교정합니다.
+                        RisuAI 번역 캐시를 검색·확인하고, 사용자 수정 사전 오버레이로 표시 번역을 교정합니다.
                     </p>
-                    <p class="text-xs text-gray-500 mb-6">
-                        ℹ️ RisuAI 캐시는 읽기 전용입니다. 번역 수정 시 "수정 사전"에 저장되며, 채팅 표시 시점에 자동으로 적용됩니다.
-                    </p>
+                    <div class="mb-6 rounded-lg border border-amber-600/60 bg-amber-950/20 p-4">
+                        <p class="text-sm font-semibold text-amber-300 mb-2">⚠️ 중요: 이 기능은 진짜 캐시 복원이 아닙니다.</p>
+                        <ul class="text-xs text-gray-300 space-y-1 list-disc pl-4">
+                            <li>RisuAI 번역 캐시는 v3 플러그인에서 읽기만 가능하고, 쓰기는 불가능합니다.</li>
+                            <li>가져오기와 번역 수정은 모두 "수정 사전" 오버레이에만 저장됩니다.</li>
+                            <li>그래서 일반 창 번역 버튼이 읽는 네이티브 캐시가 직접 복원되지는 않습니다.</li>
+                            <li>일반 창에서는 이미 표시된 번역 문자열이 기존 값과 정확히 일치할 때만 화면 치환이 적용될 수 있습니다.</li>
+                        </ul>
+                    </div>
 
                     <!-- Display Toggle -->
                     <div class="mb-4">
@@ -999,7 +1117,7 @@
                             <input id="${PREFIX}-display-toggle" type="checkbox" ${displayChecked}
                                    data-action="toggleDisplay"
                                    class="form-checkbox text-blue-500 rounded bg-gray-800 border-gray-600 focus:ring-blue-500">
-                            <span>수정 사전 자동 적용 (채팅 표시 시 번역 교정)</span>
+                            <span>수정 사전 자동 적용 (표시 텍스트 치환 전용, 네이티브 캐시 복원 아님)</span>
                         </label>
                     </div>
 
@@ -1032,7 +1150,7 @@
                     <!-- Action Buttons -->
                     <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
                         <button data-action="browseAll" class="${BTN_CLASS}" ${!canSearchCache ? 'disabled title="API 미지원"' : ''}>
-                            <span class="text-2xl mb-1">📋</span><span>캐시 전체 보기</span>
+                            <span class="text-2xl mb-1">📋</span><span>캐시/오버레이 전체 보기</span>
                         </button>
                         <button data-action="browseCorrections" class="${BTN_WARN_CLASS}">
                             <span class="text-2xl mb-1">📝</span><span>수정 사전 보기</span>
@@ -1043,15 +1161,18 @@
                     </div>
                     <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
                         <button data-action="exportCache" class="${BTN_CLASS}">
-                            <span class="text-2xl mb-1">📤</span><span>전체 내보내기</span>
+                            <span class="text-2xl mb-1">📤</span><span>병합본 내보내기</span>
                         </button>
                         <button data-action="exportCorrections" class="${BTN_WARN_CLASS}">
                             <span class="text-2xl mb-1">📤</span><span>수정 사전 내보내기</span>
                         </button>
                         <button data-action="importCache" class="${BTN_CLASS}">
-                            <span class="text-2xl mb-1">📥</span><span>가져오기</span>
+                            <span class="text-2xl mb-1">📥</span><span>병합본 가져오기</span>
                         </button>
                     </div>
+                    <p class="text-xs text-gray-500 -mt-3 mb-6">
+                        가져온 항목은 이 탭의 목록과 검색에는 바로 보이지만, 일반 창 번역 버튼용 네이티브 캐시 자체를 복원하지는 않습니다.
+                    </p>
                     <div class="grid grid-cols-1 gap-3 mb-6">
                         <button data-action="clearCorrections" class="${BTN_RED_CLASS}">
                             <span class="text-lg">🗑️ 수정 사전 전체 삭제</span>
@@ -1065,5 +1186,5 @@
         }
     });
 
-    console.log(`${LOG_TAG} Translation Cache Manager v1.3.1 registered — sidebar: 💾 번역 캐시`);
+    console.log(`${LOG_TAG} Translation Cache Manager v1.3.2 registered — sidebar: 💾 번역 캐시`);
 })();

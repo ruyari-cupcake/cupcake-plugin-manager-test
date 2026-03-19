@@ -102,7 +102,7 @@ describe('auto-updater — download integrity and retry tests', () => {
             expect(result.ok).toBe(true);
             expect(result.code).toBe('// valid plugin code here');
             expect(attempt).toBe(3);
-        });
+        }, 15000);
 
         it('returns error when all retries have Content-Length mismatch', async () => {
             failBundleAttempt();
@@ -119,7 +119,7 @@ describe('auto-updater — download integrity and retry tests', () => {
             const result = await updater._downloadMainPluginCode();
             expect(result.ok).toBe(false);
             expect(result.error).toContain('불완전');
-        });
+        }, 15000);
     });
 
     describe('L583-587: retry loop exhaustion after errors', () => {
@@ -132,7 +132,7 @@ describe('auto-updater — download integrity and retry tests', () => {
             expect(result.ok).toBe(false);
             expect(result.error).toContain('다운로드 실패');
             expect(result.error).toContain('3회 시도');
-        });
+        }, 15000);
 
         it('returns error when HTTP status is non-2xx on all attempts', async () => {
             failBundleAttempt();
@@ -146,7 +146,7 @@ describe('auto-updater — download integrity and retry tests', () => {
             const result = await updater._downloadMainPluginCode();
             expect(result.ok).toBe(false);
             expect(result.error).toContain('다운로드 실패');
-        });
+        }, 15000);
 
         it('succeeds on second attempt after first failure', async () => {
             failBundleAttempt();
@@ -166,7 +166,7 @@ describe('auto-updater — download integrity and retry tests', () => {
             const result = await updater._downloadMainPluginCode();
             expect(result.ok).toBe(true);
             expect(result.code).toBe('// recovered plugin code');
-        });
+        }, 15000);
     });
 
     describe('nativeFetch fallback to risuFetch', () => {

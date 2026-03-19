@@ -8,6 +8,7 @@ import {
     sanitizeBodyJSON,
     stripThoughtDisplayContent,
 } from '../src/lib/sanitize.js';
+import { safeStringify } from '../src/lib/helpers.js';
 
 describe('isInlaySceneWrapperText', () => {
     it('returns false for non-string', () => {
@@ -230,8 +231,8 @@ describe('sanitizeMessages', () => {
     });
 });
 
-describe('sanitizeBodyJSON', () => {
-    it('filters null messages from JSON body', () => {
+describe('sanitizeBodyJSON (validate-only)', () => {
+    it('returns valid JSON as-is without re-stringifying', () => {
         const body = JSON.stringify({
             model: 'gpt-4',
             messages: [
@@ -240,19 +241,18 @@ describe('sanitizeBodyJSON', () => {
                 { role: 'assistant', content: 'Hi' },
             ]
         });
-        const result = JSON.parse(sanitizeBodyJSON(body));
-        expect(result.messages).toHaveLength(2);
+        // validate-only: returns input string unchanged (null in array preserved)
+        expect(sanitizeBodyJSON(body)).toBe(body);
     });
 
-    it('filters null contents from Gemini-style body', () => {
+    it('returns valid Gemini-style JSON as-is', () => {
         const body = JSON.stringify({
             contents: [
                 { role: 'user', parts: [{ text: 'Hi' }] },
                 null,
             ]
         });
-        const result = JSON.parse(sanitizeBodyJSON(body));
-        expect(result.contents).toHaveLength(1);
+        expect(sanitizeBodyJSON(body)).toBe(body);
     });
 
     it('returns non-JSON strings as-is', () => {
@@ -260,9 +260,167 @@ describe('sanitizeBodyJSON', () => {
         expect(sanitizeBodyJSON(formData)).toBe(formData);
     });
 
-    it('returns original on stringify failure', () => {
+    it('returns invalid JSON as-is (with error log)', () => {
         const body = '{"invalid": }';
         expect(sanitizeBodyJSON(body)).toBe(body);
+    });
+
+    it('returns non-string input as-is', () => {
+        expect(sanitizeBodyJSON(null)).toBe(null);
+        expect(sanitizeBodyJSON(undefined)).toBe(undefined);
+        expect(sanitizeBodyJSON(123)).toBe(123);
+    });
+});
+
+describe('sanitizeMessages — tool-use preservation', () => {
+    it('preserves assistant message with tool_calls and content:null', () => {
+        const msgs = [
+            { role: 'user', content: 'What is the weather?' },
+            { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'get_weather', arguments: '{"location":"SF"}' } }] },
+            { role: 'tool', tool_call_id: 'call_1', content: '{"temp":72}' },
+            { role: 'assistant', content: 'It is 72°F in SF.' },
+        ];
+        const result = sanitizeMessages(msgs);
+        expect(result).toHaveLength(4);
+        expect(result[1].content).toBeNull();
+        expect(result[1].tool_calls).toBeDefined();
+    });
+
+    it('preserves assistant message with function_call and content:null', () => {
+        const msgs = [
+            { role: 'user', content: 'Search for cats' },
+            { role: 'assistant', content: null, function_call: { name: 'search', arguments: '{"q":"cats"}' } },
+            { role: 'function', name: 'search', content: '{"results":[]}' },
+        ];
+        const result = sanitizeMessages(msgs);
+        expect(result).toHaveLength(3);
+        expect(result[1].content).toBeNull();
+        expect(result[1].function_call).toBeDefined();
+    });
+
+    it('preserves tool role message with tool_call_id', () => {
+        const msgs = [
+            { role: 'tool', tool_call_id: 'call_1', content: '{"temp":72}' },
+        ];
+        const result = sanitizeMessages(msgs);
+        expect(result).toHaveLength(1);
+        expect(result[0].tool_call_id).toBe('call_1');
+    });
+
+    it('still filters non-tool messages with content:null', () => {
+        const msgs = [
+            { role: 'user', content: null },
+            { role: 'assistant', content: null },
+            { role: 'user', content: 'valid' },
+        ];
+        const result = sanitizeMessages(msgs);
+        expect(result).toHaveLength(1);
+        expect(result[0].content).toBe('valid');
+    });
+
+    it('preserves tool_calls message with content:undefined', () => {
+        const msgs = [
+            { role: 'assistant', tool_calls: [{ id: 'c1', type: 'function', function: { name: 'fn' } }] },
+        ];
+        const result = sanitizeMessages(msgs);
+        expect(result).toHaveLength(1);
+        expect(result[0].tool_calls).toBeDefined();
+    });
+});
+
+describe('safeStringify — tool-use data integrity', () => {
+    it('preserves content:null scalar in tool_calls assistant message', () => {
+        const body = {
+            messages: [
+                { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'get_weather', arguments: '{"loc":"SF"}' } }] },
+            ]
+        };
+        const result = JSON.parse(safeStringify(body));
+        expect(result.messages[0].content).toBeNull();
+        expect(result.messages[0].tool_calls).toHaveLength(1);
+    });
+
+    it('does not remove objects from tool_calls array', () => {
+        const toolCalls = [
+            { id: 'call_1', type: 'function', function: { name: 'fn1' } },
+            { id: 'call_2', type: 'function', function: { name: 'fn2' } },
+        ];
+        const body = { messages: [{ role: 'assistant', content: null, tool_calls: toolCalls }] };
+        const result = JSON.parse(safeStringify(body));
+        expect(result.messages[0].tool_calls).toHaveLength(2);
+    });
+
+    it('filters null items from arrays but not null scalar properties', () => {
+        const body = {
+            messages: [
+                { role: 'user', content: 'hi' },
+                null,  // this null in array gets filtered
+                { role: 'assistant', content: null },  // this null scalar survives
+            ]
+        };
+        const result = JSON.parse(safeStringify(body));
+        // null array element filtered → 2 items
+        expect(result.messages).toHaveLength(2);
+        // scalar null preserved
+        expect(result.messages[1].content).toBeNull();
+    });
+
+    it('preserves Anthropic tool_use content blocks', () => {
+        const body = {
+            messages: [
+                {
+                    role: 'assistant',
+                    content: [
+                        { type: 'text', text: 'Let me check' },
+                        { type: 'tool_use', id: 'toolu_01', name: 'get_weather', input: { location: 'SF' } },
+                    ]
+                },
+            ]
+        };
+        const result = JSON.parse(safeStringify(body));
+        expect(result.messages[0].content).toHaveLength(2);
+        expect(result.messages[0].content[1].type).toBe('tool_use');
+    });
+
+    it('preserves Google functionCall parts', () => {
+        const body = {
+            contents: [
+                {
+                    role: 'model',
+                    parts: [{ functionCall: { name: 'get_weather', args: { location: 'SF' } } }]
+                },
+                {
+                    role: 'user',
+                    parts: [{ functionResponse: { name: 'get_weather', response: { temp: 72 } } }]
+                },
+            ]
+        };
+        const result = JSON.parse(safeStringify(body));
+        expect(result.contents).toHaveLength(2);
+        expect(result.contents[0].parts[0].functionCall.name).toBe('get_weather');
+        expect(result.contents[1].parts[0].functionResponse.response.temp).toBe(72);
+    });
+
+    it('filters null from nested arrays inside tool arguments', () => {
+        const body = {
+            messages: [{
+                role: 'assistant',
+                content: null,
+                tool_calls: [{
+                    id: 'call_1',
+                    type: 'function',
+                    function: {
+                        name: 'process_list',
+                        arguments: JSON.stringify({ items: ['a', null, 'b'] })
+                    }
+                }]
+            }]
+        };
+        const result = JSON.parse(safeStringify(body));
+        // arguments는 string이므로 내부 null은 safeStringify 영향 안 받음
+        const args = JSON.parse(result.messages[0].tool_calls[0].function.arguments);
+        // arguments 내부의 null은 safeStringify의 영향 범위 밖 (이미 string)
+        expect(args.items).toEqual(['a', null, 'b']);
     });
 });
 

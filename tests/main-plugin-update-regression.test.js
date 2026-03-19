@@ -127,11 +127,11 @@ describe('main plugin update regression guard', () => {
         expect(initIIFEStart).toBeGreaterThan(-1);
 
         const initSection = distBundle.substring(initIIFEStart);
-        const registerSettingIndex = initSection.indexOf('await Risu.registerSetting(');
+        const registerSettingIndex = initSection.search(/await Risu(\$\d+)?\.registerSetting\(/);
         const loadRegistryIndex = initSection.indexOf('await SubPluginManager.loadRegistry()');
         const executeEnabledIndex = initSection.indexOf('await SubPluginManager.executeEnabled()');
-        const restoreSettingsIndex = initSection.indexOf('await SettingsBackup.load()');
-        const fallbackRegisterIndex = initSection.indexOf('⚠️ CPM v${CPM_VERSION} (Error)');
+        const restoreSettingsIndex = initSection.search(/await SettingsBackup(\$\d+)?\.load\(\)/);
+        const fallbackRegisterIndex = initSection.search(/CPM v\$\{CPM_VERSION\}.*Error/);
 
         expect(registerSettingIndex).toBeGreaterThan(-1);
         expect(loadRegistryIndex).toBeGreaterThan(-1);

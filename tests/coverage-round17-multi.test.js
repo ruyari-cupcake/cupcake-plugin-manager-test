@@ -144,8 +144,8 @@ describe('sanitize.js branches — Round 17', () => {
         expect(result.multimodals.length).toBe(1);
     });
 
-    // L196: sanitizeBodyJSON with invalid entries removed
-    it('sanitizeBodyJSON removes invalid message entries', () => {
+    // L196: sanitizeBodyJSON validate-only (no filtering since lightweight refactor)
+    it('sanitizeBodyJSON validates but preserves all message entries (validate-only)', () => {
         const json = JSON.stringify({
             messages: [
                 { role: 'user', content: 'Hello' },
@@ -154,14 +154,13 @@ describe('sanitize.js branches — Round 17', () => {
                 { role: 'assistant', content: '' },
             ],
         });
-        const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const result = sanitizeBodyJSON(json);
         const parsed = JSON.parse(result);
-        expect(parsed.messages.length).toBeLessThan(4);
-        spy.mockRestore();
+        // validate-only: 원본 그대로 반환
+        expect(parsed.messages.length).toBe(4);
     });
 
-    it('sanitizeBodyJSON removes null contents entries', () => {
+    it('sanitizeBodyJSON validates but preserves null contents entries (validate-only)', () => {
         const json = JSON.stringify({
             contents: [
                 { role: 'user', parts: [{ text: 'Hello' }] },
@@ -169,11 +168,10 @@ describe('sanitize.js branches — Round 17', () => {
                 'string',
             ],
         });
-        const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const result = sanitizeBodyJSON(json);
         const parsed = JSON.parse(result);
-        expect(parsed.contents.length).toBe(1);
-        spy.mockRestore();
+        // validate-only: 원본 그대로 반환
+        expect(parsed.contents.length).toBe(3);
     });
 
     it('sanitizeBodyJSON with non-JSON string returns as-is', () => {

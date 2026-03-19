@@ -776,7 +776,7 @@ describe('sanitize.js — deep branch coverage', () => {
         expect(parsed.messages[0].content).toBe('hello');
     });
 
-    it('sanitizeBodyJSON: handles contents array (Google format)', () => {
+    it('sanitizeBodyJSON: validates contents array without filtering (validate-only)', () => {
         const body = {
             contents: [
                 { parts: [{ text: 'hello' }] },
@@ -786,7 +786,8 @@ describe('sanitize.js — deep branch coverage', () => {
         };
         const result = sanitizeBodyJSON(JSON.stringify(body));
         const parsed = JSON.parse(result);
-        expect(parsed.contents).toHaveLength(2); // null should be removed
+        // validate-only: 원본 그대로 반환 (필터링 안 함)
+        expect(parsed.contents).toHaveLength(3);
     });
 
     it('stripInternalTags: returns non-string input as-is', () => {
