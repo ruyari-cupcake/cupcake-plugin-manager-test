@@ -1,6 +1,6 @@
 //@name CPM Component - Copilot Token Manager
 //@display-name Cupcake Copilot Manager
-//@version 1.7.8
+//@version 1.7.9
 //@author Cupcake
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager-test/main/cpm-copilot-manager.js
 
@@ -124,10 +124,8 @@
     ]);
 
     function _isActiveSubscription(sku) {
-        if (!sku) return false;
-        if (ACTIVE_SKUS.has(sku)) return true;
-        // 포괄적으로 subscriber/pro 포함 시 활성 처리
-        return /subscriber|pro/i.test(sku);
+        if (!sku || sku === 'unknown' || sku === 'error') return false;
+        return ACTIVE_SKUS.has(sku);
     }
 
     /** 토큰 상태 확인 (캐시 사용, 5분 TTL) */
@@ -979,7 +977,7 @@
                         <div><strong>모델:</strong> ${escapeHtml(modelDef.model)}</div>
                         <div><strong>Key:</strong> Copilot 토큰 자동 사용 (githubcopilot.com URL 감지)</div>
                     </div>
-                    <p class="mt-3 text-xs text-yellow-300">💡 RisuAI 메인 UI에서 [Cupcake PM] [Custom] 🤖 Copilot (GPT-4.1) 을 선택하면 사용할 수 있습니다.<br>변경사항을 적용하려면 설정을 닫고 플러그인을 다시 로드하세요.</p>
+                    <p class="mt-3 text-xs text-yellow-300">💡 RisuAI 메인 UI에서 [Cupcake PM] [Custom] 🤖 Copilot (GPT-4.1) 을 선택하면 사용할 수 있습니다.<br>⚠️ <strong>설정창을 꺼다 켜야 추가된 모델이 보입니다.</strong></p>
                     <p class="mt-2 text-xs text-gray-400">⚠️ 기본으로 <strong>GPT-4.1</strong> 모델만 추가합니다. Claude, o3, o4-mini 등 다른 Copilot 모델을 설정하고 싶다면 <strong>커스텀 모델</strong> 탭에서 모델을 추가하거나 편집을 이용해 모델 목록을 변경하세요.<br>URL은 동일하게 <code class="text-gray-300">https://api.githubcopilot.com/chat/completions</code>를 사용합니다.</p>`);
             } else {
                 showError('커스텀 모델 추가에 실패했습니다: ' + (result.error || '알 수 없는 오류'));
@@ -1295,5 +1293,5 @@
         }
     });
 
-    console.log(`${LOG_TAG} Settings tab registered (v1.7.8) — sidebar: 🔑 Copilot`);
+    console.log(`${LOG_TAG} Settings tab registered (v1.7.9) — sidebar: 🔑 Copilot`);
 })();

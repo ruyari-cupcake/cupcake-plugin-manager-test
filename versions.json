@@ -40,9 +40,9 @@
     "changes": "v0.3.6: 전체 서브플러그인 버전 동기화 릴리즈"
   },
   "CPM Component - Copilot Token Manager": {
-    "version": "1.7.8",
+    "version": "1.7.9",
     "file": "cpm-copilot-manager.js",
-    "changes": "v1.7.8: 자동설정 안내문구 개선, 기존 모델 덮어쓰지 않고 새로 생성"
+    "changes": "v1.7.9: 활성 판정 엄격화 (ACTIVE_SKUS 만 매칭), 자동설정 설정창 꺼다켜기 안내 추가"
   },
   "CPM Component - Translation Cache Manager": {
     "version": "1.4.0",
