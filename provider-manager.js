@@ -1,7 +1,7 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.3
+//@version 1.22.4
 //@changes v1.22.1: 프리페치 검색 개선, Copilot 멀티토큰 회전, Tool Use 중복 검색 방지
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
@@ -190,7 +190,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.22.3';
+    const CPM_VERSION = '1.22.4';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -6744,7 +6744,14 @@ var CupcakeProviderManager = (function (exports) {
                 try {
                     const _origUrl = new URL(effectiveUrl);
                     const _proxyBase = new URL(_proxyUrl);
-                    effectiveUrl = _proxyBase.origin + _proxyBase.pathname.replace(/\/+$/, '') + _origUrl.pathname + _origUrl.search;
+                    // Strip common /api prefix before version paths (/api/v1/... → /v1/...)
+                    // Most AI proxy workers expect standard paths like /v1/chat/completions
+                    let _proxyPath = _origUrl.pathname;
+                    if (/^\/api\/v\d/i.test(_proxyPath)) {
+                        _proxyPath = _proxyPath.substring(4);
+                        console.log(`[Cupcake PM] Proxy Rewrite: stripped /api prefix → ${_proxyPath}`);
+                    }
+                    effectiveUrl = _proxyBase.origin + _proxyBase.pathname.replace(/\/+$/, '') + _proxyPath + _origUrl.search;
                     console.log(`[Cupcake PM] CORS Proxy (Rewrite mode) active → ${effectiveUrl}`);
                 } catch (_e) {
                     console.error(`[Cupcake PM] ❌ Invalid proxyUrl "${_proxyUrl}" — proxy NOT applied. URL 형식을 확인하세요 (예: https://my-server.kr/proxy).`, _e);
@@ -6755,9 +6762,9 @@ var CupcakeProviderManager = (function (exports) {
         }
 
         // ── Direct proxy wrapper: intercepts smartNativeFetch in direct mode ──
-        // Direct mode uses plain fetch() to the external proxy — no need to go
-        // through Risu's nativeFetch/risuFetch pipeline (which would cause
-        // double-proxying or header loss).
+        // Direct mode sends the original target URL as X-Target-URL header to the
+        // user's proxy. Uses smartNativeFetch so it works on web (CSP bypass via
+        // risuFetch/nativeFetch) as well as desktop (direct fetch).
         /**
          * @param {string} url
          * @param {RequestInit & Record<string, any>} [options]
@@ -6770,7 +6777,7 @@ var CupcakeProviderManager = (function (exports) {
                     'X-Target-URL': url,
                 };
                 console.log(`[Cupcake PM] [direct proxy] → ${_proxyUrl.substring(0, 60)} (target: ${url.substring(0, 60)})`);
-                return fetch(_proxyUrl, { ...options, headers: directHeaders });
+                return smartNativeFetch(_proxyUrl, { ...options, headers: directHeaders });
             }
             : smartNativeFetch;
 

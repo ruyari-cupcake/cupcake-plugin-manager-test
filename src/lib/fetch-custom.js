@@ -416,7 +416,14 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
             try {
                 const _origUrl = new URL(effectiveUrl);
                 const _proxyBase = new URL(_proxyUrl);
-                effectiveUrl = _proxyBase.origin + _proxyBase.pathname.replace(/\/+$/, '') + _origUrl.pathname + _origUrl.search;
+                // Strip common /api prefix before version paths (/api/v1/... → /v1/...)
+                // Most AI proxy workers expect standard paths like /v1/chat/completions
+                let _proxyPath = _origUrl.pathname;
+                if (/^\/api\/v\d/i.test(_proxyPath)) {
+                    _proxyPath = _proxyPath.substring(4);
+                    console.log(`[Cupcake PM] Proxy Rewrite: stripped /api prefix → ${_proxyPath}`);
+                }
+                effectiveUrl = _proxyBase.origin + _proxyBase.pathname.replace(/\/+$/, '') + _proxyPath + _origUrl.search;
                 console.log(`[Cupcake PM] CORS Proxy (Rewrite mode) active → ${effectiveUrl}`);
             } catch (_e) {
                 console.error(`[Cupcake PM] ❌ Invalid proxyUrl "${_proxyUrl}" — proxy NOT applied. URL 형식을 확인하세요 (예: https://my-server.kr/proxy).`, _e);
@@ -427,9 +434,9 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
     }
 
     // ── Direct proxy wrapper: intercepts smartNativeFetch in direct mode ──
-    // Direct mode uses plain fetch() to the external proxy — no need to go
-    // through Risu's nativeFetch/risuFetch pipeline (which would cause
-    // double-proxying or header loss).
+    // Direct mode sends the original target URL as X-Target-URL header to the
+    // user's proxy. Uses smartNativeFetch so it works on web (CSP bypass via
+    // risuFetch/nativeFetch) as well as desktop (direct fetch).
     /**
      * @param {string} url
      * @param {RequestInit & Record<string, any>} [options]
@@ -442,7 +449,7 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
                 'X-Target-URL': url,
             };
             console.log(`[Cupcake PM] [direct proxy] → ${_proxyUrl.substring(0, 60)} (target: ${url.substring(0, 60)})`);
-            return fetch(_proxyUrl, { ...options, headers: directHeaders });
+            return smartNativeFetch(_proxyUrl, { ...options, headers: directHeaders });
         }
         : smartNativeFetch;
 
