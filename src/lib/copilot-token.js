@@ -73,7 +73,7 @@ export async function ensureCopilotApiToken() {
         }
 
         // Parse multi-token (space-separated) — try each in order
-        const allTokens = rawTokenValue.split(/\s+/).map(t => t.replace(/[^\x20-\x7E]/g, '').trim()).filter(Boolean);
+        const allTokens = rawTokenValue.split(/\s+/).map((/** @type {string} */ t) => t.replace(/[^\x20-\x7E]/g, '').trim()).filter(Boolean);
         if (allTokens.length === 0) return '';
 
         const maxAttempts = Math.min(allTokens.length, 5); // cap to avoid infinite loops

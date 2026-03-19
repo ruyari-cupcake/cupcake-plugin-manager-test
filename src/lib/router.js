@@ -93,7 +93,7 @@ export async function fetchByProviderId(modelDef, args, abortSignal, _reqId) {
     }
 
     const rawChat = args.prompt_chat;
-    let messages = sanitizeMessages(rawChat);
+    let messages = /** @type {Array<{role:string, content:any}>} */ (sanitizeMessages(rawChat));
 
     try {
         const pfResult = await injectPrefetchSearch(messages);

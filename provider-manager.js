@@ -3507,7 +3507,7 @@ var CupcakeProviderManager = (function (exports) {
             }
 
             // Parse multi-token (space-separated) — try each in order
-            const allTokens = rawTokenValue.split(/\s+/).map(t => t.replace(/[^\x20-\x7E]/g, '').trim()).filter(Boolean);
+            const allTokens = rawTokenValue.split(/\s+/).map((/** @type {string} */ t) => t.replace(/[^\x20-\x7E]/g, '').trim()).filter(Boolean);
             if (allTokens.length === 0) return '';
 
             const maxAttempts = Math.min(allTokens.length, 5); // cap to avoid infinite loops
@@ -8189,7 +8189,7 @@ var CupcakeProviderManager = (function (exports) {
         }
 
         const rawChat = args.prompt_chat;
-        let messages = sanitizeMessages(rawChat);
+        let messages = /** @type {Array<{role:string, content:any}>} */ (sanitizeMessages(rawChat));
 
         try {
             const pfResult = await injectPrefetchSearch(messages);
