@@ -1,8 +1,8 @@
 //@name CPM Component - Copilot Token Manager
 //@display-name Cupcake Copilot Manager
-//@version 1.7.2
+//@version 1.7.3
 //@author Cupcake
-//@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-copilot-manager.js
+//@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager-test/main/cpm-copilot-manager.js
 
 /**
  * ======== CUPCAKE PM Sub-Plugin: GitHub Copilot Token Manager ========
@@ -69,12 +69,58 @@
 
     async function getToken() {
         const raw = (await CPM.safeGetArg(TOKEN_ARG_KEY)) || '';
-        return sanitizeToken(raw);
+        // 멀티토큰: 공백 구분 → 첫 번째 유효 토큰 반환 (호환성)
+        const tokens = raw.split(/\s+/).map(t => sanitizeToken(t)).filter(Boolean);
+        return tokens[0] || '';
+    }
+
+    /** 모든 저장된 토큰 배열 반환 */
+    async function getTokens() {
+        const raw = (await CPM.safeGetArg(TOKEN_ARG_KEY)) || '';
+        return raw.split(/\s+/).map(t => sanitizeToken(t)).filter(Boolean);
     }
 
     function setToken(value) {
         // Sanitize before saving so stored token is clean
         CPM.setArg(TOKEN_ARG_KEY, sanitizeToken(value));
+    }
+
+    /** 토큰 배열을 공백 구분으로 저장 */
+    function setTokens(tokenArr) {
+        const cleaned = tokenArr.map(t => sanitizeToken(t)).filter(Boolean);
+        CPM.setArg(TOKEN_ARG_KEY, cleaned.join(' '));
+    }
+
+    /** 토큰 추가 (중복 방지) */
+    async function addToken(newToken) {
+        const clean = sanitizeToken(newToken);
+        if (!clean) return false;
+        const tokens = await getTokens();
+        if (tokens.includes(clean)) return false; // 이미 존재
+        tokens.push(clean);
+        setTokens(tokens);
+        return true;
+    }
+
+    /** 특정 토큰 제거 */
+    async function removeTokenAt(index) {
+        const tokens = await getTokens();
+        if (index < 0 || index >= tokens.length) return;
+        tokens.splice(index, 1);
+        setTokens(tokens);
+    }
+
+    /** 실패한 토큰을 뒤로 보내기 (키 회전) */
+    async function rotateFailedToken(failedToken) {
+        const tokens = await getTokens();
+        const idx = tokens.indexOf(sanitizeToken(failedToken));
+        if (idx > -1 && tokens.length > 1) {
+            tokens.push(tokens.splice(idx, 1)[0]); // 뒤로 보냄
+            setTokens(tokens);
+            console.log(LOG_TAG, `Key rotation: failed token moved to end (${tokens.length} tokens total)`);
+            return tokens[0]; // 다음 토큰 반환
+        }
+        return null; // 회전할 토큰 없음
     }
 
     function toast(msg, duration = 3000) {
@@ -482,11 +528,15 @@
         if (!input) return;
         const val = input.value.trim();
         if (!val) { toast('토큰을 입력하세요.'); return; }
-        setToken(val);
+        const added = await addToken(val);
         input.value = '';
-        await refreshTokenDisplay();
-        toast('토큰이 저장되었습니다.');
-        showSuccess('<strong>✅ 성공!</strong> 직접 입력한 토큰이 저장되었습니다.');
+        _refreshTokenList();
+        if (added) {
+            toast('토큰이 추가되었습니다.');
+            showSuccess('<strong>✅ 성공!</strong> 토큰이 추가되었습니다.');
+        } else {
+            toast('동일한 토큰이 이미 존재합니다.');
+        }
     };
 
     actions.copyToken = async () => {
@@ -557,11 +607,16 @@
                 this.disabled = true; this.textContent = '확인 중...';
                 try {
                     const accessToken = await exchangeAccessToken(deviceCode.device_code);
-                    setToken(accessToken);
+                    const added = await addToken(accessToken);
                     dialog.remove();
-                    await refreshTokenDisplay();
-                    toast('GitHub Copilot 토큰이 성공적으로 생성되었습니다!');
-                    showSuccess('<strong>✅ 성공!</strong> 토큰이 생성되고 저장되었습니다.');
+                    _refreshTokenList();
+                    if (added) {
+                        toast('GitHub Copilot 토큰이 성공적으로 생성·추가되었습니다!');
+                        showSuccess('<strong>✅ 성공!</strong> 토큰이 생성되고 저장되었습니다.');
+                    } else {
+                        toast('동일한 토큰이 이미 존재합니다.');
+                        showResult('<div class="bg-yellow-800/50 border border-yellow-600 rounded-lg p-4 text-yellow-300"><strong>⚠️ 중복 토큰.</strong> 이미 동일한 토큰이 등록되어 있습니다.</div>');
+                    }
                 } catch (e) { this.disabled = false; this.textContent = '확인'; toast(e.message); }
             });
         } catch (e) { showError(e.message); }
@@ -596,12 +651,12 @@
     };
 
     actions.remove = async () => {
-        const token = await getToken();
-        if (!token) { toast('이미 토큰이 비어있습니다.'); return; }
-        if (!confirm('정말로 저장된 GitHub Copilot 토큰을 제거하시겠습니까?\n\n제거 후에는 다시 토큰을 생성해야 합니다.')) return;
-        setToken('');
-        await refreshTokenDisplay();
-        toast('토큰이 제거되었습니다.');
+        const tokens = await getTokens();
+        if (tokens.length === 0) { toast('이미 토큰이 비어있습니다.'); return; }
+        if (!confirm(`정말로 저장된 GitHub Copilot 토큰 ${tokens.length}개를 모두 제거하시겠습니까?\n\n제거 후에는 다시 토큰을 생성해야 합니다.`)) return;
+        await setTokens([]);
+        _refreshTokenList();
+        toast('모든 토큰이 제거되었습니다.');
         showResult(`<div class="bg-gray-800 border border-gray-700 rounded-lg p-4 text-yellow-300"><strong>🗑️ 토큰 제거 완료.</strong> 필요 시 다시 생성하세요.</div>`);
     };
 
@@ -872,7 +927,8 @@
     // CSP-SAFE EVENT DELEGATION
     // Handles data-action clicks for both the settings tab and dialogs.
     // ==========================================
-    const DELEGATED_ACTIONS = new Set(['generate', 'verify', 'remove', 'models', 'quota', 'autoConfig', 'copyToken', 'manualSave']);
+    const DELEGATED_ACTIONS = new Set(['generate', 'verify', 'remove', 'models', 'quota', 'autoConfig', 'copyToken', 'manualSave',
+        'addToken', 'removeToken', 'tokenModels', 'tokenQuota', 'tokenCopy', 'tokensRemoveAll']);
 
     document.addEventListener('click', (e) => {
         const btn = e.target.closest('[data-action]');
@@ -892,11 +948,133 @@
             return;
         }
 
+        // 멀티토큰 액션: data-token-idx 사용
+        if (action === 'removeToken') {
+            const idx = parseInt(btn.dataset.tokenIdx);
+            if (!isNaN(idx)) { removeTokenAt(idx).then(() => { toast('토큰이 제거되었습니다.'); _refreshTokenList(); }); }
+            return;
+        }
+        if (action === 'tokenModels') {
+            const idx = parseInt(btn.dataset.tokenIdx);
+            if (!isNaN(idx)) { _showTokenModels(idx); }
+            return;
+        }
+        if (action === 'tokenQuota') {
+            const idx = parseInt(btn.dataset.tokenIdx);
+            if (!isNaN(idx)) { _showTokenQuota(idx); }
+            return;
+        }
+        if (action === 'tokenCopy') {
+            const idx = parseInt(btn.dataset.tokenIdx);
+            if (!isNaN(idx)) { getTokens().then(tokens => { if (tokens[idx]) { navigator.clipboard.writeText(tokens[idx]).then(() => toast('토큰이 복사되었습니다.')); } }); }
+            return;
+        }
+        if (action === 'addToken') {
+            const input = document.getElementById(`${PREFIX}-add-input`);
+            if (input?.value) {
+                addToken(input.value).then(added => {
+                    if (added) { toast('토큰이 추가되었습니다!'); input.value = ''; _refreshTokenList(); }
+                    else toast('이미 존재하거나 유효하지 않은 토큰입니다.');
+                });
+            }
+            return;
+        }
+        if (action === 'tokensRemoveAll') {
+            setTokens([]);
+            toast('모든 토큰이 제거되었습니다.');
+            _refreshTokenList();
+            return;
+        }
+
         if (DELEGATED_ACTIONS.has(action) && typeof actions[action] === 'function') {
             actions[action]();
             return;
         }
     }, true);
+
+    // 토큰별 모델/쿼터 조회 헬퍼
+    async function _showTokenModels(idx) {
+        const tokens = await getTokens();
+        const token = tokens[idx];
+        if (!token) return;
+        const resultEl = document.getElementById(`${PREFIX}-result`);
+        if (resultEl) { resultEl.style.display = 'block'; resultEl.innerHTML = '<div class="text-blue-300 text-sm p-4">📋 모델 목록 조회 중...</div>'; }
+        try {
+            const data = await fetchModelList(token);
+            const models = data?.data || data?.models || (Array.isArray(data) ? data : []);
+            let html = `<div class="bg-gray-800 border border-gray-700 rounded-lg p-4"><h4 class="text-white font-bold mb-3">📋 토큰 #${idx + 1} 모델 목록 (${models.length}개)</h4><div class="space-y-1 max-h-80 overflow-y-auto">`;
+            for (const m of models) {
+                const name = m.id || m.name || m.model || JSON.stringify(m);
+                html += `<div class="text-xs text-gray-300 py-1 px-2 bg-gray-900 rounded font-mono">${escapeHtml(name)}</div>`;
+            }
+            html += '</div></div>';
+            if (resultEl) resultEl.innerHTML = html;
+        } catch (e) { if (resultEl) resultEl.innerHTML = `<div class="text-red-400 text-sm p-4">❌ ${escapeHtml(e.message)}</div>`; }
+    }
+
+    async function _showTokenQuota(idx) {
+        const tokens = await getTokens();
+        const token = tokens[idx];
+        if (!token) return;
+        const resultEl = document.getElementById(`${PREFIX}-result`);
+        if (resultEl) { resultEl.style.display = 'block'; resultEl.innerHTML = '<div class="text-blue-300 text-sm p-4">📊 할당량 조회 중...</div>'; }
+        try {
+            // checkQuota는 기존 함수를 그대로 사용 (actions.quota 로직 재활용)
+            const q = await checkQuota(token);
+            let html = `<div class="bg-gray-800 border border-gray-700 rounded-lg p-4"><h4 class="text-white font-bold mb-3">📊 토큰 #${idx + 1} 할당량</h4>`;
+            html += `<div class="text-xs text-gray-400 mb-2">플랜: <span class="text-blue-300 font-bold">${escapeHtml(q.plan || 'unknown')}</span></div>`;
+            if (q.limited_user_quotas) {
+                const luq = q.limited_user_quotas;
+                const arr = Array.isArray(luq) ? luq : Object.entries(luq).map(([k, v]) => ({ name: k, ...(typeof v === 'object' ? v : { value: v }) }));
+                for (const item of arr) {
+                    const label = (item.name || 'quota').replace(/_/g, ' ');
+                    const limit = item.limit ?? item.entitlement ?? null;
+                    const remaining = item.remaining ?? null;
+                    if (limit != null && remaining != null) {
+                        const pct = limit > 0 ? (remaining / limit * 100) : 0;
+                        const clr = pct > 70 ? '#4ade80' : (pct > 30 ? '#facc15' : '#f87171');
+                        html += `<div class="py-1"><div class="flex justify-between text-xs"><span class="text-gray-300 capitalize">${escapeHtml(label)}</span><span style="color:${clr}">${remaining}/${limit}</span></div><div class="bg-gray-700 rounded-full h-1.5 mt-1"><div style="background:${clr}; width:${Math.min(pct, 100)}%; height:100%; border-radius:9999px;"></div></div></div>`;
+                    }
+                }
+                if (q.limited_user_reset_date) html += `<div class="text-gray-500 text-xs mt-2">리셋: ${new Date(q.limited_user_reset_date).toLocaleString('ko-KR')}</div>`;
+            } else {
+                html += `<div class="text-xs text-gray-500">할당량 정보를 가져올 수 없습니다.</div>`;
+            }
+            html += '</div>';
+            if (resultEl) resultEl.innerHTML = html;
+        } catch (e) { if (resultEl) resultEl.innerHTML = `<div class="text-red-400 text-sm p-4">❌ ${escapeHtml(e.message)}</div>`; }
+    }
+
+    // 토큰 리스트 UI 새로고침
+    async function _refreshTokenList() {
+        const container = document.getElementById(`${PREFIX}-token-list`);
+        if (!container) return;
+        const tokens = await getTokens();
+        if (tokens.length === 0) {
+            container.innerHTML = '<div class="text-gray-500 text-sm p-3 text-center">저장된 토큰이 없습니다. 아래에서 토큰을 생성하거나 직접 입력하세요.</div>';
+            return;
+        }
+        let html = '';
+        for (let i = 0; i < tokens.length; i++) {
+            const t = tokens[i];
+            const masked = t.length > 16 ? t.substring(0, 6) + '••••' + t.substring(t.length - 4) : t;
+            const isFirst = i === 0;
+            html += `<div class="flex items-center gap-2 p-2 rounded ${isFirst ? 'bg-blue-900/30 border border-blue-700/50' : 'bg-gray-800/50 border border-gray-700/50'}">
+                <span class="text-xs font-bold ${isFirst ? 'text-blue-400' : 'text-gray-500'} w-6 text-center">#${i + 1}</span>
+                <span class="flex-1 font-mono text-xs ${isFirst ? 'text-blue-300' : 'text-gray-400'} truncate">${escapeHtml(masked)}</span>
+                ${isFirst ? '<span class="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded font-bold">활성</span>' : ''}
+                <button data-action="tokenCopy" data-token-idx="${i}" class="text-xs text-gray-400 hover:text-white px-1.5 py-0.5 rounded bg-gray-700 hover:bg-gray-600" title="복사">📋</button>
+                <button data-action="tokenModels" data-token-idx="${i}" class="text-xs text-gray-400 hover:text-white px-1.5 py-0.5 rounded bg-gray-700 hover:bg-gray-600" title="모델 조회">📋</button>
+                <button data-action="tokenQuota" data-token-idx="${i}" class="text-xs text-gray-400 hover:text-white px-1.5 py-0.5 rounded bg-gray-700 hover:bg-gray-600" title="할당량">📊</button>
+                <button data-action="removeToken" data-token-idx="${i}" class="text-xs text-red-400 hover:text-red-200 px-1.5 py-0.5 rounded bg-gray-700 hover:bg-red-700" title="제거">🗑️</button>
+            </div>`;
+        }
+        container.innerHTML = html;
+    }
+
+    // window에 노출
+    window._cpmCopilotRefreshTokens = _refreshTokenList;
+    window._cpmCopilotRotateToken = rotateFailedToken;
 
     // ==========================================
     // REGISTER AS SETTINGS TAB (appears in sidebar)
@@ -913,34 +1091,43 @@
             label: 'Copilot',
             exportKeys: [TOKEN_ARG_KEY],
             renderContent: async (renderInput) => {
-                const token = await getToken();
-                const masked = token
-                    ? (token.length > 16 ? token.substring(0, 8) + '••••••••' + token.substring(token.length - 4) : token)
-                    : '토큰 없음';
+                const tokens = await getTokens();
+                const tokenCount = tokens.length;
 
                 return `
                     <h3 class="text-3xl font-bold text-blue-400 mb-6 pb-3 border-b border-gray-700">🔑 GitHub Copilot 토큰 관리자</h3>
-                    <p class="text-blue-300 font-semibold mb-6 border-l-4 border-blue-500 pl-4 py-1">
+                    <p class="text-blue-300 font-semibold mb-4 border-l-4 border-blue-500 pl-4 py-1">
                         GitHub Copilot OAuth 토큰을 생성·확인·제거하고, 사용 가능한 모델과 할당량을 조회합니다.
                     </p>
-
-                    <!-- Current Token Display -->
-                    <div class="mb-4">
-                        <label class="block text-sm font-medium text-gray-400 mb-2">현재 저장된 토큰</label>
-                        <div class="flex items-center space-x-2">
-                            <div id="${PREFIX}-token-display" class="flex-1 bg-gray-800 border border-gray-600 rounded px-3 py-2 text-gray-300 font-mono text-sm select-all truncate">${escapeHtml(masked)}</div>
-                            <button data-action="copyToken" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded text-sm font-bold shrink-0" title="토큰 복사">📋 복사</button>
-                        </div>
+                    <div class="bg-blue-900/30 border border-blue-700/50 rounded-lg p-3 mb-6">
+                        <p class="text-xs text-blue-300">🔄 <strong>자동 키 회전:</strong> 여러 토큰을 저장하면, API 호출 실패(401/429) 시 자동으로 다음 토큰으로 회전합니다. 각 토큰의 모델·할당량을 개별 조회할 수 있습니다.</p>
                     </div>
 
-                    <!-- Manual Token Input -->
+                    <!-- Token List -->
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-400 mb-2">저장된 토큰 (${tokenCount}개) ${tokenCount > 1 ? '<span class="text-green-400 text-xs ml-2">🔄 키 회전 활성</span>' : ''}</label>
+                        <div id="${PREFIX}-token-list" class="space-y-2 mb-3 max-h-60 overflow-y-auto">
+                            ${tokenCount === 0 ? '<div class="text-gray-500 text-sm p-3 text-center">저장된 토큰이 없습니다. 아래에서 토큰을 생성하거나 직접 입력하세요.</div>' : ''}
+                        </div>
+                        ${tokenCount > 1 ? `<button data-action="tokensRemoveAll" class="text-xs text-red-400 hover:text-red-300 underline">모든 토큰 제거</button>` : ''}
+                    </div>
+
+                    <!-- Add Token Input -->
                     <div class="mb-6">
-                        <label class="block text-sm font-medium text-gray-400 mb-2">토큰 직접 입력</label>
+                        <label class="block text-sm font-medium text-gray-400 mb-2">➕ 토큰 추가</label>
                         <div class="flex items-center space-x-2">
-                            <input id="${PREFIX}-manual-input" type="text" placeholder="ghu_xxxx 또는 gho_xxxx 토큰을 붙여넣기..." class="flex-1 bg-gray-800 border border-gray-600 rounded px-3 py-2 text-gray-200 font-mono text-sm focus:border-blue-500 focus:outline-none" />
+                            <input id="${PREFIX}-add-input" type="text" placeholder="ghu_xxxx 또는 gho_xxxx 토큰을 붙여넣기..." class="flex-1 bg-gray-800 border border-gray-600 rounded px-3 py-2 text-gray-200 font-mono text-sm focus:border-blue-500 focus:outline-none" />
+                            <button data-action="addToken" class="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded text-sm font-bold shrink-0">➕ 추가</button>
+                        </div>
+                        <p class="text-gray-500 text-xs mt-1">여러 토큰을 추가하면 실패 시 자동으로 다음 토큰으로 회전합니다.</p>
+                    </div>
+
+                    <!-- Existing Manual Input (for single overwrite) -->
+                    <div class="mb-6 hidden">
+                        <div class="flex items-center space-x-2">
+                            <input id="${PREFIX}-manual-input" type="text" placeholder="" class="flex-1 bg-gray-800 border border-gray-600 rounded px-3 py-2 text-gray-200 font-mono text-sm" />
                             <button data-action="manualSave" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-sm font-bold shrink-0">💾 저장</button>
                         </div>
-                        <p class="text-gray-500 text-xs mt-1">GitHub에서 직접 발급받은 토큰을 수동으로 입력할 수 있습니다.</p>
                     </div>
 
                     <!-- Action Buttons Grid -->
@@ -967,10 +1154,11 @@
 
                     <!-- Result Container -->
                     <div id="${PREFIX}-result" style="display:none;" class="space-y-3"></div>
+                    <script>setTimeout(() => { if (window._cpmCopilotRefreshTokens) window._cpmCopilotRefreshTokens(); }, 50);</script>
                 `;
             }
         }
     });
 
-    console.log(`${LOG_TAG} Settings tab registered (v1.7.1) — sidebar: 🔑 Copilot`);
+    console.log(`${LOG_TAG} Settings tab registered (v1.7.3) — sidebar: 🔑 Copilot`);
 })();

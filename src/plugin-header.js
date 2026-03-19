@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.0
-//@changes v1.22.0: tool-use 시스템 추가, Vertex AI 인증, 번역캐시 개선, Settings UI 강화, smart-fetch 개선, sanitize 리팩토링
+//@version 1.22.1
+//@changes v1.22.1: 프리페치 검색 개선, Copilot 멀티토큰 회전, Tool Use 중복 검색 방지
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================

@@ -19,6 +19,7 @@ import { collectStream, checkStreamCapability } from './stream-utils.js';
 import { isToolUseEnabled } from './tool-use/tool-config.js';
 import { getActiveToolList } from './tool-use/tool-definitions.js';
 import { runToolLoop } from './tool-use/tool-loop.js';
+import { injectPrefetchSearch, isPrefetchSearchEnabled } from './tool-use/prefetch-search.js';
 
 /**
  * @typedef {Object} ModelDef
@@ -92,7 +93,16 @@ export async function fetchByProviderId(modelDef, args, abortSignal, _reqId) {
     }
 
     const rawChat = args.prompt_chat;
-    const messages = sanitizeMessages(rawChat);
+    let messages = sanitizeMessages(rawChat);
+
+    try {
+        const pfResult = await injectPrefetchSearch(messages);
+        if (pfResult.searched) {
+            messages = pfResult.messages;
+        }
+    } catch (pfErr) {
+        console.warn('[CPM Prefetch Search] Error:', /** @type {Error} */ (pfErr).message);
+    }
 
     try {
         const fetcher = customFetchers[modelDef.provider];
@@ -135,7 +145,8 @@ export async function fetchByProviderId(modelDef, args, abortSignal, _reqId) {
             };
 
             // ── Tool-Use Layer 2: CPM standalone tool-use loop ──
-            const _toolEnabled = await isToolUseEnabled();
+            const _prefetchOn = await isPrefetchSearchEnabled();
+            const _toolEnabled = _prefetchOn ? false : (await isToolUseEnabled());
             if (_toolEnabled) {
                 const _activeTools = await getActiveToolList();
                 if (_activeTools.length > 0) {

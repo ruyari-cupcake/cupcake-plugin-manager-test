@@ -452,6 +452,18 @@ export async function openCpmSettings() {
         <div id="tab-tools" class="cpm-tab-content hidden">
             <h3 class="text-3xl font-bold text-orange-400 mb-6 pb-3 border-b border-gray-700">🔧 도구 사용 (Tool Use)</h3>
             <p class="text-orange-300 font-semibold mb-4 border-l-4 border-orange-500 pl-4 py-1">AI가 실시간으로 날짜 확인, 계산, 주사위 굴림, 웹 검색 등 도구를 호출할 수 있게 합니다.</p>
+            <div class="bg-red-900/60 border-2 border-red-500 rounded-lg p-4 mb-6">
+                <h4 class="text-lg font-bold text-red-300 mb-2">⚠️ 메인 모델 2회 이상 호출 주의</h4>
+                <p class="text-sm text-red-200 mb-2">도구 사용을 켜면, AI가 도구를 호출할 때마다 <strong class="text-red-100 underline">메인 채팅 모델 API가 최소 2회 호출</strong>됩니다.</p>
+                <div class="text-xs text-red-300/80 space-y-1 ml-2">
+                    <div>• <strong>1회차:</strong> 모델이 "도구를 쓸지 말지" 판단 → 도구 호출 요청 생성</div>
+                    <div>• <strong>검색 API:</strong> CPM이 외부 검색 API 실행 (메인 모델 호출 아님)</div>
+                    <div>• <strong>2회차:</strong> 검색 결과를 포함해서 모델 재호출 → 최종 답변 생성</div>
+                    <div>• <strong>최악의 경우:</strong> 도구를 여러 번 호출하면 max_depth + 1회까지 호출 가능</div>
+                </div>
+                <p class="text-xs text-red-400 mt-2 font-semibold">💡 이것은 CPM의 문제가 아니라 OpenAI/Anthropic/Google Function Calling 프로토콜의 구조적 특성입니다. 토큰 비용이 약 1.3~2배 증가할 수 있습니다.</p>
+            </div>
+
             <div class="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-6">
                 <h4 class="text-sm font-bold text-gray-300 mb-3">📋 동작 방식</h4>
                 <div class="text-xs text-gray-400 space-y-1">
@@ -527,6 +539,37 @@ export async function openCpmSettings() {
                     ${await renderInput('cpm_tool_websearch_url', '검색 API URL (Custom용, 비워두면 프로바이더 기본값)', 'text')}
                     ${await renderInput('cpm_tool_websearch_key', '검색 API Key', 'password')}
                     ${await renderInput('cpm_tool_websearch_cx', 'Google CSE ID (cx, Google CSE 전용)', 'text')}
+                </div>
+            </div>
+
+            <div class="mt-8 pt-6 border-t border-gray-700">
+                <h4 class="text-xl font-bold text-green-400 mb-4">🚀 프리페치 검색 (Prefetch Search) — 모델 1회 호출</h4>
+                <div class="bg-green-900/40 border border-green-600/50 rounded-lg p-4 mb-4">
+                    <p class="text-xs text-green-300 mb-2 font-semibold">✅ Function Calling 없이 모델 1회만 호출합니다</p>
+                    <p class="text-xs text-gray-400 mb-2">사용자 메시지를 먼저 웹검색한 뒤, 검색 결과를 시스템 프롬프트에 주입하고 메인 모델을 1번만 호출합니다. 기존 도구사용(Tool Use)의 2회 호출 문제를 해결합니다.</p>
+                    <p class="text-xs text-green-400 font-semibold">🔒 프리페치 검색이 켜지면 위의 "도구 사용(Tool Use)"는 자동으로 비활성화됩니다. 웹검색 중복 호출을 방지합니다.</p>
+                </div>
+                <div class="space-y-3 mb-4">
+                    ${await renderInput('cpm_prefetch_search_enabled', '🚀 프리페치 검색 활성화 (Prefetch Search)', 'checkbox')}
+                </div>
+                <div class="space-y-3 mb-4">
+                    ${await renderInput('cpm_prefetch_search_position', '검색 결과 삽입 위치 (Insert Position)', 'select', [
+                        { value: 'after', text: '시스템 프롬프트 뒤 (기본, 권장)' },
+                        { value: 'before', text: '시스템 프롬프트 앞' },
+                    ])}
+                </div>
+                <div class="space-y-3 mb-4">
+                    ${await renderInput('cpm_prefetch_search_max_results', '최대 검색 결과 수 (기본 5, 최대 10)', 'number')}
+                </div>
+                <div class="space-y-3 mb-4">
+                    ${await renderInput('cpm_prefetch_search_snippet_only', '📝 Snippet 전용 모드 (토큰 절약 — 제목/URL 제외, 요약만 주입)', 'checkbox')}
+                </div>
+                <div class="space-y-3 mb-4">
+                    ${await renderInput('cpm_prefetch_search_keywords', '🔑 트리거 키워드 (쉼표 구분, 비우면 모든 메시지에 검색)', 'text')}
+                    <p class="text-xs text-gray-500 ml-1">예: <code class="text-gray-400">검색,최신,현재,오늘,뉴스,search,latest,today</code> — 이 키워드가 사용자 메시지에 포함될 때만 검색 실행</p>
+                </div>
+                <div class="bg-gray-800/50 border border-gray-700 rounded-lg p-3 mt-4">
+                    <p class="text-xs text-gray-500">💡 검색 API 설정(프로바이더, API Key 등)은 위의 "웹 검색 설정" 섹션과 공유합니다.</p>
                 </div>
             </div>
 

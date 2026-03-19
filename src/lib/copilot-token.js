@@ -65,58 +65,78 @@ export async function ensureCopilotApiToken() {
     const fetchFn = _fetchFn || globalThis.fetch;
 
     _copilotTokenPromise = (async () => {
-        const githubToken = await _getArgFn('tools_githubCopilotToken');
+        const rawTokenValue = await _getArgFn('tools_githubCopilotToken');
         const nodelessMode = normalizeCopilotNodelessMode(await _getArgFn('cpm_copilot_nodeless_mode'));
-        if (!githubToken) {
+        if (!rawTokenValue) {
             console.warn('[Cupcake PM] Copilot: No GitHub OAuth token found. Set token via Copilot Manager.');
             return '';
         }
 
-        const cleanToken = githubToken.replace(/[^\x20-\x7E]/g, '').trim();
-        if (!cleanToken) return '';
+        // Parse multi-token (space-separated) — try each in order
+        const allTokens = rawTokenValue.split(/\s+/).map(t => t.replace(/[^\x20-\x7E]/g, '').trim()).filter(Boolean);
+        if (allTokens.length === 0) return '';
 
-        console.log('[Cupcake PM] Copilot: Exchanging OAuth token for API token...');
-        const res = await fetchFn('https://api.github.com/copilot_internal/v2/token', {
-            method: 'GET',
-            headers: buildCopilotTokenExchangeHeaders(cleanToken, nodelessMode),
-        });
+        const maxAttempts = Math.min(allTokens.length, 5); // cap to avoid infinite loops
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            const cleanToken = allTokens[attempt];
+            if (!cleanToken) continue;
 
-        if (!res.ok) {
-            console.error(`[Cupcake PM] Copilot token exchange failed (${res.status}): ${await res.text()}`);
-            // Negative cache: avoid retrying the same failed exchange for 60s
-            _copilotTokenCache = { token: '', expiry: Date.now() + _NEGATIVE_CACHE_MS };
-            return '';
-        }
+            console.log(`[Cupcake PM] Copilot: Exchanging token #${attempt + 1}/${allTokens.length} for API token...`);
+            try {
+                const res = await fetchFn('https://api.github.com/copilot_internal/v2/token', {
+                    method: 'GET',
+                    headers: buildCopilotTokenExchangeHeaders(cleanToken, nodelessMode),
+                });
 
-        const data = await res.json();
-        if (data.token) {
-            // Standard flow: received TID token
-            const expiryMs = data.expires_at ? data.expires_at * 1000 : Date.now() + 1800000;
-            _copilotTokenCache = { token: data.token, expiry: expiryMs };
+                if (!res.ok) {
+                    const errText = await res.text();
+                    console.warn(`[Cupcake PM] Copilot token #${attempt + 1} exchange failed (${res.status}): ${errText}`);
+                    // Rotate failed token to end via copilot-manager bridge (if available)
+                    if (typeof window !== 'undefined' && typeof /** @type {any} */ (window)._cpmCopilotRotateToken === 'function') {
+                        await /** @type {any} */ (window)._cpmCopilotRotateToken(cleanToken);
+                    }
+                    continue; // try next token
+                }
 
-            if (typeof window !== 'undefined') {
-                /** @type {any} */ (window)._cpmCopilotApiToken = data.token;
-                // Preserve dynamic API base URL from endpoints.api if present
-                if (data.endpoints?.api) {
-                    /** @type {any} */ (window)._cpmCopilotApiBase = data.endpoints.api.replace(/\/$/, '');
-                    console.log('[Cupcake PM] Copilot: dynamic API base:', /** @type {any} */ (window)._cpmCopilotApiBase);
+                const data = await res.json();
+                if (data.token) {
+                    const expiryMs = data.expires_at ? data.expires_at * 1000 : Date.now() + 1800000;
+                    _copilotTokenCache = { token: data.token, expiry: expiryMs };
+
+                    if (typeof window !== 'undefined') {
+                        /** @type {any} */ (window)._cpmCopilotApiToken = data.token;
+                        if (data.endpoints?.api) {
+                            /** @type {any} */ (window)._cpmCopilotApiBase = data.endpoints.api.replace(/\/$/, '');
+                            console.log('[Cupcake PM] Copilot: dynamic API base:', /** @type {any} */ (window)._cpmCopilotApiBase);
+                        }
+                    }
+                    console.log(`[Cupcake PM] Copilot: API token obtained from token #${attempt + 1}, expires in`, Math.round((expiryMs - Date.now()) / 60000), 'min');
+                    return data.token;
+                }
+
+                // New API format: token response is a model list
+                if (Array.isArray(data.data)) {
+                    console.log(`[Cupcake PM] Copilot: Token #${attempt + 1} response is model list (${data.data.length} models) — using OAuth token directly`);
+                    const expiryMs = Date.now() + 1800000;
+                    _copilotTokenCache = { token: cleanToken, expiry: expiryMs };
+                    if (typeof window !== 'undefined') /** @type {any} */ (window)._cpmCopilotApiToken = cleanToken;
+                    return cleanToken;
+                }
+
+                console.warn(`[Cupcake PM] Copilot token #${attempt + 1} exchange returned no token`);
+                if (typeof window !== 'undefined' && typeof /** @type {any} */ (window)._cpmCopilotRotateToken === 'function') {
+                    await /** @type {any} */ (window)._cpmCopilotRotateToken(cleanToken);
+                }
+            } catch (e) {
+                console.warn(`[Cupcake PM] Copilot token #${attempt + 1} error:`, /** @type {Error} */ (e).message);
+                if (typeof window !== 'undefined' && typeof /** @type {any} */ (window)._cpmCopilotRotateToken === 'function') {
+                    await /** @type {any} */ (window)._cpmCopilotRotateToken(cleanToken);
                 }
             }
-            console.log('[Cupcake PM] Copilot: API token obtained, expires in', Math.round((expiryMs - Date.now()) / 60000), 'min');
-            return data.token;
         }
 
-        // New API format: token response is a model list (data.data array) → use OAuth token directly
-        if (Array.isArray(data.data)) {
-            console.log(`[Cupcake PM] Copilot: Token response is model list (${data.data.length} models) — using OAuth token directly`);
-            const expiryMs = Date.now() + 1800000; // 30 min TTL
-            _copilotTokenCache = { token: cleanToken, expiry: expiryMs };
-            if (typeof window !== 'undefined') /** @type {any} */ (window)._cpmCopilotApiToken = cleanToken;
-            return cleanToken;
-        }
-
-        console.error('[Cupcake PM] Copilot token exchange returned no token');
-        // Negative cache: avoid retrying the same failed exchange for 60s
+        // All tokens failed — negative cache
+        console.error('[Cupcake PM] Copilot: All tokens exhausted — negative caching for', _NEGATIVE_CACHE_MS / 1000, 's');
         _copilotTokenCache = { token: '', expiry: Date.now() + _NEGATIVE_CACHE_MS };
         return '';
     })();

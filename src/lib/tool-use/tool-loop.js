@@ -150,6 +150,33 @@ export async function runToolLoop(opts) {
         const finalResult = await fetchFn(
             finalConfig, workingMessages, temp, maxTokens, args, abortSignal, _reqId
         );
+
+        if (finalResult?._rawData) {
+            const parsedFinal = parseToolCalls(finalResult._rawData, format);
+            if (!parsedFinal.hasToolCalls && parsedFinal.textContent) {
+                return { success: true, content: parsedFinal.textContent, _status: finalResult._status || 200 };
+            }
+
+            if (parsedFinal.hasToolCalls) {
+                const retryMessages = [...workingMessages, {
+                    role: format === 'anthropic' ? 'user' : 'user',
+                    content: '[System] Do not call any more tools. Return a plain final answer only.'
+                }];
+                const retryResult = await fetchFn(
+                    finalConfig, retryMessages, temp, maxTokens, args, abortSignal, _reqId
+                );
+
+                if (retryResult?._rawData) {
+                    const parsedRetry = parseToolCalls(retryResult._rawData, format);
+                    if (!parsedRetry.hasToolCalls && parsedRetry.textContent) {
+                        return { success: true, content: parsedRetry.textContent, _status: retryResult._status || 200 };
+                    }
+                }
+
+                return { success: retryResult.success, content: retryResult.content || '', _status: retryResult._status };
+            }
+        }
+
         return { success: finalResult.success, content: finalResult.content || '', _status: finalResult._status };
     }
 
