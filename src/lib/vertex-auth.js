@@ -5,7 +5,7 @@
  */
 
 // @ts-nocheck
-/* global Risu */
+import { Risu } from './shared-state.js';
 
 /** @type {Record<string, {token:string, expiry:number}>} */
 const _tokenCaches = {};

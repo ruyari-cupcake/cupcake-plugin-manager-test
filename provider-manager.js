@@ -1,7 +1,7 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.2
+//@version 1.22.3
 //@changes v1.22.1: 프리페치 검색 개선, Copilot 멀티토큰 회전, Tool Use 중복 검색 방지
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
@@ -190,7 +190,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.22.2';
+    const CPM_VERSION = '1.22.3';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -6226,8 +6226,6 @@ var CupcakeProviderManager = (function (exports) {
      * Handles: SA JSON parsing → JWT generation → OAuth token exchange → caching.
      */
 
-    // @ts-nocheck
-    /* global Risu */
 
     /** @type {Record<string, {token:string, expiry:number}>} */
     const _tokenCaches = {};
@@ -6345,7 +6343,7 @@ var CupcakeProviderManager = (function (exports) {
 
         // Exchange JWT for access token
         const tokenBody = `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`;
-        const res = await Risu.nativeFetch('https://oauth2.googleapis.com/token', {
+        const res = await Risu$1.nativeFetch('https://oauth2.googleapis.com/token', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: new TextEncoder().encode(tokenBody)

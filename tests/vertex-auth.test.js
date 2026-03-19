@@ -11,7 +11,9 @@ const h = vi.hoisted(() => ({
     sign: vi.fn(),
 }));
 
-vi.stubGlobal('Risu', { nativeFetch: h.nativeFetch });
+vi.mock('../src/lib/shared-state.js', () => ({
+    Risu: { nativeFetch: h.nativeFetch },
+}));
 vi.stubGlobal('crypto', {
     subtle: {
         importKey: h.importKey,
