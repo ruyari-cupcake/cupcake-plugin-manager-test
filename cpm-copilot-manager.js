@@ -1,6 +1,6 @@
 //@name CPM Component - Copilot Token Manager
 //@display-name Cupcake Copilot Manager
-//@version 1.7.12
+//@version 1.7.13
 //@author Cupcake
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager-test/main/cpm-copilot-manager.js
 
@@ -116,54 +116,71 @@
     const _tokenStatusCache = new Map(); // token → { sku, active, planLabel, checkedAt }
 
     /**
-     * Pro/Pro+/Business/Enterprise 구독만 '활성' 처리.
-     * SKU에 'pro','plus','business','enterprise' 키워드가 포함된 경우만 true.
-     * - copilot_for_individuals_subscriber (무료/레거시) → false (pro 미포함)
-     * - copilot_for_individuals_pro_subscriber → true (pro 포함)
-     * - plus_monthly_subscriber_quota → true (plus 포함)
-     * - copilot_for_business_seat → true (business 포함)
+     * /copilot_internal/user 응답 데이터로 유료 구독 여부 판단.
+     * - copilot_plan 필드에 pro/plus/business/enterprise 포함 → 활성
+     * - copilot_plan 없어도 quota_snapshots 존재 → 유료 (Pro 이상)
+     * - 그 외 (free, 비구독 등) → 비활성
      */
-    function _isActiveSubscription(sku) {
-        if (!sku || sku === 'unknown' || sku === 'error') return false;
-        const lower = sku.toLowerCase();
-        return lower.includes('pro') || lower.includes('plus') ||
-               lower.includes('business') || lower.includes('enterprise');
+    function _isActivePlan(userData) {
+        if (!userData) return false;
+        const plan = (userData.copilot_plan || '').toLowerCase();
+        if (plan.includes('pro') || plan.includes('plus') ||
+            plan.includes('business') || plan.includes('enterprise')) return true;
+        if (userData.quota_snapshots) return true;
+        return false;
     }
 
-    /** SKU에서 플랜 표시 라벨 추출 */
-    function _getPlanLabel(sku) {
-        if (!sku) return '';
-        const lower = sku.toLowerCase();
-        if (lower.includes('plus')) return 'Pro+';
-        if (lower.includes('pro')) return 'Pro';
-        if (lower.includes('business') || lower.includes('enterprise')) return 'Biz';
-        if (lower.includes('individual')) return 'Individual';
-        return 'Active';
+    /** /copilot_internal/user 응답에서 플랜 라벨 추출 */
+    function _getPlanLabelFromUser(userData) {
+        if (!userData) return '';
+        if (userData.codex_agent_enabled) return 'Pro+';
+        const plan = (userData.copilot_plan || '').toLowerCase();
+        if (plan.includes('plus')) return 'Pro+';
+        if (plan.includes('pro')) return 'Pro';
+        if (plan.includes('business')) return 'Biz';
+        if (plan.includes('enterprise')) return 'Enterprise';
+        if (userData.quota_snapshots) return 'Pro';
+        return '';
     }
 
-    /** 토큰 상태 확인 (캐시 사용, 5분 TTL) */
+    /**
+     * 토큰 상태 확인 (캐시 사용, 5분 TTL).
+     * /copilot_internal/user 엔드포인트로 실제 copilot_plan 필드를 확인.
+     * (/v2/token의 sku는 모든 계정에 동일값 반환되므로 사용하지 않음)
+     */
     async function _checkTokenStatusCached(token, tokenIdx) {
         const cached = _tokenStatusCache.get(token);
         if (cached && (Date.now() - cached.checkedAt) < 5 * 60 * 1000) {
-            console.log(LOG_TAG, `Token #${tokenIdx ?? '?'} [cached] sku="${cached.sku}", active=${cached.active}`);
+            console.log(LOG_TAG, `Token #${tokenIdx ?? '?'} [cached] plan="${cached.copilotPlan}", active=${cached.active}`);
             return cached;
         }
         const masked = token.length > 12 ? token.substring(0, 6) + '…' + token.substring(token.length - 4) : '***';
         try {
-            const data = await checkTokenStatus(token);
-            const sku = data.sku || 'unknown';
-            const individual = data.individual;
-            const chatEnabled = data.chat_enabled;
-            const quotaCount = Array.isArray(data.limited_user_quotas) ? data.limited_user_quotas.length : 0;
-            const active = _isActiveSubscription(sku);
-            const planLabel = active ? _getPlanLabel(sku) : '';
-            console.log(LOG_TAG, `Token #${tokenIdx ?? '?'} [${masked}] sku="${sku}", individual=${individual}, chat=${chatEnabled}, quotas=${quotaCount}, active=${active}, label="${planLabel}"`);
-            const info = { sku, active, planLabel, individual, checkedAt: Date.now() };
+            const Risu = window.Risuai || window.risuai;
+            const cleanToken = sanitizeToken(token);
+            const result = await Risu.risuFetch('https://api.github.com/copilot_internal/user', {
+                method: 'GET',
+                headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${cleanToken}`, 'Content-Type': 'application/json' },
+                rawResponse: false,
+                plainFetchForce: true,
+            });
+            let userData = null;
+            if (result?.ok && result?.data && typeof result.data === 'object') {
+                userData = result.data;
+            } else if (result?.data && typeof result.data === 'string') {
+                try { userData = JSON.parse(result.data); } catch { /* ignore */ }
+            }
+            if (!userData) throw new Error('사용자 정보를 가져올 수 없습니다.');
+            const active = _isActivePlan(userData);
+            const planLabel = active ? _getPlanLabelFromUser(userData) : '';
+            const copilotPlan = userData.copilot_plan || '';
+            console.log(LOG_TAG, `Token #${tokenIdx ?? '?'} [${masked}] copilot_plan="${copilotPlan}", quotas=${!!userData.quota_snapshots}, codex=${!!userData.codex_agent_enabled}, active=${active}, label="${planLabel}"`);
+            const info = { sku: copilotPlan || 'unknown', copilotPlan, active, planLabel, checkedAt: Date.now() };
             _tokenStatusCache.set(token, info);
             return info;
         } catch (e) {
             console.log(LOG_TAG, `Token #${tokenIdx ?? '?'} [${masked}] FAILED: ${e.message}`);
-            const info = { sku: 'error', active: false, planLabel: '', checkedAt: Date.now() };
+            const info = { sku: 'error', copilotPlan: '', active: false, planLabel: '', checkedAt: Date.now() };
             _tokenStatusCache.set(token, info);
             return info;
         }
@@ -1318,5 +1335,5 @@
         }
     });
 
-    console.log(`${LOG_TAG} Settings tab registered (v1.7.12) — sidebar: 🔑 Copilot`);
+    console.log(`${LOG_TAG} Settings tab registered (v1.7.13) — sidebar: 🔑 Copilot`);
 })();

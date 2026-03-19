@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-03-19T13:50:22.921Z",
+  "timestamp": "2026-03-19T14:00:39.385Z",
   "version": "1.22.1",
   "files": {
     "cpm-provider-vertex.js": {
@@ -43,9 +43,9 @@
       "size": 22194
     },
     "cpm-copilot-manager.js": {
-      "version": "1.7.12",
-      "sha256": "8567383a91f811d24bf8d039c71cc44ca548eac8e053f3fa9e7b4db5045b9869",
-      "size": 73086
+      "version": "1.7.13",
+      "sha256": "b034af0a85df2c07f8d4fc94b0d424121e8172c6e13c39af3a06fce768186f7f",
+      "size": 73941
     },
     "cpm-translation-cache.js": {
       "version": "1.4.0",
@@ -63,5 +63,5 @@
       "size": 605217
     }
   },
-  "bundleHash": "5b518032b9f96ffa5d6db1e03c10b8aba59f5b799a95ddd56fd21a9d6d36c5da"
+  "bundleHash": "69e0a8c99fd29a02937cb6adac65d2e3d325c942f2e67cd4b85057f72f9a65d2"
 }
