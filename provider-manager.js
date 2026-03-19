@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.4
-//@changes v1.22.1: 프리페치 검색 개선, Copilot 멀티토큰 회전, Tool Use 중복 검색 방지
+//@version 1.22.5
+//@changes v1.22.5: 범용 CORS 프록시 워커 추가, Rewrite 모드 X-Target-URL 전달 지원
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================
@@ -190,7 +190,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.22.4';
+    const CPM_VERSION = '1.22.5';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -6735,6 +6735,8 @@ var CupcakeProviderManager = (function (exports) {
         }
         const _isProxied = !!_proxyUrl;
         const _proxyDirect = !!config.proxyDirect;
+        // 범용 프록시 지원: Rewrite 전 원래 대상 URL 저장 (X-Target-URL 헤더로 전달)
+        let _originalTargetUrl = effectiveUrl || '';
         if (_proxyUrl && effectiveUrl) {
             if (_proxyDirect) {
                 // Direct mode: 프록시 URL로 직접 요청, effectiveUrl은 X-Target-URL 헤더로 전달
@@ -6779,7 +6781,16 @@ var CupcakeProviderManager = (function (exports) {
                 console.log(`[Cupcake PM] [direct proxy] → ${_proxyUrl.substring(0, 60)} (target: ${url.substring(0, 60)})`);
                 return smartNativeFetch(_proxyUrl, { ...options, headers: directHeaders });
             }
-            : smartNativeFetch;
+            : (_isProxied && _originalTargetUrl)
+                ? async (/** @type {string} */ url, /** @type {RequestInit & Record<string, any>} */ options = {}) => {
+                    // Rewrite mode: 범용 프록시가 원래 대상을 알 수 있도록 X-Target-URL 전달
+                    const rewriteHeaders = {
+                        ...(/** @type {Record<string, string>} */ (options.headers) || {}),
+                        'X-Target-URL': _originalTargetUrl,
+                    };
+                    return smartNativeFetch(url, { ...options, headers: rewriteHeaders });
+                }
+                : smartNativeFetch;
 
         // ── Core fetch logic (wrapped for key rotation) ──
         const _doCustomFetch = async (/** @type {string} */ _apiKey) => {
