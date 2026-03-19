@@ -1,6 +1,6 @@
 //@name CPM Component - Copilot Token Manager
 //@display-name Cupcake Copilot Manager
-//@version 1.7.9
+//@version 1.7.10
 //@author Cupcake
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager-test/main/cpm-copilot-manager.js
 
@@ -113,19 +113,28 @@
     // ==========================================
     // TOKEN STATUS CACHE (subscription check)
     // ==========================================
-    const _tokenStatusCache = new Map(); // token → { sku, active, checkedAt }
+    const _tokenStatusCache = new Map(); // token → { sku, active, planLabel, checkedAt }
 
-    const ACTIVE_SKUS = new Set([
-        'monthly_subscriber',
-        'copilot_for_individuals_subscriber',
-        'copilot_for_individuals_pro_subscriber',
-        'plus_monthly_subscriber_quota',
-        'plus_yearly_subscriber_quota',
-    ]);
-
+    /** API에서 성공 응답이 와서 SKU가 있으면 활성, free/community만 제외 */
     function _isActiveSubscription(sku) {
         if (!sku || sku === 'unknown' || sku === 'error') return false;
-        return ACTIVE_SKUS.has(sku);
+        const lower = sku.toLowerCase();
+        // 명확히 무료/비활성인 경우만 제외
+        if (lower === 'none' || lower === 'free' || lower === 'expired' || lower === 'disabled') return false;
+        if (lower.includes('free') || lower.includes('community')) return false;
+        // API가 유효한 SKU를 반환했으면 활성 토큰
+        return true;
+    }
+
+    /** SKU에서 플랜 표시 라벨 추출 */
+    function _getPlanLabel(sku) {
+        if (!sku) return '';
+        const lower = sku.toLowerCase();
+        if (lower.includes('plus')) return 'Pro+';
+        if (lower.includes('pro')) return 'Pro';
+        if (lower.includes('business') || lower.includes('enterprise')) return 'Biz';
+        if (lower.includes('individual')) return 'Individual';
+        return 'Active';
     }
 
     /** 토큰 상태 확인 (캐시 사용, 5분 TTL) */
@@ -134,11 +143,16 @@
         if (cached && (Date.now() - cached.checkedAt) < 5 * 60 * 1000) return cached;
         try {
             const data = await checkTokenStatus(token);
-            const info = { sku: data.sku || 'unknown', active: _isActiveSubscription(data.sku), checkedAt: Date.now() };
+            const sku = data.sku || 'unknown';
+            const active = _isActiveSubscription(sku);
+            const planLabel = active ? _getPlanLabel(sku) : '';
+            console.log(LOG_TAG, `Token status: sku=${sku}, active=${active}, planLabel=${planLabel}`);
+            const info = { sku, active, planLabel, checkedAt: Date.now() };
             _tokenStatusCache.set(token, info);
             return info;
-        } catch {
-            const info = { sku: 'error', active: false, checkedAt: Date.now() };
+        } catch (e) {
+            console.log(LOG_TAG, `Token status check failed: ${e.message}`);
+            const info = { sku: 'error', active: false, planLabel: '', checkedAt: Date.now() };
             _tokenStatusCache.set(token, info);
             return info;
         }
@@ -1187,10 +1201,10 @@
                 if (status.sku === 'error') {
                     badge = '<span class="text-[10px] bg-red-700 text-white px-1.5 py-0.5 rounded font-bold">만료/오류</span>';
                 } else if (isActive) {
-                    const planLabel = status.sku.includes('plus') ? 'Pro+' : 'Pro';
-                    badge = `<span class="text-[10px] bg-green-600 text-white px-1.5 py-0.5 rounded font-bold">활성 ${planLabel}</span>`;
+                    const label = status.planLabel || 'Active';
+                    badge = `<span class="text-[10px] bg-green-600 text-white px-1.5 py-0.5 rounded font-bold">활성 ${escapeHtml(label)}</span>`;
                 } else {
-                    badge = '<span class="text-[10px] bg-gray-600 text-white px-1.5 py-0.5 rounded font-bold">비활성</span>';
+                    badge = `<span class="text-[10px] bg-gray-600 text-white px-1.5 py-0.5 rounded font-bold">비활성 (${escapeHtml(status.sku)})</span>`;
                 }
             } else {
                 badge = '<span class="text-[10px] bg-gray-700 text-gray-400 px-1.5 py-0.5 rounded">미확인</span>';
@@ -1293,5 +1307,5 @@
         }
     });
 
-    console.log(`${LOG_TAG} Settings tab registered (v1.7.9) — sidebar: 🔑 Copilot`);
+    console.log(`${LOG_TAG} Settings tab registered (v1.7.10) — sidebar: 🔑 Copilot`);
 })();
