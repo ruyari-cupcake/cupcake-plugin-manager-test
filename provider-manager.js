@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.8
-//@changes v1.22.8: Copilot 키 회전 수정 — 멀티토큰 캐시 sourceOAuth 추적, 403/401 자동 재시도, rotateFailedToken 캐시 클리어
+//@version 1.22.9
+//@changes v1.22.9: Copilot 400 model_not_supported + CORS 프록시 경로 자동 재시도 수정
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================
@@ -190,7 +190,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.22.8';
+    const CPM_VERSION = '1.22.9';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -7214,19 +7214,27 @@ var CupcakeProviderManager = (function (exports) {
 
         let _result = await _dispatchFetch();
 
-        // ── Copilot 403/401 auto-retry with token rotation ──
-        // When a Copilot request fails with 403 or 401, the cached API token likely
-        // belongs to a lower-tier account (e.g. Free) that cannot access the requested
-        // model.  Clear the token cache, rotate to the next OAuth token, and retry once.
-        if (_result && !_result.success && _isCopilotDomain && !_isProxied &&
-            (_result._status === 403 || _result._status === 401)) {
+        // ── Copilot token rotation auto-retry ──
+        // When a Copilot request fails with 400 (model_not_supported), 403, or 401,
+        // the token likely belongs to a lower-tier account (e.g. Free) that cannot
+        // access the requested model.  Rotate to next OAuth token and retry once.
+        // Works for both direct and proxied paths.
+        const _isCopilotRotatable = _result && !_result.success && _isCopilotDomain && (
+            _result._status === 403 || _result._status === 401 ||
+            (_result._status === 400 && /model_not_supported/i.test(String(_result.content || '')))
+        );
+        if (_isCopilotRotatable) {
             console.warn(`[Cupcake PM] Copilot model "${config.model}" returned HTTP ${_result._status} — rotating token and retrying.`);
             clearCopilotTokenCache();
             if (typeof window !== 'undefined') {
                 const _rotateFn = /** @type {any} */ (window)._cpmCopilotRotateToken;
                 if (typeof _rotateFn === 'function') {
-                    const _cachedOAuth = /** @type {any} */ (window)._cpmCopilotApiToken;
-                    if (_cachedOAuth) await _rotateFn(_cachedOAuth);
+                    // Read the current first OAuth token to rotate it
+                    const _rawToken = await safeGetArg('tools_githubCopilotToken');
+                    const _firstOAuth = (_rawToken || '').split(/\s+/)
+                        .map((/** @type {string} */ t) => t.replace(/[^\x20-\x7E]/g, '').trim())
+                        .filter(Boolean)[0];
+                    if (_firstOAuth) await _rotateFn(_firstOAuth);
                 }
             }
             _result = await _dispatchFetch();

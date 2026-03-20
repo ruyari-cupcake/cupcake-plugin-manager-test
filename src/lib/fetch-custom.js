@@ -852,19 +852,27 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
 
     let _result = await _dispatchFetch();
 
-    // ── Copilot 403/401 auto-retry with token rotation ──
-    // When a Copilot request fails with 403 or 401, the cached API token likely
-    // belongs to a lower-tier account (e.g. Free) that cannot access the requested
-    // model.  Clear the token cache, rotate to the next OAuth token, and retry once.
-    if (_result && !_result.success && _isCopilotDomain && !_isProxied &&
-        (_result._status === 403 || _result._status === 401)) {
+    // ── Copilot token rotation auto-retry ──
+    // When a Copilot request fails with 400 (model_not_supported), 403, or 401,
+    // the token likely belongs to a lower-tier account (e.g. Free) that cannot
+    // access the requested model.  Rotate to next OAuth token and retry once.
+    // Works for both direct and proxied paths.
+    const _isCopilotRotatable = _result && !_result.success && _isCopilotDomain && (
+        _result._status === 403 || _result._status === 401 ||
+        (_result._status === 400 && /model_not_supported/i.test(String(_result.content || '')))
+    );
+    if (_isCopilotRotatable) {
         console.warn(`[Cupcake PM] Copilot model "${config.model}" returned HTTP ${_result._status} — rotating token and retrying.`);
         clearCopilotTokenCache();
         if (typeof window !== 'undefined') {
             const _rotateFn = /** @type {any} */ (window)._cpmCopilotRotateToken;
             if (typeof _rotateFn === 'function') {
-                const _cachedOAuth = /** @type {any} */ (window)._cpmCopilotApiToken;
-                if (_cachedOAuth) await _rotateFn(_cachedOAuth);
+                // Read the current first OAuth token to rotate it
+                const _rawToken = await safeGetArg('tools_githubCopilotToken');
+                const _firstOAuth = (_rawToken || '').split(/\s+/)
+                    .map((/** @type {string} */ t) => t.replace(/[^\x20-\x7E]/g, '').trim())
+                    .filter(Boolean)[0];
+                if (_firstOAuth) await _rotateFn(_firstOAuth);
             }
         }
         _result = await _dispatchFetch();
