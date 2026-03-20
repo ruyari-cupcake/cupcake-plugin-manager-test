@@ -308,6 +308,7 @@ async function handleCopilotProxy(request, url, copilotAuth, overridePath) {
 
   const copilotHeaders = {
     Authorization: `Bearer ${tidToken}`,
+    Accept: isStream ? 'text/event-stream' : 'application/json',
     "Content-Type": "application/json",
     "Copilot-Integration-Id": "vscode-chat",
     "Editor-plugin-version": `copilot-chat/${CHAT_VERSION}`,

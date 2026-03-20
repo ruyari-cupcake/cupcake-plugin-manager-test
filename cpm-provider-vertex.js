@@ -382,11 +382,10 @@
 
                     // BUG-3 FIX: Only enter adaptive path when effort is explicitly set.
                     // Budget-only on 4.6 models should use budget-based path (type: 'enabled').
-                    if (isVertexAdaptive && vertexClaudeEffort) {
+                    if (isVertexAdaptive && vertexClaudeEffort && VERTEX_EFFORT_OPTIONS.includes(vertexClaudeEffort)) {
                         // Claude 4.6: adaptive thinking
                         body.thinking = { type: 'adaptive' };
-                        const effort = VERTEX_EFFORT_OPTIONS.includes(vertexClaudeEffort)
-                            ? vertexClaudeEffort : 'high';
+                        const effort = vertexClaudeEffort;
                         body.output_config = { effort };
                         delete body.temperature;
                         delete body.top_k;
@@ -639,7 +638,7 @@
             id: 'tab-vertex',
             icon: '🔷',
             label: 'Vertex AI',
-            exportKeys: ['cpm_vertex_key_json', 'cpm_vertex_location', 'cpm_vertex_thinking_level', 'cpm_vertex_thinking_budget', 'cpm_vertex_claude_thinking_budget', 'cpm_vertex_claude_effort', 'chat_vertex_preserveSystem', 'chat_vertex_showThoughtsToken', 'chat_vertex_useThoughtSignature', 'cpm_dynamic_vertexai'],
+            exportKeys: ['cpm_vertex_key_json', 'cpm_vertex_location', 'cpm_vertex_thinking_level', 'cpm_vertex_thinking_budget', 'cpm_vertex_claude_thinking_budget', 'cpm_vertex_claude_effort', 'cpm_vertex_claude_cache_ttl', 'chat_vertex_preserveSystem', 'chat_vertex_showThoughtsToken', 'chat_vertex_useThoughtSignature', 'cpm_dynamic_vertexai'],
             renderContent: async (renderInput, lists) => {
                 return `
                     <h3 class="text-3xl font-bold text-blue-400 mb-6 pb-3 border-b border-gray-700">Vertex AI Configuration (설정)</h3>
@@ -652,6 +651,7 @@
                     <h4 class="text-xl font-semibold text-orange-400 mb-3">Claude on Vertex (Model Garden)</h4>
                     ${await renderInput('cpm_vertex_claude_thinking_budget', 'Claude Thinking Budget Tokens (4.5 이하 모델용, 0은 끄기)', 'number')}
                     ${await renderInput('cpm_vertex_claude_effort', 'Adaptive Thinking Effort (4.6 모델용: low/medium/high/max)')}
+                    ${await renderInput('cpm_vertex_claude_cache_ttl', 'Claude Cache TTL (캐시 보존 시간)', 'select', [{ value: '', text: 'Default (5분, GA)' }, { value: '1h', text: 'Extended 1시간 (Beta)' }])}
                     <hr class="my-4 border-gray-700">
                     ${await renderInput('chat_vertex_preserveSystem', 'Preserve System (시스템 프롬프트 보존)', 'checkbox')}
                     ${await renderInput('chat_vertex_showThoughtsToken', 'Show Thoughts Token Info (생각 토큰 알림 표시)', 'checkbox')}

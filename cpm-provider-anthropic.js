@@ -175,9 +175,9 @@
                 // BUG-3 FIX: Only enter adaptive path when effort is explicitly set.
                 // Budget-only on 4.6 models should use budget-based path (type: 'enabled').
                 // RisuAI-main treats effort and budget as independent flows.
-                if (isAdaptiveModel && config.effort) {
+                if (isAdaptiveModel && config.effort && EFFORT_OPTIONS.includes(config.effort)) {
                     body.thinking = { type: 'adaptive' };
-                    const effort = EFFORT_OPTIONS.includes(config.effort) ? config.effort : 'high';
+                    const effort = config.effort;
                     body.output_config = { effort };
                     delete body.temperature;
                     delete body.top_k;

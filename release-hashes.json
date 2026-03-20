@@ -3,9 +3,9 @@
   "files": {
     "provider-manager.js": {
       "version": "1.22.6",
-      "sha256": "c82f8c6959cf40decfaa5be996d4a0651e678db38ced4340d78dd1d0cecd73b4",
-      "size": 623286
+      "sha256": "59a0839d6d87c9a48cbfd7ff1a7a9e2aeb1d5c11ff545edee24c50e1afbac886",
+      "size": 623531
     }
   },
-  "updatedAt": "2026-03-20T09:43:20.232Z"
+  "updatedAt": "2026-03-20T10:06:23.920Z"
 }

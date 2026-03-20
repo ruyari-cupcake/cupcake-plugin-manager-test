@@ -547,7 +547,10 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
             let proxiedCopilotToken = _initialApiKey;
             if (!proxiedCopilotToken) {
                 const _githubToken = await safeGetArg('tools_githubCopilotToken');
-                proxiedCopilotToken = String(_githubToken || '').replace(/[^\x20-\x7E]/g, '').trim();
+                // tools_githubCopilotToken은 공백 구분 멀티 토큰 — 첫 번째(활성) 토큰만 사용
+                const _allTokens = String(_githubToken || '').split(/\s+/)
+                    .map(t => t.replace(/[^\x20-\x7E]/g, '').trim()).filter(Boolean);
+                proxiedCopilotToken = _allTokens[0] || '';
             }
 
             if (!proxiedCopilotToken) {

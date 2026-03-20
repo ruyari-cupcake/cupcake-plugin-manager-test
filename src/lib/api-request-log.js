@@ -8,7 +8,11 @@ import { safeUUID } from './helpers.js';
 const _apiRequestHistory = new Map();
 const _API_REQUEST_HISTORY_MAX = 20;
 
-/** Log response max characters — 0 means unlimited (full response stored for debugging UI) */
+/**
+ * Log response max characters — 0 = unlimited.
+ * @deprecated Intentionally set to 0 in v1.22.6 — response truncation removed.
+ * Kept as export for test backward compatibility only. Ring buffer (20 entries) + streaming cap (512KB) bound memory.
+ */
 export const API_LOG_RESPONSE_MAX_CHARS = 0;
 export const API_LOG_CONSOLE_MAX_CHARS = 8000;
 export const API_LOG_RISU_MAX_CHARS = 2000;
