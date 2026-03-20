@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.9
-//@changes v1.22.9: Copilot 400 model_not_supported + CORS 프록시 경로 자동 재시도 수정
+//@version 1.22.10
+//@changes v1.22.10: Copilot 토큰 회전 디버그 로깅 + 400/403/401 재시도 강화
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================

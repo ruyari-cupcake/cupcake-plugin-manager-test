@@ -857,6 +857,9 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
     // the token likely belongs to a lower-tier account (e.g. Free) that cannot
     // access the requested model.  Rotate to next OAuth token and retry once.
     // Works for both direct and proxied paths.
+    if (_result && !_result.success && _isCopilotDomain) {
+        console.log(`[Cupcake PM v1.22.10] 🔍 Copilot fail-check: status=${_result._status}, statusType=${typeof _result._status}, success=${_result.success}, isCopilotDomain=${_isCopilotDomain}, isProxied=${_isProxied}, contentSnippet="${String(_result.content || '').substring(0, 120)}"`);
+    }
     const _isCopilotRotatable = _result && !_result.success && _isCopilotDomain && (
         _result._status === 403 || _result._status === 401 ||
         (_result._status === 400 && /model_not_supported/i.test(String(_result.content || '')))
@@ -864,18 +867,27 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
     if (_isCopilotRotatable) {
         console.warn(`[Cupcake PM] Copilot model "${config.model}" returned HTTP ${_result._status} — rotating token and retrying.`);
         clearCopilotTokenCache();
-        if (typeof window !== 'undefined') {
-            const _rotateFn = /** @type {any} */ (window)._cpmCopilotRotateToken;
-            if (typeof _rotateFn === 'function') {
-                // Read the current first OAuth token to rotate it
-                const _rawToken = await safeGetArg('tools_githubCopilotToken');
-                const _firstOAuth = (_rawToken || '').split(/\s+/)
-                    .map((/** @type {string} */ t) => t.replace(/[^\x20-\x7E]/g, '').trim())
-                    .filter(Boolean)[0];
-                if (_firstOAuth) await _rotateFn(_firstOAuth);
+        const _rotateFn = (typeof window !== 'undefined') ? /** @type {any} */ (window)._cpmCopilotRotateToken : undefined;
+        if (typeof _rotateFn === 'function') {
+            const _rawToken = await safeGetArg('tools_githubCopilotToken');
+            const _firstOAuth = (_rawToken || '').split(/\s+/)
+                .map((/** @type {string} */ t) => t.replace(/[^\x20-\x7E]/g, '').trim())
+                .filter(Boolean)[0];
+            if (_firstOAuth) {
+                console.log(`[Cupcake PM] Rotating failed token: ${_firstOAuth.substring(0, 8)}...`);
+                await _rotateFn(_firstOAuth);
+            } else {
+                console.warn(`[Cupcake PM] No OAuth token found to rotate.`);
             }
+        } else {
+            console.warn(`[Cupcake PM] _cpmCopilotRotateToken not available — rotation skipped.`);
         }
         _result = await _dispatchFetch();
+        if (_result && !_result.success) {
+            console.warn(`[Cupcake PM] Retry after rotation also failed: status=${_result._status}`);
+        }
+    } else if (_result && !_result.success && _isCopilotDomain && (_result._status === 400 || _result._status === 403 || _result._status === 401)) {
+        console.warn(`[Cupcake PM v1.22.10] ⚠️ Copilot error NOT matched for rotation: _status=${_result._status} (type=${typeof _result._status}), content_has_model_not_supported=${/model_not_supported/i.test(String(_result.content || ''))}`);
     }
 
     // ── temperature+top_p conflict auto-retry (once) ──
