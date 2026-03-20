@@ -1,6 +1,6 @@
 //@name CPM Component - Copilot Token Manager
 //@display-name Cupcake Copilot Manager
-//@version 1.7.13
+//@version 1.7.14
 //@author Cupcake
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager-test/main/cpm-copilot-manager.js
 
@@ -224,6 +224,21 @@
         });
         document.body.appendChild(el);
         setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, duration);
+    }
+
+    /** Clipboard write with execCommand fallback for iframe/Permissions Policy environments */
+    async function _copyToClipboard(text) {
+        try {
+            await navigator.clipboard.writeText(text);
+        } catch {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.cssText = 'position:fixed;left:-9999px;opacity:0';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            ta.remove();
+        }
     }
 
     function escapeHtml(str) {
@@ -632,10 +647,7 @@
     actions.copyToken = async () => {
         const token = await getToken();
         if (!token) { toast('저장된 토큰이 없습니다.'); return; }
-        try { await navigator.clipboard.writeText(token); } catch {
-            const ta = document.createElement('textarea'); ta.value = token; ta.style.cssText = 'position:fixed;left:-9999px';
-            document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
-        }
+        await _copyToClipboard(token);
         toast('토큰이 클립보드에 복사되었습니다.');
     };
 
@@ -688,7 +700,7 @@
                 } else if (action === 'copy-code') {
                     const codeId = btn.dataset.codeId;
                     const text = document.getElementById(codeId)?.textContent ?? '';
-                    navigator.clipboard.writeText(text).then(() => {});
+                    _copyToClipboard(text).then(() => {});
                 }
             });
             document.body.appendChild(dialog);
@@ -1056,7 +1068,7 @@
         if (action === 'copy-code') {
             const codeId = btn.dataset.codeId;
             const text = document.getElementById(codeId)?.textContent ?? '';
-            navigator.clipboard.writeText(text).then(() => {});
+            _copyToClipboard(text).then(() => {});
             return;
         }
 
@@ -1078,7 +1090,7 @@
         }
         if (action === 'tokenCopy') {
             const idx = parseInt(btn.dataset.tokenIdx);
-            if (!isNaN(idx)) { getTokens().then(tokens => { if (tokens[idx]) { navigator.clipboard.writeText(tokens[idx]).then(() => toast('토큰이 복사되었습니다.')); } }); }
+            if (!isNaN(idx)) { getTokens().then(tokens => { if (tokens[idx]) { _copyToClipboard(tokens[idx]).then(() => toast('토큰이 복사되었습니다.')); } }); }
             return;
         }
         if (action === 'addToken') {

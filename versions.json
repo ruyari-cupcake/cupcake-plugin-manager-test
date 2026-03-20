@@ -40,9 +40,9 @@
     "changes": "v0.3.6: 전체 서브플러그인 버전 동기화 릴리즈"
   },
   "CPM Component - Copilot Token Manager": {
-    "version": "1.7.13",
+    "version": "1.7.14",
     "file": "cpm-copilot-manager.js",
-    "changes": "v1.7.13: /copilot_internal/user 엔드포인트로 플랜 판별 (/v2/token sku는 모든 계정 동일값), copilot_plan+quota_snapshots+codex_agent_enabled 기반 분류"
+    "changes": "v1.7.14: Clipboard API Permissions Policy 차단 수정 — execCommand fallback 적용, iframe 환경 호환"
   },
   "CPM Component - Translation Cache Manager": {
     "version": "1.4.0",
