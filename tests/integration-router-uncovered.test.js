@@ -54,6 +54,9 @@ vi.mock('../src/lib/sanitize.js', () => ({ sanitizeMessages: (...a) => h.sanitiz
 vi.mock('../src/lib/slot-inference.js', () => ({ inferSlot: (...a) => h.inferSlot(...a) }));
 vi.mock('../src/lib/fetch-custom.js', () => ({ fetchCustom: (...a) => h.fetchCustom(...a) }));
 vi.mock('../src/lib/api-request-log.js', () => ({
+    API_LOG_RESPONSE_MAX_CHARS: 0,
+    API_LOG_CONSOLE_MAX_CHARS: 8000,
+    API_LOG_RISU_MAX_CHARS: 2000,
     storeApiRequest: (...a) => h.storeReq(...a),
     updateApiRequest: (...a) => h.updateReq(...a),
     getAllApiRequests: vi.fn(() => []),

@@ -15,6 +15,7 @@ import { hasNonEmptyMessageContent, parseBase64DataUri } from './helpers.js';
  * @param {boolean} [config.altrole] - Convert assistant→model (for Gemini-style APIs)
  * @param {boolean} [config.sysfirst] - Move first system message to top
  * @param {boolean} [config.developerRole] - Convert system→developer (GPT-5 series)
+ * @param {boolean} [config.copilotCacheControl] - Add copilot_cache_control to top messages
  * @returns {Array<any>} Formatted messages array
  */
 export function formatToOpenAI(messages, config = {}) {
@@ -161,6 +162,26 @@ export function formatToOpenAI(messages, config = {}) {
     if (config.developerRole) {
         for (const m of arr) {
             if (m.role === 'system') m.role = 'developer';
+        }
+    }
+
+    // Non-standard copilot_cache_control: {type: "ephemeral"}
+    // Copilot-specific extension for OpenAI format caching (비표준 방식)
+    // Max 4 blocks, sorted by content size descending (largest cached first)
+    if (config.copilotCacheControl) {
+        /** @type {{ idx: number, size: number }[]} */
+        const candidates = [];
+        for (let i = 0; i < arr.length; i++) {
+            const c = arr[i].content;
+            const size = typeof c === 'string' ? c.length
+                : Array.isArray(c) ? c.reduce((/** @type {number} */ s, /** @type {any} */ p) => s + (p.text?.length || 0), 0)
+                : 0;
+            if (size > 0) candidates.push({ idx: i, size });
+        }
+        candidates.sort((a, b) => b.size - a.size);
+        const topN = candidates.slice(0, 4);
+        for (const { idx } of topN) {
+            /** @type {any} */ (arr[idx]).copilot_cache_control = { type: 'ephemeral' };
         }
     }
 

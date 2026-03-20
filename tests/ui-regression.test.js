@@ -76,6 +76,9 @@ vi.mock('../src/lib/sub-plugin-manager.js', () => ({
 }));
 
 vi.mock('../src/lib/api-request-log.js', () => ({
+    API_LOG_RESPONSE_MAX_CHARS: 0,
+    API_LOG_CONSOLE_MAX_CHARS: 8000,
+    API_LOG_RISU_MAX_CHARS: 2000,
     getAllApiRequests: vi.fn(() => mockApiState.requests.slice()),
     getApiRequestById: vi.fn((id) => mockApiState.requests.find(r => r.id === id) || null),
     storeApiRequest: vi.fn(),

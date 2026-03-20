@@ -59,6 +59,9 @@ vi.mock('../src/lib/fetch-custom.js', () => ({
     fetchCustom: (...args) => h.fetchCustom(...args),
 }));
 vi.mock('../src/lib/api-request-log.js', () => ({
+    API_LOG_RESPONSE_MAX_CHARS: 0,
+    API_LOG_CONSOLE_MAX_CHARS: 8000,
+    API_LOG_RISU_MAX_CHARS: 2000,
     storeApiRequest: (...args) => h.storeReq(...args),
     updateApiRequest: (...args) => h.updateReq(...args),
     getAllApiRequests: vi.fn(() => []),

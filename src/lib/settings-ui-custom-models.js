@@ -141,6 +141,8 @@ export function renderCustomModelEditor(thinkingList, reasoningList, verbosityLi
                         <label class="flex items-center space-x-2 text-sm text-gray-300"><input type="checkbox" id="cpm-cm-thought" class="form-checkbox bg-gray-800"> <span>useThoughtSignature</span></label>
                         <label class="flex items-center space-x-2 text-sm text-gray-300"><input type="checkbox" id="cpm-cm-adaptive-thinking" class="form-checkbox bg-gray-800"> <span>useAdaptiveThinking (적응형 사고)</span></label>
                         <p class="text-[11px] text-amber-400/70 ml-6 -mt-1">⚠️ 추론 기능의 필수 스위치. 끄면 추론이 작동하지 않습니다. 스트리밍 권장. 로컬리스는 스트리밍 버그 주의.</p>
+                        <label class="flex items-center space-x-2 text-sm text-gray-300"><input type="checkbox" id="cpm-cm-copilot-cache" class="form-checkbox bg-gray-800"> <span>Copilot Cache Control <span class="text-xs text-yellow-400">(비표준)</span></span></label>
+                        <p class="text-[11px] text-cyan-400/70 ml-6 -mt-1">ℹ️ Copilot 전용 비표준 캐싱. OpenAI 포맷 메시지에 copilot_cache_control: {type:"ephemeral"}을 추가합니다. 가장 큰 메시지 4개에 적용됩니다.</p>
                     </div>
                 </div>
                 <div class="md:col-span-2 mt-4 border-t border-gray-800 pt-4">
@@ -186,6 +188,7 @@ export function populateEditor(m) {
     getCheckbox('cpm-cm-streaming').checked = (m.streaming === true) || (m.streaming !== false && !m.decoupled);
     getCheckbox('cpm-cm-thought').checked = !!m.thought;
     getCheckbox('cpm-cm-adaptive-thinking').checked = !!m.adaptiveThinking;
+    getCheckbox('cpm-cm-copilot-cache').checked = !!m.copilotCacheControl;
     getField('cpm-cm-custom-params').value = m.customParams || '';
 }
 
@@ -205,7 +208,7 @@ export function clearEditor() {
     getField('cpm-cm-reasoning').value = 'none';
     getField('cpm-cm-verbosity').value = 'none';
     getField('cpm-cm-effort').value = 'none';
-    ['sysfirst', 'mergesys', 'altrole', 'mustuser', 'maxout', 'thought', 'streaming', 'adaptive-thinking'].forEach(id => { getCheckbox(`cpm-cm-${id}`).checked = false; });
+    ['sysfirst', 'mergesys', 'altrole', 'mustuser', 'maxout', 'thought', 'streaming', 'adaptive-thinking', 'copilot-cache'].forEach(id => { getCheckbox(`cpm-cm-${id}`).checked = false; });
     getField('cpm-cm-custom-params').value = '';
 }
 
@@ -240,6 +243,7 @@ export function readEditorValues(uid) {
         decoupled: !getCheckbox('cpm-cm-streaming').checked,
         thought: getCheckbox('cpm-cm-thought').checked,
         adaptiveThinking: getCheckbox('cpm-cm-adaptive-thinking').checked,
+        copilotCacheControl: getCheckbox('cpm-cm-copilot-cache').checked,
         customParams: getField('cpm-cm-custom-params').value,
     });
 }

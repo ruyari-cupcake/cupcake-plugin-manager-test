@@ -1,5 +1,5 @@
 //@name CPM Provider - Vertex AI
-//@version 1.6.6
+//@version 1.6.7
 //@description Google Vertex AI (Service Account) provider for Cupcake PM (Streaming, Key Rotation)
 //@icon 🔷
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-provider-vertex.js
@@ -259,7 +259,8 @@
             const _vtxCacheRaw = await CPM.safeGetArg('chat_claude_caching');
             const _vtxCacheTtl = await CPM.safeGetArg('cpm_vertex_claude_cache_ttl');
             const _vtxCacheTtlNorm = String(_vtxCacheTtl || '').trim().toLowerCase();
-            const _vtxOneHourCaching = _vtxCacheTtlNorm === '1h' || String(_vtxCacheRaw || '').trim().toLowerCase() === '1h';
+            // BUG-CACHE-1 FIX: cacheEnabled가 false이면 oneHourCaching도 false여야 함
+            const _vtxOneHourCaching = !!_vtxCacheEnabled && (_vtxCacheTtlNorm === '1h' || String(_vtxCacheRaw || '').trim().toLowerCase() === '1h');
             const _so = args?._cpmSlotThinkingConfig || {};
             const config = {
                 location: await CPM.safeGetArg('cpm_vertex_location'),
@@ -270,7 +271,7 @@
                 preserveSystem: await CPM.safeGetBoolArg('chat_vertex_preserveSystem', true),
                 showThoughtsToken: await CPM.safeGetBoolArg('chat_vertex_showThoughtsToken'),
                 useThoughtSignature: await CPM.safeGetBoolArg('chat_vertex_useThoughtSignature'),
-                caching: !!_vtxCacheEnabled || _vtxOneHourCaching,
+                caching: !!_vtxCacheEnabled,
                 claude1HourCaching: _vtxOneHourCaching,
             };
 

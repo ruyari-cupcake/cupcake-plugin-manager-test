@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.5
-//@changes v1.22.5: 범용 CORS 프록시 워커 추가, Rewrite 모드 X-Target-URL 전달 지원
+//@version 1.22.6
+//@changes v1.22.6: Copilot 401 수정 (프록시 라우팅), copilot_cache_control 추가, 로그 제한 제거
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================
@@ -190,7 +190,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.22.5';
+    const CPM_VERSION = '1.22.6';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -899,6 +899,7 @@ var CupcakeProviderManager = (function (exports) {
      * @param {boolean} [config.altrole] - Convert assistant→model (for Gemini-style APIs)
      * @param {boolean} [config.sysfirst] - Move first system message to top
      * @param {boolean} [config.developerRole] - Convert system→developer (GPT-5 series)
+     * @param {boolean} [config.copilotCacheControl] - Add copilot_cache_control to top messages
      * @returns {Array<any>} Formatted messages array
      */
     function formatToOpenAI(messages, config = {}) {
@@ -1045,6 +1046,26 @@ var CupcakeProviderManager = (function (exports) {
         if (config.developerRole) {
             for (const m of arr) {
                 if (m.role === 'system') m.role = 'developer';
+            }
+        }
+
+        // Non-standard copilot_cache_control: {type: "ephemeral"}
+        // Copilot-specific extension for OpenAI format caching (비표준 방식)
+        // Max 4 blocks, sorted by content size descending (largest cached first)
+        if (config.copilotCacheControl) {
+            /** @type {{ idx: number, size: number }[]} */
+            const candidates = [];
+            for (let i = 0; i < arr.length; i++) {
+                const c = arr[i].content;
+                const size = typeof c === 'string' ? c.length
+                    : Array.isArray(c) ? c.reduce((/** @type {number} */ s, /** @type {any} */ p) => s + (p.text?.length || 0), 0)
+                    : 0;
+                if (size > 0) candidates.push({ idx: i, size });
+            }
+            candidates.sort((a, b) => b.size - a.size);
+            const topN = candidates.slice(0, 4);
+            for (const { idx } of topN) {
+                /** @type {any} */ (arr[idx]).copilot_cache_control = { type: 'ephemeral' };
             }
         }
 
@@ -2520,6 +2541,8 @@ var CupcakeProviderManager = (function (exports) {
 
     const _apiRequestHistory = new Map();
     const _API_REQUEST_HISTORY_MAX = 20;
+    const API_LOG_CONSOLE_MAX_CHARS = 8000;
+    const API_LOG_RISU_MAX_CHARS = 2000;
     /** @type {string | null} */
     let _apiRequestLatestId = null;
 
@@ -6886,6 +6909,9 @@ var CupcakeProviderManager = (function (exports) {
                 }
 
                 headers['Authorization'] = `Bearer ${proxiedCopilotToken}`;
+                // X-Copilot-Auth 헤더로 OAuth 토큰 전달 → 프록시가 tid 토큰 교환 수행
+                // 이 헤더가 있으면 프록시는 generic handler 대신 Copilot handler를 사용
+                headers['X-Copilot-Auth'] = proxiedCopilotToken;
             }
 
             // Copilot headers — skip when using CORS proxy (proxy handles token exchange + headers)
@@ -7091,7 +7117,7 @@ var CupcakeProviderManager = (function (exports) {
                         fallbackData = JSON.parse(fallbackText);
                     } catch (_jsonErr) {
                         const contentType = fallbackRes.headers?.get?.('content-type') || 'unknown';
-                        if (_reqId) updateApiRequest(_reqId, { response: `[Parse Error: content-type=${contentType}]\n${fallbackText.substring(0, 4000)}` });
+                        if (_reqId) updateApiRequest(_reqId, { response: `[Parse Error: content-type=${contentType}]\n${fallbackText}` });
                         return { success: false, content: `[Custom API Error] Response is not JSON (${contentType}): ${fallbackText.substring(0, 1000)}`, _status: fallbackRes.status };
                     }
                     if (_reqId) updateApiRequest(_reqId, { response: fallbackData });
@@ -7142,14 +7168,14 @@ var CupcakeProviderManager = (function (exports) {
             }
 
             const _rawResponseText = await res.text();
-            if (_reqId) updateApiRequest(_reqId, { response: _rawResponseText.substring(0, 4000) });
+            if (_reqId) updateApiRequest(_reqId, { response: _rawResponseText });
 
             let data;
             try {
                 data = JSON.parse(_rawResponseText);
             } catch (_jsonErr) {
                 const contentType = res.headers?.get?.('content-type') || 'unknown';
-                if (_reqId) updateApiRequest(_reqId, { response: `[Parse Error: content-type=${contentType}]\n${_rawResponseText.substring(0, 4000)}` });
+                if (_reqId) updateApiRequest(_reqId, { response: `[Parse Error: content-type=${contentType}]\n${_rawResponseText}` });
                 return { success: false, content: `[Custom API Error] Response is not JSON (${contentType}): ${_rawResponseText.substring(0, 1000)}`, _status: res.status };
             }
             if (_reqId) updateApiRequest(_reqId, { response: data });
@@ -8262,7 +8288,8 @@ var CupcakeProviderManager = (function (exports) {
                     showThoughtsToken: !!cDef.thought, useThoughtSignature: !!cDef.thought,
                     customParams: cDef.customParams || '', copilotToken: '',
                     effort: _so.effort || cDef.effort || 'none',
-                    adaptiveThinking: _so.adaptiveThinking || !!cDef.adaptiveThinking
+                    adaptiveThinking: _so.adaptiveThinking || !!cDef.adaptiveThinking,
+                    copilotCacheControl: !!cDef.copilotCacheControl
                 };
 
                 // ── Tool-Use Layer 2: CPM standalone tool-use loop ──
@@ -8429,9 +8456,9 @@ var CupcakeProviderManager = (function (exports) {
         const _showTokens = await safeGetBoolArg('cpm_show_token_usage', false);
         const _logResponse = (/** @type {any} */ contentStr, prefix = '📥 Response') => {
             const safeContent = typeof contentStr === 'string' ? contentStr : (contentStr == null ? '' : String(contentStr));
-            updateApiRequest(_reqId, { response: safeContent.substring(0, 4000) });
-            console.log(`[CupcakePM] ${prefix} (${_displayName}):`, safeContent.substring(0, 2000));
-            try { Risu$1.log(`${prefix} (${_displayName}): ${safeContent.substring(0, 500)}`); } catch {}
+            updateApiRequest(_reqId, { response: safeContent });
+            console.log(`[CupcakePM] ${prefix} (${_displayName}):`, safeContent.substring(0, API_LOG_CONSOLE_MAX_CHARS));
+            try { Risu$1.log(`${prefix} (${_displayName}): ${safeContent.substring(0, API_LOG_RISU_MAX_CHARS)}`); } catch {}
         };
 
         // Streaming pass-through
@@ -8903,6 +8930,8 @@ var CupcakeProviderManager = (function (exports) {
                         <label class="flex items-center space-x-2 text-sm text-gray-300"><input type="checkbox" id="cpm-cm-thought" class="form-checkbox bg-gray-800"> <span>useThoughtSignature</span></label>
                         <label class="flex items-center space-x-2 text-sm text-gray-300"><input type="checkbox" id="cpm-cm-adaptive-thinking" class="form-checkbox bg-gray-800"> <span>useAdaptiveThinking (적응형 사고)</span></label>
                         <p class="text-[11px] text-amber-400/70 ml-6 -mt-1">⚠️ 추론 기능의 필수 스위치. 끄면 추론이 작동하지 않습니다. 스트리밍 권장. 로컬리스는 스트리밍 버그 주의.</p>
+                        <label class="flex items-center space-x-2 text-sm text-gray-300"><input type="checkbox" id="cpm-cm-copilot-cache" class="form-checkbox bg-gray-800"> <span>Copilot Cache Control <span class="text-xs text-yellow-400">(비표준)</span></span></label>
+                        <p class="text-[11px] text-cyan-400/70 ml-6 -mt-1">ℹ️ Copilot 전용 비표준 캐싱. OpenAI 포맷 메시지에 copilot_cache_control: {type:"ephemeral"}을 추가합니다. 가장 큰 메시지 4개에 적용됩니다.</p>
                     </div>
                 </div>
                 <div class="md:col-span-2 mt-4 border-t border-gray-800 pt-4">
@@ -8948,6 +8977,7 @@ var CupcakeProviderManager = (function (exports) {
         getCheckbox('cpm-cm-streaming').checked = (m.streaming === true) || (m.streaming !== false && !m.decoupled);
         getCheckbox('cpm-cm-thought').checked = !!m.thought;
         getCheckbox('cpm-cm-adaptive-thinking').checked = !!m.adaptiveThinking;
+        getCheckbox('cpm-cm-copilot-cache').checked = !!m.copilotCacheControl;
         getField('cpm-cm-custom-params').value = m.customParams || '';
     }
 
@@ -8967,7 +8997,7 @@ var CupcakeProviderManager = (function (exports) {
         getField('cpm-cm-reasoning').value = 'none';
         getField('cpm-cm-verbosity').value = 'none';
         getField('cpm-cm-effort').value = 'none';
-        ['sysfirst', 'mergesys', 'altrole', 'mustuser', 'maxout', 'thought', 'streaming', 'adaptive-thinking'].forEach(id => { getCheckbox(`cpm-cm-${id}`).checked = false; });
+        ['sysfirst', 'mergesys', 'altrole', 'mustuser', 'maxout', 'thought', 'streaming', 'adaptive-thinking', 'copilot-cache'].forEach(id => { getCheckbox(`cpm-cm-${id}`).checked = false; });
         getField('cpm-cm-custom-params').value = '';
     }
 
@@ -9002,6 +9032,7 @@ var CupcakeProviderManager = (function (exports) {
             decoupled: !getCheckbox('cpm-cm-streaming').checked,
             thought: getCheckbox('cpm-cm-thought').checked,
             adaptiveThinking: getCheckbox('cpm-cm-adaptive-thinking').checked,
+            copilotCacheControl: getCheckbox('cpm-cm-copilot-cache').checked,
             customParams: getField('cpm-cm-custom-params').value,
         });
     }

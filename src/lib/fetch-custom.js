@@ -558,6 +558,9 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
             }
 
             headers['Authorization'] = `Bearer ${proxiedCopilotToken}`;
+            // X-Copilot-Auth 헤더로 OAuth 토큰 전달 → 프록시가 tid 토큰 교환 수행
+            // 이 헤더가 있으면 프록시는 generic handler 대신 Copilot handler를 사용
+            headers['X-Copilot-Auth'] = proxiedCopilotToken;
         }
 
         // Copilot headers — skip when using CORS proxy (proxy handles token exchange + headers)
@@ -763,7 +766,7 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
                     fallbackData = JSON.parse(fallbackText);
                 } catch (_jsonErr) {
                     const contentType = fallbackRes.headers?.get?.('content-type') || 'unknown';
-                    if (_reqId) _updateApiRequest(_reqId, { response: `[Parse Error: content-type=${contentType}]\n${fallbackText.substring(0, 4000)}` });
+                    if (_reqId) _updateApiRequest(_reqId, { response: `[Parse Error: content-type=${contentType}]\n${fallbackText}` });
                     return { success: false, content: `[Custom API Error] Response is not JSON (${contentType}): ${fallbackText.substring(0, 1000)}`, _status: fallbackRes.status };
                 }
                 if (_reqId) _updateApiRequest(_reqId, { response: fallbackData });
@@ -814,14 +817,14 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
         }
 
         const _rawResponseText = await res.text();
-        if (_reqId) _updateApiRequest(_reqId, { response: _rawResponseText.substring(0, 4000) });
+        if (_reqId) _updateApiRequest(_reqId, { response: _rawResponseText });
 
         let data;
         try {
             data = JSON.parse(_rawResponseText);
         } catch (_jsonErr) {
             const contentType = res.headers?.get?.('content-type') || 'unknown';
-            if (_reqId) _updateApiRequest(_reqId, { response: `[Parse Error: content-type=${contentType}]\n${_rawResponseText.substring(0, 4000)}` });
+            if (_reqId) _updateApiRequest(_reqId, { response: `[Parse Error: content-type=${contentType}]\n${_rawResponseText}` });
             return { success: false, content: `[Custom API Error] Response is not JSON (${contentType}): ${_rawResponseText.substring(0, 1000)}`, _status: res.status };
         }
         if (_reqId) _updateApiRequest(_reqId, { response: data });

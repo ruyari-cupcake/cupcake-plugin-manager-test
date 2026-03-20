@@ -12,6 +12,8 @@ import {
     storeApiRequest as _storeApiRequest,
     updateApiRequest as _updateApiRequest,
     getAllApiRequests as _getAllApiRequests,
+    API_LOG_CONSOLE_MAX_CHARS,
+    API_LOG_RISU_MAX_CHARS,
 } from './api-request-log.js';
 import { _takeTokenUsage } from './token-usage.js';
 import { showTokenUsageToast as _showTokenUsageToast } from './token-toast.js';
@@ -141,7 +143,8 @@ export async function fetchByProviderId(modelDef, args, abortSignal, _reqId) {
                 showThoughtsToken: !!cDef.thought, useThoughtSignature: !!cDef.thought,
                 customParams: cDef.customParams || '', copilotToken: '',
                 effort: _so.effort || cDef.effort || 'none',
-                adaptiveThinking: _so.adaptiveThinking || !!cDef.adaptiveThinking
+                adaptiveThinking: _so.adaptiveThinking || !!cDef.adaptiveThinking,
+                copilotCacheControl: !!cDef.copilotCacheControl
             };
 
             // ── Tool-Use Layer 2: CPM standalone tool-use loop ──
@@ -310,9 +313,9 @@ export async function handleRequest(args, activeModelDef, abortSignal) {
     const _apiRequestHistory = { get: (/** @type {string} */ _id) => { /* placeholder — actual data comes from api-request-log module */ } };
     const _logResponse = (/** @type {any} */ contentStr, prefix = '📥 Response') => {
         const safeContent = typeof contentStr === 'string' ? contentStr : (contentStr == null ? '' : String(contentStr));
-        _updateApiRequest(_reqId, { response: safeContent.substring(0, 4000) });
-        console.log(`[CupcakePM] ${prefix} (${_displayName}):`, safeContent.substring(0, 2000));
-        try { Risu.log(`${prefix} (${_displayName}): ${safeContent.substring(0, 500)}`); } catch {}
+        _updateApiRequest(_reqId, { response: safeContent });
+        console.log(`[CupcakePM] ${prefix} (${_displayName}):`, safeContent.substring(0, API_LOG_CONSOLE_MAX_CHARS));
+        try { Risu.log(`${prefix} (${_displayName}): ${safeContent.substring(0, API_LOG_RISU_MAX_CHARS)}`); } catch {}
     };
 
     // Streaming pass-through

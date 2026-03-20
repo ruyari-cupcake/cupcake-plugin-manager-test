@@ -29,8 +29,8 @@
 // ── Copilot 호환 상수 (Copilot 모드 전용) ──
 const COPILOT_TOKEN_URL = "https://api.github.com/copilot_internal/v2/token";
 const COPILOT_API_BASE = "https://api.githubcopilot.com";
-const CHAT_VERSION = "0.26.2025030601";
-const CODE_VERSION = "1.99.2025030601";
+const CHAT_VERSION = "0.26.2025032001";
+const CODE_VERSION = "1.99.2025032001";
 const USER_AGENT = `GitHubCopilotChat/${CHAT_VERSION}`;
 
 const COPILOT_PATHS = new Set([
@@ -106,6 +106,17 @@ function resolveTargetUrl(request, url) {
   // 1순위: X-Target-URL 헤더 (CPM Direct/Rewrite 모드 모두 전송)
   const xTargetUrl = request.headers.get("X-Target-URL");
   if (xTargetUrl) {
+    // Copilot 도메인 + X-Copilot-Auth → Copilot 핸들러로 라우팅 (tid 토큰 교환 필요)
+    const copilotAuth = request.headers.get("X-Copilot-Auth");
+    if (copilotAuth) {
+      try {
+        const targetHost = new URL(xTargetUrl).hostname.toLowerCase();
+        if (targetHost.includes("githubcopilot.com")) {
+          const targetPath = new URL(xTargetUrl).pathname;
+          return { targetUrl: xTargetUrl, mode: "copilot", copilotAuth, copilotPath: targetPath };
+        }
+      } catch { /* invalid URL — fall through to generic */ }
+    }
     return { targetUrl: xTargetUrl, mode: "header" };
   }
 
@@ -183,7 +194,7 @@ export default {
     // 모드 B: Copilot 호환 (기존 Copilot 프록시와 동일)
     // ═══════════════════════════════════════════════════
     if (resolved.mode === "copilot") {
-      return await handleCopilotProxy(request, url, resolved.copilotAuth);
+      return await handleCopilotProxy(request, url, resolved.copilotAuth, resolved.copilotPath);
     }
 
     // ── 알 수 없는 요청 ──
@@ -261,7 +272,7 @@ async function handleGenericProxy(request, targetUrl, mode) {
 // ══════════════════════════════════════════════════════════
 // Copilot 호환 프록시 핸들러
 // ══════════════════════════════════════════════════════════
-async function handleCopilotProxy(request, url, copilotAuth) {
+async function handleCopilotProxy(request, url, copilotAuth, overridePath) {
   if (request.method !== "POST") {
     return jsonError("Method Not Allowed", 405);
   }
@@ -292,7 +303,7 @@ async function handleCopilotProxy(request, url, copilotAuth) {
     rawBody.includes('"stream":true') || rawBody.includes('"stream": true');
 
   const sessionId = crypto.randomUUID() + Date.now().toString();
-  const targetPath = normalizeCopilotPath(url.pathname);
+  const targetPath = normalizeCopilotPath(overridePath || url.pathname);
   const copilotUrl = `${COPILOT_API_BASE}${targetPath}`;
 
   const copilotHeaders = {

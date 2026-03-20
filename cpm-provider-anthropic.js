@@ -1,5 +1,5 @@
 //@name CPM Provider - Anthropic
-//@version 1.6.7
+//@version 1.6.8
 //@description Anthropic Claude provider for Cupcake PM (Streaming, Key Rotation)
 //@icon 🟠
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-provider-anthropic.js
@@ -99,14 +99,16 @@
             const cacheRaw = await CPM.safeGetArg('chat_claude_caching');
             const cacheTtl = await CPM.safeGetArg('cpm_anthropic_cache_ttl');
             const cacheTtlNormalized = String(cacheTtl || '').trim().toLowerCase();
-            const oneHourCaching = cacheTtlNormalized === '1h' || String(cacheRaw || '').trim().toLowerCase() === '1h';
+            // BUG-CACHE-1 FIX: cacheEnabled가 false이면 oneHourCaching도 false여야 함
+            // 이전 버그: TTL 드롭다운이 '1h'로 남아있으면 체크박스 해제해도 캐싱이 강제 활성화됨
+            const oneHourCaching = !!cacheEnabled && (cacheTtlNormalized === '1h' || String(cacheRaw || '').trim().toLowerCase() === '1h');
             const _so = args?._cpmSlotThinkingConfig || {};
             const config = {
                 url: await CPM.safeGetArg('cpm_anthropic_url'),
                 model: await CPM.safeGetArg('cpm_anthropic_model') || modelDef.id,
                 budget: _so.thinkingBudget || await CPM.safeGetArg('cpm_anthropic_thinking_budget'),
                 effort: _so.effort || await CPM.safeGetArg('cpm_anthropic_thinking_effort'),
-                caching: !!cacheEnabled || oneHourCaching,
+                caching: !!cacheEnabled,
                 claude1HourCaching: oneHourCaching,
             };
 

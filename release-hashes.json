@@ -1,67 +1,11 @@
 {
-  "timestamp": "2026-03-19T17:53:14.459Z",
-  "version": "1.22.5",
+  "version": "1.22.6",
   "files": {
-    "cpm-provider-vertex.js": {
-      "version": "1.6.6",
-      "sha256": "3b857d51b108d64415240a34119be5f438947d1145aecec1e5694b4db5b56370",
-      "size": 40834
-    },
-    "cpm-provider-gemini.js": {
-      "version": "1.6.6",
-      "sha256": "10de33ad6def6b153e20c8f0a263df3afa0558b56fd2b49b091bbab47caf5b92",
-      "size": 15447
-    },
-    "cpm-provider-anthropic.js": {
-      "version": "1.6.7",
-      "sha256": "4c309efc36781db1df9f669a444f44f9d69747f5df0ae5df38d4c2042ffd49d7",
-      "size": 17213
-    },
-    "cpm-provider-openai.js": {
-      "version": "1.5.9",
-      "sha256": "6f3e92ef1b291163e27ca3005d05189ed3911e0ed4647af4554110361360813e",
-      "size": 23685
-    },
-    "cpm-provider-deepseek.js": {
-      "version": "1.4.5",
-      "sha256": "760841d248509ab7a9bc23a01ff97e783ae4a60a858aa8a4b6a84be96dcae015",
-      "size": 10174
-    },
-    "cpm-provider-openrouter.js": {
-      "version": "1.3.6",
-      "sha256": "a64843cc9a19d8eff6939f43f27155c9c4f5d3cac918532b82c37ae0c4601d99",
-      "size": 11141
-    },
-    "cpm-provider-aws.js": {
-      "version": "1.5.3",
-      "sha256": "fbb24636ffd0c21e902f719aebf81563ec97d5f5170e0286176a2dc5055fcb61",
-      "size": 27535
-    },
-    "cpm-chat-resizer.js": {
-      "version": "0.3.6",
-      "sha256": "eee0be99bfabf66edfc156aced5f94b4dde6382006719cd420ead75767a5a99f",
-      "size": 22194
-    },
-    "cpm-copilot-manager.js": {
-      "version": "1.7.13",
-      "sha256": "b034af0a85df2c07f8d4fc94b0d424121e8172c6e13c39af3a06fce768186f7f",
-      "size": 73941
-    },
-    "cpm-translation-cache.js": {
-      "version": "1.4.0",
-      "sha256": "8e4d36cab4cb1b526f54a88fa928c354d7d03e6994d395f5876a6595e990b3e4",
-      "size": 52594
-    },
-    "cpm-chat-navigation.js": {
-      "version": "2.1.3",
-      "sha256": "3a32ca4e166125d2c6303491f51bf77ccf3052f6398c20350cbcbab5d8c9be12",
-      "size": 22781
-    },
     "provider-manager.js": {
-      "version": "1.22.5",
-      "sha256": "005a259c6c2864c53eb61f7828ffe1d47e06f57f65515006cc0707fb338913ff",
-      "size": 607428
+      "version": "1.22.6",
+      "sha256": "c82f8c6959cf40decfaa5be996d4a0651e678db38ced4340d78dd1d0cecd73b4",
+      "size": 623286
     }
   },
-  "bundleHash": "50e3a059b734ae12affea8af2f5e0208e01e53eaa7cbf5f7c57c9bd993fdb330"
+  "updatedAt": "2026-03-20T09:43:20.232Z"
 }

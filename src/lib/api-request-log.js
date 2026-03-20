@@ -7,6 +7,11 @@ import { safeUUID } from './helpers.js';
 
 const _apiRequestHistory = new Map();
 const _API_REQUEST_HISTORY_MAX = 20;
+
+/** Log response max characters — 0 means unlimited (full response stored for debugging UI) */
+export const API_LOG_RESPONSE_MAX_CHARS = 0;
+export const API_LOG_CONSOLE_MAX_CHARS = 8000;
+export const API_LOG_RISU_MAX_CHARS = 2000;
 /** @type {string | null} */
 let _apiRequestLatestId = null;
 

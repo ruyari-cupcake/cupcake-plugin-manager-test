@@ -80,6 +80,7 @@ function setupDom() {
                 <input type="checkbox" id="cpm-cm-streaming">
                 <input type="checkbox" id="cpm-cm-thought">
                 <input type="checkbox" id="cpm-cm-adaptive-thinking">
+                <input type="checkbox" id="cpm-cm-copilot-cache">
                 <textarea id="cpm-cm-custom-params"></textarea>
                 <button id="cpm-cm-cancel">Cancel</button>
                 <button id="cpm-cm-save">Save</button>

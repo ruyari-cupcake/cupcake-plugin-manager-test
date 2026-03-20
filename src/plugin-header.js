@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.5
-//@changes v1.22.5: 범용 CORS 프록시 워커 추가, Rewrite 모드 X-Target-URL 전달 지원
+//@version 1.22.6
+//@changes v1.22.6: Copilot 401 수정 (프록시 라우팅), copilot_cache_control 추가, 로그 제한 제거
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================

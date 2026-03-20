@@ -36,6 +36,9 @@ vi.mock('../src/lib/shared-state.js', async (importOriginal) => {
 
 // ── Mock api-request-log ──
 vi.mock('../src/lib/api-request-log.js', () => ({
+    API_LOG_RESPONSE_MAX_CHARS: 0,
+    API_LOG_CONSOLE_MAX_CHARS: 8000,
+    API_LOG_RISU_MAX_CHARS: 2000,
     updateApiRequest: vi.fn(),
     storeApiRequest: vi.fn(() => 'req-e2e'),
     getAllApiRequests: vi.fn(() => []),
