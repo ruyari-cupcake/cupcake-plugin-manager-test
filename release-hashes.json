@@ -1,11 +1,11 @@
 {
-  "version": "1.22.6",
+  "version": "1.22.7",
   "files": {
     "provider-manager.js": {
-      "version": "1.22.6",
-      "sha256": "59a0839d6d87c9a48cbfd7ff1a7a9e2aeb1d5c11ff545edee24c50e1afbac886",
-      "size": 623531
+      "version": "1.22.7",
+      "sha256": "6cc34c46899363a55b12cfeeb39fb4d87eea4219bc7214fdda470c03bbbb0d66",
+      "size": 623517
     }
   },
-  "updatedAt": "2026-03-20T10:06:23.920Z"
+  "updatedAt": "2026-03-20T10:57:47.430Z"
 }
