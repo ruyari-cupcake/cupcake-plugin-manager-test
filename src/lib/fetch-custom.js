@@ -30,7 +30,7 @@ import {
     parseOpenAINonStreamingResponse, parseResponsesAPINonStreamingResponse,
 } from './response-parsers.js';
 import { smartNativeFetch } from './smart-fetch.js';
-import { ensureCopilotApiToken } from './copilot-token.js';
+import { ensureCopilotApiToken, clearCopilotTokenCache } from './copilot-token.js';
 import {
     getCopilotStaticHeaders,
     normalizeCopilotNodelessMode,
@@ -851,6 +851,24 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
     };
 
     let _result = await _dispatchFetch();
+
+    // ── Copilot 403/401 auto-retry with token rotation ──
+    // When a Copilot request fails with 403 or 401, the cached API token likely
+    // belongs to a lower-tier account (e.g. Free) that cannot access the requested
+    // model.  Clear the token cache, rotate to the next OAuth token, and retry once.
+    if (_result && !_result.success && _isCopilotDomain && !_isProxied &&
+        (_result._status === 403 || _result._status === 401)) {
+        console.warn(`[Cupcake PM] Copilot model "${config.model}" returned HTTP ${_result._status} — rotating token and retrying.`);
+        clearCopilotTokenCache();
+        if (typeof window !== 'undefined') {
+            const _rotateFn = /** @type {any} */ (window)._cpmCopilotRotateToken;
+            if (typeof _rotateFn === 'function') {
+                const _cachedOAuth = /** @type {any} */ (window)._cpmCopilotApiToken;
+                if (_cachedOAuth) await _rotateFn(_cachedOAuth);
+            }
+        }
+        _result = await _dispatchFetch();
+    }
 
     // ── temperature+top_p conflict auto-retry (once) ──
     // Some Copilot-served models reject both parameters simultaneously.

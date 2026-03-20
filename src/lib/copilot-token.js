@@ -12,7 +12,7 @@ import {
 /** Negative cache duration (ms) — prevents rapid-fire retries after failure */
 const _NEGATIVE_CACHE_MS = 60000;
 
-let _copilotTokenCache = { token: '', expiry: 0 };
+let _copilotTokenCache = { token: '', expiry: 0, sourceOAuth: '' };
 let _copilotTokenPromise = /** @type {Promise<string> | null} */ (null);
 
 /** Injected dependencies */
@@ -76,6 +76,12 @@ export async function ensureCopilotApiToken() {
         const allTokens = rawTokenValue.split(/\s+/).map((/** @type {string} */ t) => t.replace(/[^\x20-\x7E]/g, '').trim()).filter(Boolean);
         if (allTokens.length === 0) return '';
 
+        // Invalidate cache if the active (first) OAuth token has changed (e.g. after key rotation)
+        if (_copilotTokenCache.token && _copilotTokenCache.sourceOAuth && allTokens[0] !== _copilotTokenCache.sourceOAuth) {
+            console.log('[Cupcake PM] Copilot: Active OAuth token changed (rotation detected) — clearing cached API token.');
+            _copilotTokenCache = { token: '', expiry: 0, sourceOAuth: '' };
+        }
+
         const maxAttempts = Math.min(allTokens.length, 5); // cap to avoid infinite loops
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
             const cleanToken = allTokens[attempt];
@@ -101,7 +107,7 @@ export async function ensureCopilotApiToken() {
                 const data = await res.json();
                 if (data.token) {
                     const expiryMs = data.expires_at ? data.expires_at * 1000 : Date.now() + 1800000;
-                    _copilotTokenCache = { token: data.token, expiry: expiryMs };
+                    _copilotTokenCache = { token: data.token, expiry: expiryMs, sourceOAuth: cleanToken };
 
                     if (typeof window !== 'undefined') {
                         /** @type {any} */ (window)._cpmCopilotApiToken = data.token;
@@ -118,7 +124,7 @@ export async function ensureCopilotApiToken() {
                 if (Array.isArray(data.data)) {
                     console.log(`[Cupcake PM] Copilot: Token #${attempt + 1} response is model list (${data.data.length} models) — using OAuth token directly`);
                     const expiryMs = Date.now() + 1800000;
-                    _copilotTokenCache = { token: cleanToken, expiry: expiryMs };
+                    _copilotTokenCache = { token: cleanToken, expiry: expiryMs, sourceOAuth: cleanToken };
                     if (typeof window !== 'undefined') /** @type {any} */ (window)._cpmCopilotApiToken = cleanToken;
                     return cleanToken;
                 }
@@ -137,7 +143,7 @@ export async function ensureCopilotApiToken() {
 
         // All tokens failed — negative cache
         console.error('[Cupcake PM] Copilot: All tokens exhausted — negative caching for', _NEGATIVE_CACHE_MS / 1000, 's');
-        _copilotTokenCache = { token: '', expiry: Date.now() + _NEGATIVE_CACHE_MS };
+        _copilotTokenCache = { token: '', expiry: Date.now() + _NEGATIVE_CACHE_MS, sourceOAuth: '' };
         return '';
     })();
 
@@ -155,6 +161,11 @@ export async function ensureCopilotApiToken() {
  * Clear the cached token (for testing or logout).
  */
 export function clearCopilotTokenCache() {
-    _copilotTokenCache = { token: '', expiry: 0 };
+    _copilotTokenCache = { token: '', expiry: 0, sourceOAuth: '' };
     _copilotTokenPromise = null;
+}
+
+// Expose clearCopilotTokenCache to window for cross-module bridge (e.g. cpm-copilot-manager.js)
+if (typeof window !== 'undefined') {
+    /** @type {any} */ (window)._cpmClearCopilotTokenCache = clearCopilotTokenCache;
 }

@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.7
-//@changes v1.22.7: Copilot 401 멀티토큰 버그 수정, BUG-R2~R5 패치, Vertex TTL UI 추가
+//@version 1.22.8
+//@changes v1.22.8: Copilot 키 회전 수정 — 멀티토큰 캐시 sourceOAuth 추적, 403/401 자동 재시도, rotateFailedToken 캐시 클리어
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================
@@ -190,7 +190,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.22.7';
+    const CPM_VERSION = '1.22.8';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -3469,7 +3469,7 @@ var CupcakeProviderManager = (function (exports) {
     /** Negative cache duration (ms) — prevents rapid-fire retries after failure */
     const _NEGATIVE_CACHE_MS = 60000;
 
-    let _copilotTokenCache = { token: '', expiry: 0 };
+    let _copilotTokenCache = { token: '', expiry: 0, sourceOAuth: '' };
     let _copilotTokenPromise = /** @type {Promise<string> | null} */ (null);
 
     /** Injected dependencies */
@@ -3533,6 +3533,12 @@ var CupcakeProviderManager = (function (exports) {
             const allTokens = rawTokenValue.split(/\s+/).map((/** @type {string} */ t) => t.replace(/[^\x20-\x7E]/g, '').trim()).filter(Boolean);
             if (allTokens.length === 0) return '';
 
+            // Invalidate cache if the active (first) OAuth token has changed (e.g. after key rotation)
+            if (_copilotTokenCache.token && _copilotTokenCache.sourceOAuth && allTokens[0] !== _copilotTokenCache.sourceOAuth) {
+                console.log('[Cupcake PM] Copilot: Active OAuth token changed (rotation detected) — clearing cached API token.');
+                _copilotTokenCache = { token: '', expiry: 0, sourceOAuth: '' };
+            }
+
             const maxAttempts = Math.min(allTokens.length, 5); // cap to avoid infinite loops
             for (let attempt = 0; attempt < maxAttempts; attempt++) {
                 const cleanToken = allTokens[attempt];
@@ -3558,7 +3564,7 @@ var CupcakeProviderManager = (function (exports) {
                     const data = await res.json();
                     if (data.token) {
                         const expiryMs = data.expires_at ? data.expires_at * 1000 : Date.now() + 1800000;
-                        _copilotTokenCache = { token: data.token, expiry: expiryMs };
+                        _copilotTokenCache = { token: data.token, expiry: expiryMs, sourceOAuth: cleanToken };
 
                         if (typeof window !== 'undefined') {
                             /** @type {any} */ (window)._cpmCopilotApiToken = data.token;
@@ -3575,7 +3581,7 @@ var CupcakeProviderManager = (function (exports) {
                     if (Array.isArray(data.data)) {
                         console.log(`[Cupcake PM] Copilot: Token #${attempt + 1} response is model list (${data.data.length} models) — using OAuth token directly`);
                         const expiryMs = Date.now() + 1800000;
-                        _copilotTokenCache = { token: cleanToken, expiry: expiryMs };
+                        _copilotTokenCache = { token: cleanToken, expiry: expiryMs, sourceOAuth: cleanToken };
                         if (typeof window !== 'undefined') /** @type {any} */ (window)._cpmCopilotApiToken = cleanToken;
                         return cleanToken;
                     }
@@ -3594,7 +3600,7 @@ var CupcakeProviderManager = (function (exports) {
 
             // All tokens failed — negative cache
             console.error('[Cupcake PM] Copilot: All tokens exhausted — negative caching for', _NEGATIVE_CACHE_MS / 1000, 's');
-            _copilotTokenCache = { token: '', expiry: Date.now() + _NEGATIVE_CACHE_MS };
+            _copilotTokenCache = { token: '', expiry: Date.now() + _NEGATIVE_CACHE_MS, sourceOAuth: '' };
             return '';
         })();
 
@@ -3612,8 +3618,13 @@ var CupcakeProviderManager = (function (exports) {
      * Clear the cached token (for testing or logout).
      */
     function clearCopilotTokenCache() {
-        _copilotTokenCache = { token: '', expiry: 0 };
+        _copilotTokenCache = { token: '', expiry: 0, sourceOAuth: '' };
         _copilotTokenPromise = null;
+    }
+
+    // Expose clearCopilotTokenCache to window for cross-module bridge (e.g. cpm-copilot-manager.js)
+    if (typeof window !== 'undefined') {
+        /** @type {any} */ (window)._cpmClearCopilotTokenCache = clearCopilotTokenCache;
     }
 
     // @ts-check
@@ -7202,6 +7213,24 @@ var CupcakeProviderManager = (function (exports) {
         };
 
         let _result = await _dispatchFetch();
+
+        // ── Copilot 403/401 auto-retry with token rotation ──
+        // When a Copilot request fails with 403 or 401, the cached API token likely
+        // belongs to a lower-tier account (e.g. Free) that cannot access the requested
+        // model.  Clear the token cache, rotate to the next OAuth token, and retry once.
+        if (_result && !_result.success && _isCopilotDomain && !_isProxied &&
+            (_result._status === 403 || _result._status === 401)) {
+            console.warn(`[Cupcake PM] Copilot model "${config.model}" returned HTTP ${_result._status} — rotating token and retrying.`);
+            clearCopilotTokenCache();
+            if (typeof window !== 'undefined') {
+                const _rotateFn = /** @type {any} */ (window)._cpmCopilotRotateToken;
+                if (typeof _rotateFn === 'function') {
+                    const _cachedOAuth = /** @type {any} */ (window)._cpmCopilotApiToken;
+                    if (_cachedOAuth) await _rotateFn(_cachedOAuth);
+                }
+            }
+            _result = await _dispatchFetch();
+        }
 
         // ── temperature+top_p conflict auto-retry (once) ──
         // Some Copilot-served models reject both parameters simultaneously.

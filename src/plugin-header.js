@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.7
-//@changes v1.22.7: Copilot 401 멀티토큰 버그 수정, BUG-R2~R5 패치, Vertex TTL UI 추가
+//@version 1.22.8
+//@changes v1.22.8: Copilot 키 회전 수정 — 멀티토큰 캐시 sourceOAuth 추적, 403/401 자동 재시도, rotateFailedToken 캐시 클리어
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================

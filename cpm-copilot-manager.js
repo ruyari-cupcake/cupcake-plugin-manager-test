@@ -202,6 +202,11 @@
             }
             const reordered = [...active, ...inactive];
             setTokens(reordered);
+            // Clear the cached Copilot API token so ensureCopilotApiToken() will
+            // re-exchange using the new first token on the next request.
+            if (typeof window._cpmClearCopilotTokenCache === 'function') {
+                window._cpmClearCopilotTokenCache();
+            }
             console.log(LOG_TAG, `Key rotation: failed token moved to end, active-first reorder (${active.length} active, ${inactive.length} inactive)`);
             return tokens[0]; // 다음 토큰 반환
         }
