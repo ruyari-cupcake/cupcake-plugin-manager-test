@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.15
-//@changes v1.22.15: Copilot Gemini unsupported_api_for_model 자동 fallback (/responses → /chat/completions), 프록시 디버깅 강화
+//@version 1.22.16
+//@changes v1.22.16: v1.22.12 안정 코드 기반 긴급 롤백 (Copilot 400 에러 해결)
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================

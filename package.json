@@ -1,7 +1,7 @@
 {
   "name": "cupcake-provider-manager",
   "type": "module",
-  "version": "1.22.15",
+  "version": "1.22.16",
   "private": true,
   "engines": {
     "node": ">=20"

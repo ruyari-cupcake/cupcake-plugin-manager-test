@@ -1,9 +1,9 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.15
-//@changes v1.22.15: Copilot Gemini unsupported_api_for_model 자동 fallback (/responses → /chat/completions), 프록시 디버깅 강화
-//@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
+//@version 1.22.16
+//@changes v1.22.16: v1.22.12 안정 코드 기반 긴급 롤백 (Copilot 400 에러 해결)
+//@update-url https://cupcake-plugin-manager.vercel.app/api/main-plugin
 
 // ==========================================
 // ARGUMENT SCHEMAS (Saved Natively by RisuAI)
@@ -126,7 +126,7 @@ var CupcakeProviderManager = (function (exports) {
         test: 'https://cupcake-plugin-manager-test.vercel.app',
     };
 
-    const _env = 'test';
+    const _env = 'production';
 
     /** @type {string} */
     const CPM_BASE_URL = _URLS[_env];
@@ -190,7 +190,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.22.15';
+    const CPM_VERSION = '1.22.16';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -1380,8 +1380,7 @@ var CupcakeProviderManager = (function (exports) {
 
     /**
      * Detect models that require the OpenAI Responses API on GitHub Copilot.
-     * GPT-5.4+ and Gemini (thinking-capable) models use /responses endpoint on Copilot
-     * to enable visible reasoning/thinking output via summary: 'auto'.
+     * GPT-5.4+ models use /responses endpoint instead of /chat/completions.
      * @param {string} modelName
      * @returns {boolean}
      */
@@ -1390,7 +1389,6 @@ var CupcakeProviderManager = (function (exports) {
         const m = String(modelName).toLowerCase();
         const match = m.match(/(?:^|\/)gpt-5\.(\d+)/);
         if (match && parseInt(match[1]) >= 4) return true;
-        if (isGeminiFamily(modelName)) return true;
         return false;
     }
 
@@ -4812,8 +4810,6 @@ var CupcakeProviderManager = (function (exports) {
         _MAIN_UPDATE_RETRY_STORAGE_KEY: 'cpm_pending_main_update',
         _MAIN_UPDATE_RETRY_COOLDOWN: 300000,
         _MAIN_UPDATE_RETRY_MAX_ATTEMPTS: 2,
-        _TOAST_DISMISS_STORAGE_KEY: 'cpm_update_toast_dismissed',
-        _TOAST_DISMISS_COOLDOWN: 6 * 60 * 60 * 1000, // 6 hours
         _mainUpdateInFlight: null,
         _pendingUpdateNames: [],
 
@@ -4944,18 +4940,18 @@ var CupcakeProviderManager = (function (exports) {
                     return false;
                 }
 
-                console.log(`[CPM Retry] Retrying pending main update on boot: ${installedVersion || 'unknown'} → ${pending.version}`);
-                if (await safeGetBoolArg('cpm_disable_autoupdate', false)) {
-                    console.log(`[CPM Retry] Auto-update disabled by user. Skipping boot retry.`);
-                    return false;
-                }
-
                 await this._writePendingMainUpdate({
                     ...pending,
                     attempts: (pending.attempts || 0) + 1,
                     lastAttemptTs: Date.now(),
                     lastError: '',
                 });
+
+                console.log(`[CPM Retry] Retrying pending main update on boot: ${installedVersion || 'unknown'} → ${pending.version}`);
+                if (await safeGetBoolArg('cpm_disable_autoupdate', false)) {
+                    console.log(`[CPM Retry] Auto-update disabled by user. Skipping boot retry.`);
+                    return false;
+                }
                 const result = await this.safeMainPluginUpdate(pending.version, pending.changes || '');
                 if (!result.ok) {
                     const latest = await this._readPendingMainUpdate();
@@ -4979,17 +4975,6 @@ var CupcakeProviderManager = (function (exports) {
             try {
                 if (/** @type {any} */ (window)._cpmVersionChecked) return;
                 /** @type {any} */ (window)._cpmVersionChecked = true;
-
-                // OFF + 6시간 쿨다운: 네트워크 호출 자체를 하지 않음 (무거운 환경 보호)
-                if (await safeGetBoolArg('cpm_disable_autoupdate', false)) {
-                    try {
-                        const lastToast = localStorage.getItem(this._TOAST_DISMISS_STORAGE_KEY);
-                        if (lastToast && (Date.now() - parseInt(lastToast, 10)) < this._TOAST_DISMISS_COOLDOWN) {
-                            console.log('[CPM AutoCheck] Auto-update OFF + toast cooldown active — skipping network fetch entirely.');
-                            return;
-                        }
-                    } catch (_) { /* localStorage unavailable — continue with check */ }
-                }
 
                 try {
                     const lastCheck = await Risu$1.pluginStorage.getItem(this._VERSION_CHECK_STORAGE_KEY);
@@ -5092,17 +5077,6 @@ var CupcakeProviderManager = (function (exports) {
                 }
                 if (/** @type {any} */ (window)._cpmMainVersionChecked) return;
                 /** @type {any} */ (window)._cpmMainVersionChecked = true;
-
-                // OFF + 6시간 쿨다운: 600KB 코드 다운로드 완전 방지
-                if (await safeGetBoolArg('cpm_disable_autoupdate', false)) {
-                    try {
-                        const lastToast = localStorage.getItem(this._TOAST_DISMISS_STORAGE_KEY);
-                        if (lastToast && (Date.now() - parseInt(lastToast, 10)) < this._TOAST_DISMISS_COOLDOWN) {
-                            console.log('[CPM MainAutoCheck] Auto-update OFF + toast cooldown active — skipping JS fallback entirely.');
-                            return;
-                        }
-                    } catch (_) { /* localStorage unavailable — continue */ }
-                }
 
                 try {
                     const lastCheck = await Risu$1.pluginStorage.getItem(this._MAIN_VERSION_CHECK_STORAGE_KEY);
@@ -5903,9 +5877,6 @@ var CupcakeProviderManager = (function (exports) {
                 const body = await doc.querySelector('body');
                 if (!body) { console.debug('[CPM AvailToast] body not found'); return; }
                 await body.appendChild(toast);
-
-                // 6시간 쿨다운 기록: OFF 사용자의 반복 토스트 방지
-                try { localStorage.setItem(this._TOAST_DISMISS_STORAGE_KEY, String(Date.now())); } catch (_) { /* ignore */ }
 
                 setTimeout(async () => { try { await toast.setStyle('opacity', '1'); await toast.setStyle('transform', 'translateY(0)'); } catch (_) { } }, 50);
                 setTimeout(async () => {
@@ -6804,9 +6775,6 @@ var CupcakeProviderManager = (function (exports) {
         const _autoResponsesMatch = _isManualResponsesEndpoint || (_isCopilotDomain && needsCopilotResponsesAPI(config.model));
         const _useResponsesAPI = !!(format === 'openai' && !_responsesForceOff && _canUseResponsesByUrl && (_responsesForceOn || _autoResponsesMatch));
 
-        // Snapshot body+URL before Responses API transformation for fallback to /chat/completions
-        const _savedChatBody = _useResponsesAPI ? JSON.parse(JSON.stringify(body)) : null;
-
         if (_useResponsesAPI) {
             if (_isCopilotDomain && !_isManualResponsesEndpoint && (_responsesForceOn || needsCopilotResponsesAPI(config.model))) {
                 const _copilotBase = (config.url.match(/https:\/\/[^/]+/) || ['https://api.githubcopilot.com'])[0];
@@ -6834,7 +6802,7 @@ var CupcakeProviderManager = (function (exports) {
 
             console.log(`[Cupcake PM] Copilot + Responses API detected (model=${config.model}) → URL=${effectiveUrl}`);
         }
-        let _isResponsesEndpoint = _useResponsesAPI || (effectiveUrl && /\/responses(?:\?|$)/.test(effectiveUrl));
+        const _isResponsesEndpoint = _useResponsesAPI || (effectiveUrl && /\/responses(?:\?|$)/.test(effectiveUrl));
 
         // ── CORS Proxy: proxyUrl이 설정되어 있으면 도메인을 프록시로 교체 ──
         // Responses API URL 재작성 후에 적용해야 올바른 경로를 프록시로 보냄
@@ -6847,9 +6815,9 @@ var CupcakeProviderManager = (function (exports) {
         }
         const _isProxied = !!_proxyUrl;
         const _proxyDirect = !!config.proxyDirect;
-        const _proxyKey = (config.proxyKey || '').trim().replace(/[\r\n]/g, '');
+        const _proxyKey = (config.proxyKey || '').trim();
         // 범용 프록시 지원: Rewrite 전 원래 대상 URL 저장 (X-Target-URL 헤더로 전달)
-        let _originalTargetUrl = effectiveUrl || '';
+        const _originalTargetUrl = effectiveUrl || '';
         if (_proxyUrl && effectiveUrl) {
             if (_proxyDirect) {
                 // Direct mode: 프록시 URL로 직접 요청, effectiveUrl은 X-Target-URL 헤더로 전달
@@ -6866,10 +6834,7 @@ var CupcakeProviderManager = (function (exports) {
                         _proxyPath = _proxyPath.substring(4);
                         console.log(`[Cupcake PM] Proxy Rewrite: stripped /api prefix → ${_proxyPath}`);
                     }
-                    effectiveUrl = _proxyBase.origin + _proxyBase.pathname.replace(/\/+$/, '') + _proxyPath
-                        + (_proxyBase.search && _origUrl.search
-                            ? _proxyBase.search + '&' + _origUrl.search.substring(1)
-                            : _proxyBase.search || _origUrl.search);
+                    effectiveUrl = _proxyBase.origin + _proxyBase.pathname.replace(/\/+$/, '') + _proxyPath + _origUrl.search;
                     console.log(`[Cupcake PM] CORS Proxy (Rewrite mode) active → ${effectiveUrl}`);
                 } catch (_e) {
                     console.error(`[Cupcake PM] ❌ Invalid proxyUrl "${_proxyUrl}" — proxy NOT applied. URL 형식을 확인하세요 (예: https://my-server.kr/proxy).`, _e);
@@ -7304,11 +7269,7 @@ var CupcakeProviderManager = (function (exports) {
         // access the requested model.  Rotate to next OAuth token and retry once.
         // Works for both direct and proxied paths.
         if (_result && !_result.success && _isCopilotDomain) {
-            console.log(`[Cupcake PM] 🔍 Copilot fail-check: status=${_result._status}, statusType=${typeof _result._status}, success=${_result.success}, isCopilotDomain=${_isCopilotDomain}, isProxied=${_isProxied}, responsesAPI=${_useResponsesAPI}, url=${effectiveUrl?.substring(0, 80)}, contentSnippet="${String(_result.content || '').substring(0, 150)}"`);
-        }
-        // ── Proxy debug: log proxy routing details on any error ──
-        if (_result && !_result.success && _isProxied) {
-            console.log(`[Cupcake PM] 🔍 Proxy debug: mode=${_proxyDirect ? 'Direct' : 'Rewrite'}, proxyUrl=${_proxyUrl?.substring(0, 60)}, target=${_originalTargetUrl?.substring(0, 80)}, proxyKey=${_proxyKey ? '***set***' : '(none)'}, status=${_result._status}`);
+            console.log(`[Cupcake PM v1.22.10] 🔍 Copilot fail-check: status=${_result._status}, statusType=${typeof _result._status}, success=${_result.success}, isCopilotDomain=${_isCopilotDomain}, isProxied=${_isProxied}, contentSnippet="${String(_result.content || '').substring(0, 120)}"`);
         }
         const _isCopilotRotatable = _result && !_result.success && _isCopilotDomain && (
             _result._status === 403 || _result._status === 401 ||
@@ -7337,27 +7298,7 @@ var CupcakeProviderManager = (function (exports) {
                 console.warn(`[Cupcake PM] Retry after rotation also failed: status=${_result._status}`);
             }
         } else if (_result && !_result.success && _isCopilotDomain && (_result._status === 400 || _result._status === 403 || _result._status === 401)) {
-            console.warn(`[Cupcake PM] ⚠️ Copilot error NOT matched for rotation: _status=${_result._status} (type=${typeof _result._status}), content_has_model_not_supported=${/model_not_supported/i.test(String(_result.content || ''))}`);
-        }
-
-        // ── Responses API unsupported → fallback to /chat/completions ──
-        // Some models (e.g. gemini-3.1-pro-preview) detected as Responses API candidates
-        // may not actually support it. When the API returns unsupported_api_for_model,
-        // restore the original Chat Completions body and retry.
-        if (_result && !_result.success && _result._status === 400 && _useResponsesAPI && _savedChatBody
-            && /unsupported_api_for_model/i.test(String(_result.content || ''))) {
-            console.warn(`[Cupcake PM] ⚠️ Model "${config.model}" does not support Responses API — falling back to /chat/completions`);
-            // Restore body to pre-Responses-API state
-            for (const k of Object.keys(body)) delete body[k];
-            Object.assign(body, _savedChatBody);
-            // Switch URL path: /responses → /chat/completions (works with proxy Rewrite + Direct)
-            effectiveUrl = effectiveUrl.replace(/\/responses(?=$|\?)/, '/chat/completions');
-            _originalTargetUrl = _originalTargetUrl.replace(/\/responses(?=$|\?)/, '/chat/completions');
-            _isResponsesEndpoint = false;
-            _result = await _dispatchFetch();
-            if (_result && _result.success) {
-                console.log(`[Cupcake PM] ✅ Fallback to /chat/completions succeeded for model "${config.model}"`);
-            }
+            console.warn(`[Cupcake PM v1.22.10] ⚠️ Copilot error NOT matched for rotation: _status=${_result._status} (type=${typeof _result._status}), content_has_model_not_supported=${/model_not_supported/i.test(String(_result.content || ''))}`);
         }
 
         // ── temperature+top_p conflict auto-retry (once) ──

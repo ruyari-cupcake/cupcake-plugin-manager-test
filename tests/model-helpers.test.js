@@ -174,11 +174,6 @@ describe('isGeminiFamily', () => {
         expect(isGeminiFamily('claude-3-opus')).toBe(false);
         expect(isGeminiFamily('o3-mini')).toBe(false);
     });
-
-    it('handles models/ prefix (Google model registry)', () => {
-        expect(isGeminiFamily('models/gemini-2.5-flash')).toBe(true);
-        expect(isGeminiFamily('models/gemini-3-pro')).toBe(true);
-    });
 });
 
 describe('supportsOpenAIReasoningEffort', () => {
@@ -210,11 +205,6 @@ describe('supportsOpenAIReasoningEffort', () => {
     it('handles slash-prefixed model IDs', () => {
         expect(supportsOpenAIReasoningEffort('openai/o3-mini')).toBe(true);
         expect(supportsOpenAIReasoningEffort('openai/gpt-5')).toBe(true);
-    });
-
-    it('handles models/ prefix (Google model registry format)', () => {
-        expect(supportsOpenAIReasoningEffort('models/gemini-2.5-flash')).toBe(true);
-        expect(supportsOpenAIReasoningEffort('models/gemini-3-pro')).toBe(true);
     });
 
     it('matches Gemini models (Copilot API reasoning_effort support)', () => {
@@ -252,19 +242,6 @@ describe('needsCopilotResponsesAPI', () => {
     it('handles slash prefix', () => {
         expect(needsCopilotResponsesAPI('openai/gpt-5.4')).toBe(true);
     });
-
-    it('returns true for Gemini family models (thinking-capable)', () => {
-        expect(needsCopilotResponsesAPI('gemini-3.1-pro-preview')).toBe(true);
-        expect(needsCopilotResponsesAPI('gemini-2.5-flash')).toBe(true);
-        expect(needsCopilotResponsesAPI('gemini-2.5-pro')).toBe(true);
-        expect(needsCopilotResponsesAPI('models/gemini-3.1-pro-preview')).toBe(true);
-    });
-
-    it('returns false for non-GPT5.4/non-Gemini models', () => {
-        expect(needsCopilotResponsesAPI('gpt-4.1')).toBe(false);
-        expect(needsCopilotResponsesAPI('claude-sonnet-4')).toBe(false);
-        expect(needsCopilotResponsesAPI('o3-mini')).toBe(false);
-    });
 });
 
 describe('shouldStripOpenAISamplingParams', () => {
@@ -300,11 +277,6 @@ describe('shouldStripGPT54SamplingForReasoning', () => {
         expect(shouldStripGPT54SamplingForReasoning('gpt-5.2', 'high')).toBe(false);
         expect(shouldStripGPT54SamplingForReasoning('gpt-5', 'high')).toBe(false);
         expect(shouldStripGPT54SamplingForReasoning('o3', 'high')).toBe(false);
-    });
-
-    it('returns false for Gemini models (Gemini uses reasoning_effort, not sampling strip)', () => {
-        expect(shouldStripGPT54SamplingForReasoning('gemini-2.5-flash', 'high')).toBe(false);
-        expect(shouldStripGPT54SamplingForReasoning('gemini-3-pro', 'medium')).toBe(false);
     });
 });
 
