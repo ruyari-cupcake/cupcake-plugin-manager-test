@@ -554,6 +554,50 @@ describe('proxyDirect + proxyKey end-to-end', () => {
         expect(fetchedOptions.headers).not.toHaveProperty('X-Proxy-Token');
         expect(fetchedOptions.headers).not.toHaveProperty('X-Target-URL');
     });
+
+    it('Rewrite mode preserves proxy URL query params alongside original URL params', async () => {
+        h.state.CUSTOM_MODELS_CACHE = [makeModel({
+            proxyUrl: 'https://my-proxy.kr/api?auth=secret123',
+            proxyDirect: false,
+            proxyKey: '',
+        })];
+
+        h.mockSmartFetch.mockResolvedValueOnce(
+            makeOkJsonResponse({ choices: [{ message: { content: 'ok' } }] })
+        );
+
+        await fetchByProviderId(
+            { provider: 'Custom', name: '[Test] Proxy Direct', uniqueId: 'proxy-direct-test' },
+            BASIC_ARGS,
+        );
+
+        const fetchedUrl = h.mockSmartFetch.mock.calls[0][0];
+        // Proxy query param should be preserved
+        expect(fetchedUrl).toContain('auth=secret123');
+        // Original path should be appended
+        expect(fetchedUrl).toContain('/v1/chat/completions');
+    });
+
+    it('proxyKey with embedded newlines is sanitized', async () => {
+        h.state.CUSTOM_MODELS_CACHE = [makeModel({
+            proxyKey: 'mytoken\r\nX-Evil: hacked',
+        })];
+
+        h.mockSmartFetch.mockResolvedValueOnce(
+            makeOkJsonResponse({ choices: [{ message: { content: 'safe' } }] })
+        );
+
+        await fetchByProviderId(
+            { provider: 'Custom', name: '[Test] Proxy Direct', uniqueId: 'proxy-direct-test' },
+            BASIC_ARGS,
+        );
+
+        const fetchedOptions = h.mockSmartFetch.mock.calls[0][1];
+        const proxyToken = fetchedOptions.headers['X-Proxy-Token'];
+        expect(proxyToken).toBe('mytokenX-Evil: hacked');
+        // No newline characters in the header value
+        expect(proxyToken).not.toMatch(/[\r\n]/);
+    });
 });
 
 // ──────────────────────────────────────────────────────────
