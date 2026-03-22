@@ -2,7 +2,7 @@
 //@display-name Cupcake Copilot Manager
 //@version 1.7.14
 //@author Cupcake
-//@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager-test/main/cpm-copilot-manager.js
+//@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-copilot-manager.js
 
 /**
  * ======== CUPCAKE PM Sub-Plugin: GitHub Copilot Token Manager ========

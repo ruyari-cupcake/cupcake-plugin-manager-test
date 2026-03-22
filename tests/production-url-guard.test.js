@@ -14,6 +14,8 @@ import { readFileSync, existsSync } from 'node:fs';
 
 const PRODUCTION_DOMAIN = 'cupcake-plugin-manager.vercel.app';
 const TEST_DOMAIN = 'cupcake-plugin-manager-test.vercel.app';
+const TEST2_DOMAIN = 'test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app';
+const ALL_TEST_DOMAINS = [TEST_DOMAIN, TEST2_DOMAIN];
 
 const rootBundlePath = new URL('../provider-manager.js', import.meta.url);
 const distBundlePath = new URL('../dist/provider-manager.js', import.meta.url);
@@ -36,7 +38,12 @@ function extractEnv(source) {
 }
 
 // Determine expected environment from the built bundle
-const builtEnv = extractEnv(rootBundle) || 'test';
+const builtEnv = extractEnv(rootBundle) || 'test2';
+const isTestEnv = builtEnv === 'test' || builtEnv === 'test2';
+
+function containsAnyTestDomain(url) {
+    return ALL_TEST_DOMAINS.some(d => url.includes(d));
+}
 
 describe('production URL guard (2026-03-15 사고 재발 방지)', () => {
     it('root provider-manager.js @update-url matches the build environment', () => {
@@ -44,9 +51,9 @@ describe('production URL guard (2026-03-15 사고 재발 방지)', () => {
         expect(url).toBeTruthy();
         if (builtEnv === 'production') {
             expect(url).toContain(PRODUCTION_DOMAIN);
-            expect(url).not.toContain(TEST_DOMAIN);
+            expect(containsAnyTestDomain(url)).toBe(false);
         } else {
-            expect(url).toContain(TEST_DOMAIN);
+            expect(containsAnyTestDomain(url)).toBe(true);
         }
     });
 
@@ -65,9 +72,9 @@ describe('production URL guard (2026-03-15 사고 재발 방지)', () => {
 
         if (builtEnv === 'production') {
             expect(distUrl).toContain(PRODUCTION_DOMAIN);
-            expect(distUrl).not.toContain(TEST_DOMAIN);
+            expect(containsAnyTestDomain(distUrl)).toBe(false);
         } else {
-            expect(distUrl).toContain(TEST_DOMAIN);
+            expect(containsAnyTestDomain(distUrl)).toBe(true);
         }
     });
 
@@ -83,9 +90,9 @@ describe('production URL guard (2026-03-15 사고 재발 방지)', () => {
 
         if (builtEnv === 'production') {
             expect(bundledUrl).toContain(PRODUCTION_DOMAIN);
-            expect(bundledUrl).not.toContain(TEST_DOMAIN);
+            expect(containsAnyTestDomain(bundledUrl)).toBe(false);
         } else {
-            expect(bundledUrl).toContain(TEST_DOMAIN);
+            expect(containsAnyTestDomain(bundledUrl)).toBe(true);
         }
     });
 
@@ -110,12 +117,12 @@ describe('production URL guard (2026-03-15 사고 재발 방지)', () => {
         const env = extractEnv(rootBundle);
 
         if (env === 'production') {
-            expect(url, 'production 빌드인데 @update-url이 테스트 서버를 가리킴!').not.toContain(TEST_DOMAIN);
+            expect(containsAnyTestDomain(url), 'production 빌드인데 @update-url이 테스트 서버를 가리킴!').toBe(false);
             expect(url, 'production 빌드인데 @update-url이 프로덕션 서버가 아님!').toContain(PRODUCTION_DOMAIN);
         }
-        if (env === 'test') {
+        if (env === 'test' || env === 'test2') {
             expect(url, 'test 빌드인데 @update-url이 프로덕션 서버를 가리킴!').not.toContain(PRODUCTION_DOMAIN);
-            expect(url, 'test 빌드인데 @update-url이 테스트 서버가 아님!').toContain(TEST_DOMAIN);
+            expect(containsAnyTestDomain(url), 'test 빌드인데 @update-url이 테스트 서버가 아님!').toBe(true);
         }
     });
 });

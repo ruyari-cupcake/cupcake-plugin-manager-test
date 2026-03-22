@@ -2,10 +2,11 @@
 
 > ## ⛔⛔⛔ AI 에이전트 — push 전 필독 ⛔⛔⛔
 >
-> **기본 push 리모트는 `test`다. `origin`이 아니다.**
+> **기본 push 리모트는 `test2`다. `origin`이 아니다.**
 >
-> - `git push test main` ← 기본. 사용자가 대상을 지정하지 않으면 항상 이것.
+> - `git push test2 main` ← 기본. 사용자가 대상을 지정하지 않으면 항상 이것.
 > - `git push origin main` ← **금지**. 사용자가 "본서버"/"origin"/"프로덕션"을 명시한 경우에만.
+> - **본서버 push 시: `test2`와 `origin` 둘 다 push한다.** (`git push test2 main && git push origin main`)
 > - `origin`에 push하면 Vercel 자동 배포로 **실사용자에게 즉시 반영**된다.
 > - 상세 규칙은 [`.github/copilot-instructions.md`](.github/copilot-instructions.md)의 최우선 규칙 섹션 참조.
 
@@ -31,12 +32,13 @@
 
 | 리모트 | 레포 | Vercel 도메인 | 용도 |
 |--------|------|---------------|------|
-| `test` | `ruyari-cupcake/cupcake-plugin-manager-test` | `cupcake-plugin-manager-test.vercel.app` | **⭐ 기본 배포 (테스트) — 항상 여기로 push** |
-| `origin` | `ruyari-cupcake/cupcake-plugin-manager` | `cupcake-plugin-manager.vercel.app` | ⛔ 프로덕션 (사용자가 명시적으로 요청한 경우에만) |
+| `test2` | `ruyari-cupcake/cupcake-plugin-manager-test2` | `test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app` | **⭐ 기본 배포 (테스트) — 항상 여기로 push** |
+| `test` | `ruyari-cupcake/cupcake-plugin-manager-test` | `cupcake-plugin-manager-test.vercel.app` | ⚠️ 레거시 (교차 오염 위험 — 사용 자제) |
+| `origin` | `ruyari-cupcake/cupcake-plugin-manager` | `cupcake-plugin-manager.vercel.app` | ⛔ 프로덕션 (사용자가 명시적으로 요청한 경우에만, test2와 함께 push) |
 
 ---
 
-## 기본 배포 (test) — 평소 작업
+## 기본 배포 (test2) — 평소 작업
 
 ### 중요: 메인 자동업데이트 수정 후에는 산출물 동기화까지 반드시 확인
 
@@ -65,11 +67,11 @@ node scripts/release.cjs
 # 2. 커밋 & push
 git add -A
 git commit -m "feat: 설명"
-git push test main
+git push test2 main
 
 # 3. 릴리즈 (선택)
 git tag v1.xx.x-test.N
-git push test v1.xx.x-test.N
+git push test2 v1.xx.x-test.N
 # → GitHub Actions가 빌드+테스트 후 Release 자동 생성
 ```
 
@@ -155,6 +157,9 @@ git push origin main
 # → pre-push hook이 자동으로 프로덕션 URL 검증 수행
 # → 테스트 URL이 감지되면 push가 차단됨
 
+# test2에도 push (본서버 push 시 항상 함께)
+git push test2 main
+
 git tag vX.XX.X
 git push origin vX.XX.X
 ```
@@ -164,11 +169,11 @@ git push origin vX.XX.X
 프로덕션 배포 후, 소스는 그대로 두고 **테스트 빌드로 돌아오기만 하면 된다.** 소스 파일 수정이 필요 없으므로 이전보다 훨씬 안전하다.
 
 ```bash
-npm run build            # CPM_ENV 기본값 = test
+npm run build            # CPM_ENV 기본값 = test2
 node scripts/release.cjs
 git add -A
-git commit -m "chore: restore test build artifacts"
-git push test main
+git commit -m "chore: restore test2 build artifacts"
+git push test2 main
 ```
 
 ---
@@ -186,9 +191,9 @@ git push test main
 
 ### 기타 주의사항
 
-- **test에는 프로덕션 빌드 산출물을 push하지 않는다** — 기본 `npm run build`는 자동으로 테스트 URL 사용
-- 프로덕션 배포 후 반드시 3단계(테스트 빌드 복원)를 수행한다
-- `CPM_ENV` 미설정 시 항상 테스트 URL로 빌드되므로, 실수로 프로덕션 URL이 테스트 서버에 올라가는 사고가 방지된다
+- **test에는 프로덕션 빌드 산출물을 push하지 않는다** — 기본 `npm run build`는 자동으로 test2 URL 사용
+- 프로덕션 배포 후 반드시 3단계(test2 빌드 복원)를 수행한다
+- `CPM_ENV` 미설정 시 항상 test2 URL로 빌드되므로, 실수로 프로덕션 URL이 테스트 서버에 올라가는 사고가 방지된다
 - 메인 자동업데이트 관련 수정 후에는 **소스만 커밋하지 말고 반드시 [node scripts/release.cjs](scripts/release.cjs)로 산출물을 재생성한다**
 - [provider-manager.js](provider-manager.js)와 [update-bundle.json](update-bundle.json)이 stale이면 메인 자동업데이트는 수정 전 코드를 계속 내려보낼 수 있다
 - 푸시 전 Husky가 `npm run verify:release-sync`와 `npm run test:release-sync`를 실행하므로, 산출물 버전/해시/번들 코드가 안 맞으면 푸시가 차단된다

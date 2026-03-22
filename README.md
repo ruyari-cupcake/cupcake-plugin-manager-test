@@ -4,8 +4,9 @@
 >
 > **`origin/main` (본서버)에 절대로 push하지 마라.**
 >
-> - 모든 작업(버그픽스, 기능추가, 테스트)은 반드시 **`test/main` (테스트서버)** 에만 push한다.
+> - 모든 작업(버그픽스, 기능추가, 테스트)은 반드시 **`test2/main` (테스트서버)** 에만 push한다.
 > - 본서버(`origin/main`)는 **사용자가 직접 명시적으로 "본서버에 올려"라고 말한 경우에만** push한다.
+> - **본서버 push 시: `test2`와 `origin` 둘 다 push한다.**
 > - 이 규칙은 어떤 상황에서도 예외 없이 적용된다.
 > - `git push`를 할 때 반드시 remote와 branch를 확인하라. 기본 push 대상이 `origin/main`이므로 주의.
 >
@@ -140,11 +141,12 @@ root의 `provider-manager.js`를 RisuAI → 설정 → 플러그인 → + 버튼
 
 | CPM_ENV | URL | 용도 |
 |---------|-----|------|
-| `test` (기본값) | `cupcake-plugin-manager-test.vercel.app` | 개발 / 테스트 |
+| `test2` (기본값) | `test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app` | 개발 / 테스트 |
+| `test` | `cupcake-plugin-manager-test.vercel.app` | 레거시 (사용 자제) |
 | `production` | `cupcake-plugin-manager.vercel.app` | 프로덕션 배포 |
 
 ```bash
-npm run build               # 테스트 URL (기본값)
+npm run build               # test2 URL (기본값)
 npm run build:production    # 프로덕션 URL (cross-platform 래퍼)
 CPM_ENV=production npm run build  # 수동 지정 (Linux/Mac)
 ```

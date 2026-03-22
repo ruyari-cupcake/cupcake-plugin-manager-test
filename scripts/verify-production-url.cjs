@@ -29,8 +29,11 @@ const p = (...parts) => path.join(ROOT, ...parts);
 // ── Constants ──
 const PRODUCTION_DOMAIN = 'cupcake-plugin-manager.vercel.app';
 const TEST_DOMAIN = 'cupcake-plugin-manager-test.vercel.app';
+const TEST2_DOMAIN = 'test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app';
 const PRODUCTION_UPDATE_URL = `https://${PRODUCTION_DOMAIN}/api/main-plugin`;
 const TEST_UPDATE_URL = `https://${TEST_DOMAIN}/api/main-plugin`;
+const TEST2_UPDATE_URL = `https://${TEST2_DOMAIN}/api/main-plugin`;
+const PRODUCTION_GITHUB_REPO = 'ruyari-cupcake/cupcake-plugin-manager';
 
 // Production remote patterns (case-insensitive)
 const PRODUCTION_REMOTE_PATTERNS = [
@@ -38,6 +41,7 @@ const PRODUCTION_REMOTE_PATTERNS = [
     /\/cupcake-plugin-manager(?:\.git)?$/i,
 ];
 const TEST_REMOTE_PATTERNS = [
+    /cupcake-plugin-manager-test2/i,
     /cupcake-plugin-manager-test/i,
 ];
 
@@ -134,7 +138,7 @@ function main() {
 
     if (!rootUpdateUrl) {
         errors.push('provider-manager.js에서 @update-url을 찾을 수 없습니다.');
-    } else if (rootUpdateUrl.includes(TEST_DOMAIN)) {
+    } else if (rootUpdateUrl.includes(TEST_DOMAIN) || rootUpdateUrl.includes(TEST2_DOMAIN)) {
         errors.push(
             `provider-manager.js @update-url이 테스트 서버를 가리킵니다:` +
             `\n    현재: ${rootUpdateUrl}` +
@@ -159,7 +163,7 @@ function main() {
         const distUpdateUrl = extractUpdateUrl(distBundle);
         const distEnv = extractEnv(distBundle);
 
-        if (distUpdateUrl && distUpdateUrl.includes(TEST_DOMAIN)) {
+        if (distUpdateUrl && (distUpdateUrl.includes(TEST_DOMAIN) || distUpdateUrl.includes(TEST2_DOMAIN))) {
             errors.push(
                 `dist/provider-manager.js @update-url이 테스트 서버를 가리킵니다:` +
                 `\n    현재: ${distUpdateUrl}` +
@@ -181,7 +185,7 @@ function main() {
                 const bundledUpdateUrl = extractUpdateUrl(bundledCode);
                 const bundledEnv = extractEnv(bundledCode);
 
-                if (bundledUpdateUrl && bundledUpdateUrl.includes(TEST_DOMAIN)) {
+                if (bundledUpdateUrl && (bundledUpdateUrl.includes(TEST_DOMAIN) || bundledUpdateUrl.includes(TEST2_DOMAIN))) {
                     errors.push(
                         `update-bundle.json 내 provider-manager.js 코드의 @update-url이 테스트 서버입니다:` +
                         `\n    현재: ${bundledUpdateUrl}`
@@ -198,6 +202,23 @@ function main() {
         }
     }
 
+    // Check sub-plugin @update-url (GitHub raw URLs should point to prod repo)
+    const glob = require('node:path');
+    const subPlugins = fs.readdirSync(ROOT).filter(f => f.startsWith('cpm-') && f.endsWith('.js'));
+    const testRepoPatterns = [/cupcake-plugin-manager-test2?\b/i];
+    for (const file of subPlugins) {
+        const content = readText(p(file));
+        if (!content) continue;
+        const url = extractUpdateUrl(content);
+        if (url && testRepoPatterns.some(pat => pat.test(url))) {
+            errors.push(
+                `${file}의 @update-url이 테스트 레포를 가리킵니다:` +
+                `\n    현재: ${url}` +
+                `\n    필요: ${PRODUCTION_GITHUB_REPO} 레포 URL`
+            );
+        }
+    }
+
     if (errors.length > 0) {
         fail(errors);
     }
@@ -205,6 +226,7 @@ function main() {
     console.log(`[verify-production-url] ✅ 프로덕션 URL 검증 통과`);
     console.log(`  @update-url: ${rootUpdateUrl}`);
     console.log(`  _env: ${rootEnv}`);
+    console.log(`  sub-plugins: ${subPlugins.length}개 검증 완료`);
 }
 
 main();

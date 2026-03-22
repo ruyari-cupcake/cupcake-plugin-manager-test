@@ -3,10 +3,12 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { MAIN_UPDATE_URL } from '../src/lib/endpoints.js';
 
-const TEST_MAIN_UPDATE_URL = 'https://cupcake-plugin-manager-test.vercel.app/api/main-plugin';
+const TEST_MAIN_UPDATE_URL = 'https://test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app/api/main-plugin';
 const EXPECTED_BUILD_ENV = MAIN_UPDATE_URL.includes('cupcake-plugin-manager.vercel.app/api/main-plugin')
     ? 'production'
-    : 'test';
+    : MAIN_UPDATE_URL.includes('cupcake-plugin-manager-test.vercel.app/api/main-plugin')
+        ? 'test'
+        : 'test2';
 
 const packageJson = JSON.parse(
     readFileSync(new URL('../package.json', import.meta.url), 'utf-8')
@@ -109,6 +111,8 @@ describe('main plugin update regression guard', () => {
         const distTestUrl = getRequiredMatch(distBundle, /test:\s*'([^']+)'/, 'dist test URL');
         const rootProductionUrl = getRequiredMatch(rootBundle, /production:\s*'([^']+)'/, 'root production URL');
         const rootTestUrl = getRequiredMatch(rootBundle, /test:\s*'([^']+)'/, 'root test URL');
+        const distTest2Url = getRequiredMatch(distBundle, /test2:\s*'([^']+)'/, 'dist test2 URL');
+        const rootTest2Url = getRequiredMatch(rootBundle, /test2:\s*'([^']+)'/, 'root test2 URL');
 
         expect(distEnv).toBe(EXPECTED_BUILD_ENV);
         expect(rootEnv).toBe(EXPECTED_BUILD_ENV);
@@ -116,6 +120,8 @@ describe('main plugin update regression guard', () => {
         expect(distTestUrl).toBe('https://cupcake-plugin-manager-test.vercel.app');
         expect(rootProductionUrl).toBe('https://cupcake-plugin-manager.vercel.app');
         expect(rootTestUrl).toBe('https://cupcake-plugin-manager-test.vercel.app');
+        expect(distTest2Url).toBe('https://test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app');
+        expect(rootTest2Url).toBe('https://test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app');
     });
 
     it('registers the settings panel before risky init phases in the shipped bundle', () => {

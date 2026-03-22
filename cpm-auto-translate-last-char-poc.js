@@ -2,7 +2,7 @@
 //@display-name Auto Translate Last Char Alpha
 //@version 0.1.0
 //@author Cupcake
-//@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager-test/main/cpm-auto-translate-last-char-poc.js
+//@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-auto-translate-last-char-poc.js
 
 (function (window) {
     const risuai = window.risuai || window.Risuai;

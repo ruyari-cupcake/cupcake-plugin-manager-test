@@ -113,17 +113,19 @@ var CupcakeProviderManager = (function (exports) {
      *
      * URL is determined by the `CPM_ENV` environment variable:
      *   - CPM_ENV=production  → https://cupcake-plugin-manager.vercel.app
-     *   - CPM_ENV=test (or unset) → https://cupcake-plugin-manager-test.vercel.app
+     *   - CPM_ENV=test         → https://cupcake-plugin-manager-test.vercel.app
+     *   - CPM_ENV=test2 (or unset) → https://test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app
      *
      * Build usage:
      *   CPM_ENV=production npm run build   (production)
-     *   npm run build                      (test — default)
+     *   npm run build                      (test2 — default)
      *   npm run build:production           (shorthand for production)
      */
 
     const _URLS = {
         production: 'https://cupcake-plugin-manager.vercel.app',
         test: 'https://cupcake-plugin-manager-test.vercel.app',
+        test2: 'https://test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app',
     };
 
     const _env = 'production';

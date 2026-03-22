@@ -7,12 +7,15 @@
 
 > ## ⛔⛔⛔ AI 에이전트 최우선 규칙 — push 대상 ⛔⛔⛔
 >
-> **기본 push 리모트: `test` (테스트서버)**
+> **기본 push 리모트: `test2` (테스트서버)**
 >
 > ```
-> git push test main          ← 기본. "푸시해" = 이것
+> git push test2 main         ← 기본. "푸시해" = 이것
 > git push origin main        ← 금지. "본서버에 올려" = 이것 (명시적 요청 시에만)
 > ```
+>
+> ### 본서버 push 시 규칙
+> - `git push test2 main && git push origin main` — **둘 다 push**
 >
 > ### 규칙 요약
 > - `git push` 시 리모트를 반드시 명시한다 (`test` 또는 `origin`)
@@ -30,9 +33,9 @@
 >
 > | 검증 항목 | 올바른 값 (프로덕션) | 잘못된 값 (테스트) |
 > |-----------|--------------------|--------------------|
-> | `provider-manager.js` `@update-url` | `cupcake-plugin-manager.vercel.app` | `cupcake-plugin-manager-test.vercel.app` |
+> | `provider-manager.js` `@update-url` | `cupcake-plugin-manager.vercel.app` | `cupcake-plugin-manager-test.vercel.app` 또는 `test-2-*.vercel.app` |
 > | `provider-manager.js` `const _env` | `'production'` | `'test'` |
-> | `dist/provider-manager.js` `@update-url` | `cupcake-plugin-manager.vercel.app` | `cupcake-plugin-manager-test.vercel.app` |
+> | `dist/provider-manager.js` `@update-url` | `cupcake-plugin-manager.vercel.app` | `cupcake-plugin-manager-test.vercel.app` 또는 `test-2-*.vercel.app` |
 > | `dist/provider-manager.js` `const _env` | `'production'` | `'test'` |
 >
 > **자동 검증:** `npm run verify:production-url`

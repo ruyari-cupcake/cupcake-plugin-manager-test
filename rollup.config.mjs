@@ -8,7 +8,7 @@
  * The RisuAI plugin header (src/plugin-header.js) is prepended as a banner.
  *
  * The `@update-url` inside the banner is rewritten at build time from
- * the CPM_ENV environment variable (or defaults to test).
+ * the CPM_ENV environment variable (or defaults to test2).
  *
  * Build usage:
  *   CPM_ENV=production npm run build   (production URL)
@@ -19,12 +19,13 @@ import resolve from '@rollup/plugin-node-resolve';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 // ── Resolve deployment URL from CPM_ENV ──
-const CPM_ENV = process.env.CPM_ENV || 'test';
+const CPM_ENV = process.env.CPM_ENV || 'test2';
 const _URL_MAP = {
   production: 'https://cupcake-plugin-manager.vercel.app',
   test: 'https://cupcake-plugin-manager-test.vercel.app',
+  test2: 'https://test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app',
 };
-const CPM_BASE_URL = _URL_MAP[CPM_ENV] || _URL_MAP.test;
+const CPM_BASE_URL = _URL_MAP[CPM_ENV] || _URL_MAP.test2;
 console.log(`[rollup] CPM_ENV=${CPM_ENV} → ${CPM_BASE_URL}`);
 
 // ── Validate against cpm-url.config.js (consistency check) ──
