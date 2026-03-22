@@ -134,6 +134,8 @@ export const autoUpdaterMethods = {
     _MAIN_UPDATE_RETRY_STORAGE_KEY: 'cpm_pending_main_update',
     _MAIN_UPDATE_RETRY_COOLDOWN: 300000,
     _MAIN_UPDATE_RETRY_MAX_ATTEMPTS: 2,
+    _TOAST_DISMISS_STORAGE_KEY: 'cpm_update_toast_dismissed',
+    _TOAST_DISMISS_COOLDOWN: 6 * 60 * 60 * 1000, // 6 hours
     _mainUpdateInFlight: null,
     _pendingUpdateNames: [],
 
@@ -300,6 +302,17 @@ export const autoUpdaterMethods = {
             if (/** @type {any} */ (window)._cpmVersionChecked) return;
             /** @type {any} */ (window)._cpmVersionChecked = true;
 
+            // OFF + 6시간 쿨다운: 네트워크 호출 자체를 하지 않음 (무거운 환경 보호)
+            if (await safeGetBoolArg('cpm_disable_autoupdate', false)) {
+                try {
+                    const lastToast = localStorage.getItem(this._TOAST_DISMISS_STORAGE_KEY);
+                    if (lastToast && (Date.now() - parseInt(lastToast, 10)) < this._TOAST_DISMISS_COOLDOWN) {
+                        console.log('[CPM AutoCheck] Auto-update OFF + toast cooldown active — skipping network fetch entirely.');
+                        return;
+                    }
+                } catch (_) { /* localStorage unavailable — continue with check */ }
+            }
+
             try {
                 const lastCheck = await Risu.pluginStorage.getItem(this._VERSION_CHECK_STORAGE_KEY);
                 if (lastCheck) {
@@ -401,6 +414,17 @@ export const autoUpdaterMethods = {
             }
             if (/** @type {any} */ (window)._cpmMainVersionChecked) return;
             /** @type {any} */ (window)._cpmMainVersionChecked = true;
+
+            // OFF + 6시간 쿨다운: 600KB 코드 다운로드 완전 방지
+            if (await safeGetBoolArg('cpm_disable_autoupdate', false)) {
+                try {
+                    const lastToast = localStorage.getItem(this._TOAST_DISMISS_STORAGE_KEY);
+                    if (lastToast && (Date.now() - parseInt(lastToast, 10)) < this._TOAST_DISMISS_COOLDOWN) {
+                        console.log('[CPM MainAutoCheck] Auto-update OFF + toast cooldown active — skipping JS fallback entirely.');
+                        return;
+                    }
+                } catch (_) { /* localStorage unavailable — continue */ }
+            }
 
             try {
                 const lastCheck = await Risu.pluginStorage.getItem(this._MAIN_VERSION_CHECK_STORAGE_KEY);

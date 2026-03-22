@@ -191,6 +191,9 @@ export const updateToastMethods = {
             if (!body) { console.debug('[CPM AvailToast] body not found'); return; }
             await body.appendChild(toast);
 
+            // 6시간 쿨다운 기록: OFF 사용자의 반복 토스트 방지
+            try { localStorage.setItem('cpm_update_toast_dismissed', String(Date.now())); } catch (_) { /* ignore */ }
+
             setTimeout(async () => { try { await toast.setStyle('opacity', '1'); await toast.setStyle('transform', 'translateY(0)'); } catch (_) { } }, 50);
             setTimeout(async () => {
                 try { await toast.setStyle('opacity', '0'); await toast.setStyle('transform', 'translateY(12px)');

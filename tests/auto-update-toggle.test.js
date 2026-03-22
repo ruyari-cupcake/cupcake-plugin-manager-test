@@ -352,4 +352,182 @@ describe('auto-update toggle (cpm_disable_autoupdate)', () => {
             expect(updater.safeMainPluginUpdate).not.toHaveBeenCalled();
         });
     });
+
+    // ──────────────────────────────────────────────────
+    // 6-hour toast cooldown (OFF + localStorage)
+    // ──────────────────────────────────────────────────
+    describe('6-hour toast cooldown', () => {
+        /** @type {Record<string,string>} */
+        let store;
+
+        beforeEach(() => {
+            store = {};
+            vi.stubGlobal('localStorage', {
+                getItem: vi.fn((k) => store[k] ?? null),
+                setItem: vi.fn((k, v) => { store[k] = String(v); }),
+                removeItem: vi.fn((k) => { delete store[k]; }),
+            });
+        });
+
+        afterEach(() => {
+            vi.unstubAllGlobals();
+        });
+
+        // ── checkVersionsQuiet ──
+
+        it('OFF + no localStorage entry → allows network check + shows toast', async () => {
+            h._safeGetBoolArgMock.mockImplementation(async (key, def) => {
+                if (key === 'cpm_disable_autoupdate') return true;
+                return def;
+            });
+
+            mockManifestFetch(makeManifest('1.21.0'));
+            updater = makeUpdater();
+
+            const promise = updater.checkVersionsQuiet();
+            await vi.advanceTimersByTimeAsync(5000);
+            await promise;
+
+            // Network happened → toast shown
+            expect(h.risu.risuFetch).toHaveBeenCalled();
+            expect(updater._showMainUpdateAvailableToast).toHaveBeenCalledWith('1.20.0', '1.21.0', 'test changes');
+        });
+
+        it('OFF + localStorage within 6h → skips network entirely', async () => {
+            h._safeGetBoolArgMock.mockImplementation(async (key, def) => {
+                if (key === 'cpm_disable_autoupdate') return true;
+                return def;
+            });
+
+            // Toast shown 2 hours ago
+            store['cpm_update_toast_dismissed'] = String(Date.now() - 2 * 60 * 60 * 1000);
+
+            mockManifestFetch(makeManifest('1.21.0'));
+            updater = makeUpdater();
+
+            const promise = updater.checkVersionsQuiet();
+            await vi.advanceTimersByTimeAsync(5000);
+            await promise;
+
+            // No network, no toast
+            expect(h.risu.risuFetch).not.toHaveBeenCalled();
+            expect(updater._showMainUpdateAvailableToast).not.toHaveBeenCalled();
+        });
+
+        it('OFF + localStorage > 6h → allows check again', async () => {
+            h._safeGetBoolArgMock.mockImplementation(async (key, def) => {
+                if (key === 'cpm_disable_autoupdate') return true;
+                return def;
+            });
+
+            // Toast shown 7 hours ago — cooldown expired
+            store['cpm_update_toast_dismissed'] = String(Date.now() - 7 * 60 * 60 * 1000);
+
+            mockManifestFetch(makeManifest('1.21.0'));
+            updater = makeUpdater();
+
+            const promise = updater.checkVersionsQuiet();
+            await vi.advanceTimersByTimeAsync(5000);
+            await promise;
+
+            // Network happened, toast shown again
+            expect(h.risu.risuFetch).toHaveBeenCalled();
+            expect(updater._showMainUpdateAvailableToast).toHaveBeenCalledWith('1.20.0', '1.21.0', 'test changes');
+        });
+
+        it('ON (auto-update enabled) → ignores localStorage cooldown entirely', async () => {
+            h._safeGetBoolArgMock.mockImplementation(async (key, def) => def);
+
+            // Even with a recent toast timestamp, auto-update ON proceeds normally
+            store['cpm_update_toast_dismissed'] = String(Date.now() - 1 * 60 * 1000); // 1 min ago
+
+            mockManifestFetch(makeManifest('1.21.0'));
+            updater = makeUpdater();
+
+            const promise = updater.checkVersionsQuiet();
+            await vi.advanceTimersByTimeAsync(5000);
+            await promise;
+
+            // Normal ON behavior: installs update, does NOT show toast
+            expect(updater.safeMainPluginUpdate).toHaveBeenCalledWith('1.21.0', 'test changes');
+            expect(updater._showMainUpdateAvailableToast).not.toHaveBeenCalled();
+        });
+
+        it('OFF + localStorage throws → falls through to network check', async () => {
+            h._safeGetBoolArgMock.mockImplementation(async (key, def) => {
+                if (key === 'cpm_disable_autoupdate') return true;
+                return def;
+            });
+
+            // Make localStorage.getItem throw
+            vi.stubGlobal('localStorage', {
+                getItem: vi.fn(() => { throw new Error('storage disabled'); }),
+                setItem: vi.fn(),
+                removeItem: vi.fn(),
+            });
+
+            mockManifestFetch(makeManifest('1.21.0'));
+            updater = makeUpdater();
+
+            const promise = updater.checkVersionsQuiet();
+            await vi.advanceTimersByTimeAsync(5000);
+            await promise;
+
+            // Falls through → network check happens
+            expect(h.risu.risuFetch).toHaveBeenCalled();
+            expect(updater._showMainUpdateAvailableToast).toHaveBeenCalled();
+        });
+
+        // ── checkMainPluginVersionQuiet ──
+
+        it('checkMainPluginVersionQuiet: OFF + within 6h → skips JS download', async () => {
+            h._safeGetBoolArgMock.mockImplementation(async (key, def) => {
+                if (key === 'cpm_disable_autoupdate') return true;
+                return def;
+            });
+
+            // Recently shown
+            store['cpm_update_toast_dismissed'] = String(Date.now() - 1 * 60 * 60 * 1000);
+
+            const remoteCode = `// @version 1.21.0\n// @changes js fallback\nconsole.log("hello");`;
+            h.risu.nativeFetch.mockResolvedValue({
+                ok: true, status: 200,
+                headers: { get: () => null },
+                text: async () => remoteCode,
+            });
+
+            updater = makeUpdater();
+
+            await updater.checkMainPluginVersionQuiet();
+
+            // No network at all
+            expect(h.risu.nativeFetch).not.toHaveBeenCalled();
+            expect(updater._showMainUpdateAvailableToast).not.toHaveBeenCalled();
+        });
+
+        it('checkMainPluginVersionQuiet: OFF + > 6h → allows JS fallback check', async () => {
+            h._safeGetBoolArgMock.mockImplementation(async (key, def) => {
+                if (key === 'cpm_disable_autoupdate') return true;
+                return def;
+            });
+
+            // 8 hours ago — expired
+            store['cpm_update_toast_dismissed'] = String(Date.now() - 8 * 60 * 60 * 1000);
+
+            const remoteCode = `// @version 1.21.0\n// @changes js fallback change\nconsole.log("hello");`;
+            h.risu.nativeFetch.mockResolvedValue({
+                ok: true, status: 200,
+                headers: { get: () => null },
+                text: async () => remoteCode,
+            });
+
+            updater = makeUpdater();
+
+            await updater.checkMainPluginVersionQuiet();
+
+            // Network + toast
+            expect(h.risu.nativeFetch).toHaveBeenCalled();
+            expect(updater._showMainUpdateAvailableToast).toHaveBeenCalledWith('1.20.0', '1.21.0', 'js fallback change');
+        });
+    });
 });
