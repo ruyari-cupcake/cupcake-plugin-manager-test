@@ -578,6 +578,30 @@ describe('proxyDirect + proxyKey end-to-end', () => {
         expect(fetchedUrl).toContain('/v1/chat/completions');
     });
 
+    it('Rewrite mode merges proxy URL query params with original URL query params', async () => {
+        h.state.CUSTOM_MODELS_CACHE = [makeModel({
+            url: 'https://api.openai.com/v1/chat/completions?stream=true',
+            proxyUrl: 'https://my-proxy.kr/api?auth=secret123',
+            proxyDirect: false,
+            proxyKey: '',
+        })];
+
+        h.mockSmartFetch.mockResolvedValueOnce(
+            makeOkJsonResponse({ choices: [{ message: { content: 'merged' } }] })
+        );
+
+        await fetchByProviderId(
+            { provider: 'Custom', name: '[Test] Proxy Direct', uniqueId: 'proxy-direct-test' },
+            BASIC_ARGS,
+        );
+
+        const fetchedUrl = h.mockSmartFetch.mock.calls[0][0];
+        // Both proxy and original query params should be present
+        expect(fetchedUrl).toContain('auth=secret123');
+        expect(fetchedUrl).toContain('stream=true');
+        expect(fetchedUrl).toContain('/v1/chat/completions');
+    });
+
     it('proxyKey with embedded newlines is sanitized', async () => {
         h.state.CUSTOM_MODELS_CACHE = [makeModel({
             proxyKey: 'mytoken\r\nX-Evil: hacked',
