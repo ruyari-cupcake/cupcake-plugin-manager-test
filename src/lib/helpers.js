@@ -112,3 +112,20 @@ export function getSubPluginFileAccept() {
     } catch (_) {}
     return '.js,.mjs,text/javascript,application/javascript';
 }
+
+/**
+ * Body corruption detection regex — matches common API error messages
+ * that indicate the request JSON was truncated or corrupted in transit.
+ * @type {RegExp}
+ */
+const _BODY_CORRUPTION_RE = /not valid JSON|invalid_request_body|Could not parse|Unexpected token|unexpected EOF|Invalid JSON/i;
+
+/**
+ * Test whether an error response body looks like a JSON body-corruption error
+ * (truncated transfer, V3 bridge buffer neutering, etc.).
+ * @param {string} text - Error response text to check.
+ * @returns {boolean}
+ */
+export function isBodyCorruptionError(text) {
+    return _BODY_CORRUPTION_RE.test(text);
+}

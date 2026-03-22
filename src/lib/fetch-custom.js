@@ -38,6 +38,7 @@ import {
 } from './copilot-headers.js';
 import { KeyPool } from './key-pool.js';
 import { updateApiRequest as _updateApiRequest } from './api-request-log.js';
+import { MAX_BODY_BYTES, BODY_WARN_BYTES, RETRY_DELAY_BASE_MS, RETRY_DELAY_CAP_MS } from './constants.js';
 
 /** @param {number} ms */
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -407,6 +408,7 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
     }
     const _isProxied = !!_proxyUrl;
     const _proxyDirect = !!config.proxyDirect;
+    const _proxyKey = (config.proxyKey || '').trim();
     // 범용 프록시 지원: Rewrite 전 원래 대상 URL 저장 (X-Target-URL 헤더로 전달)
     const _originalTargetUrl = effectiveUrl || '';
     if (_proxyUrl && effectiveUrl) {
@@ -446,20 +448,22 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
      */
     const _smartFetch = (_proxyDirect && _proxyUrl)
         ? async (/** @type {string} */ url, /** @type {RequestInit & Record<string, any>} */ options = {}) => {
-            const directHeaders = {
+            const directHeaders = /** @type {Record<string, string>} */ ({
                 ...(/** @type {Record<string, string>} */ (options.headers) || {}),
                 'X-Target-URL': url,
-            };
+            });
+            if (_proxyKey) directHeaders['X-Proxy-Token'] = _proxyKey;
             console.log(`[Cupcake PM] [direct proxy] → ${_proxyUrl.substring(0, 60)} (target: ${url.substring(0, 60)})`);
             return smartNativeFetch(_proxyUrl, { ...options, headers: directHeaders });
         }
         : (_isProxied && _originalTargetUrl)
             ? async (/** @type {string} */ url, /** @type {RequestInit & Record<string, any>} */ options = {}) => {
                 // Rewrite mode: 범용 프록시가 원래 대상을 알 수 있도록 X-Target-URL 전달
-                const rewriteHeaders = {
+                const rewriteHeaders = /** @type {Record<string, string>} */ ({
                     ...(/** @type {Record<string, string>} */ (options.headers) || {}),
                     'X-Target-URL': _originalTargetUrl,
-                };
+                });
+                if (_proxyKey) rewriteHeaders['X-Proxy-Token'] = _proxyKey;
                 return smartNativeFetch(url, { ...options, headers: rewriteHeaders });
             }
             : smartNativeFetch;
@@ -489,7 +493,7 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
                 response?.body?.cancel?.();
                 attempt++;
                 const retryAfterMs = _parseRetryAfterMs(response?.headers);
-                const exponentialDelay = Math.min(1000 * Math.pow(2, attempt - 1), 16000);
+                const exponentialDelay = Math.min(RETRY_DELAY_BASE_MS * Math.pow(2, attempt - 1), RETRY_DELAY_CAP_MS);
                 const retryDelay = retryAfterMs || exponentialDelay;
                 console.warn(`[Cupcake PM] ${label} retry ${attempt}/${maxAttempts - 1} after HTTP ${status} (delay: ${retryDelay}ms)`);
                 await sleep(retryDelay);
@@ -662,10 +666,10 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
 
             const finalBody = sanitizeBodyJSON(safeStringify(streamBody));
             const _streamBodyLen = finalBody.length;
-            if (_streamBodyLen > 10_000_000) {
+            if (_streamBodyLen > MAX_BODY_BYTES) {
                 return { success: false, content: `[Cupcake PM] Request body too large (${(_streamBodyLen / 1_048_576).toFixed(1)} MB). V3 bridge limit is ~10 MB. Reduce chat history or remove images.` };
             }
-            if (_streamBodyLen > 5_000_000) {
+            if (_streamBodyLen > BODY_WARN_BYTES) {
                 console.warn(`[Cupcake PM] ⚠️ Streaming body size: ${(_streamBodyLen / 1_048_576).toFixed(2)} MB (${body.messages?.length || 0} messages). Large bodies may cause 'unexpected EOF' if V3 bridge truncates data.`);
             }
             if (_reqId) _updateApiRequest(_reqId, {
@@ -795,10 +799,10 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
         // ── Non-streaming fallback ──
         const _nonStreamBody = sanitizeBodyJSON(safeStringify(body));
         const _nonStreamBodyLen = _nonStreamBody.length;
-        if (_nonStreamBodyLen > 10_000_000) {
+        if (_nonStreamBodyLen > MAX_BODY_BYTES) {
             return { success: false, content: `[Cupcake PM] Request body too large (${(_nonStreamBodyLen / 1_048_576).toFixed(1)} MB). V3 bridge limit is ~10 MB. Reduce chat history or remove images.` };
         }
-        if (_nonStreamBodyLen > 5_000_000) {
+        if (_nonStreamBodyLen > BODY_WARN_BYTES) {
             console.warn(`[Cupcake PM] ⚠️ Non-stream body size: ${(_nonStreamBodyLen / 1_048_576).toFixed(2)} MB (${body.messages?.length || 0} messages). Large bodies may cause 'unexpected EOF' if V3 bridge truncates data.`);
         }
         if (_reqId) _updateApiRequest(_reqId, {

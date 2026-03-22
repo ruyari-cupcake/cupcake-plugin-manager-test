@@ -61,6 +61,7 @@ function setupDom() {
                 <span id="cpm-cm-auth-type-hint" class="hidden"></span>
                 <span id="cpm-cm-key-label"></span>
                 <input type="text" id="cpm-cm-proxy-url" value="">
+                <input type="text" id="cpm-cm-proxy-key" value="">
                 <input type="checkbox" id="cpm-cm-proxy-direct">
                 <select id="cpm-cm-format"><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="google">Google</option></select>
                 <select id="cpm-cm-tok"><option value="o200k_base">o200k_base</option><option value="llama3">llama3</option></select>

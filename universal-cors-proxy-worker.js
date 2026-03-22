@@ -29,8 +29,8 @@
 // ── Copilot 호환 상수 (Copilot 모드 전용) ──
 const COPILOT_TOKEN_URL = "https://api.github.com/copilot_internal/v2/token";
 const COPILOT_API_BASE = "https://api.githubcopilot.com";
-const CHAT_VERSION = "0.26.2025032001";
-const CODE_VERSION = "1.99.2025032001";
+const CHAT_VERSION = "0.40.2026031401";
+const CODE_VERSION = "1.111.0";
 const USER_AGENT = `GitHubCopilotChat/${CHAT_VERSION}`;
 
 const COPILOT_PATHS = new Set([

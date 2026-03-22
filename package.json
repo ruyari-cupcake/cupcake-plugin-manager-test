@@ -1,7 +1,7 @@
 {
   "name": "cupcake-provider-manager",
   "type": "module",
-  "version": "1.22.10",
+  "version": "1.22.11",
   "private": true,
   "engines": {
     "node": ">=20"
@@ -14,6 +14,7 @@
     "test:watch": "vitest --watch",
     "test:coverage": "vitest run --coverage",
     "verify:release-sync": "node scripts/verify-release-sync.cjs",
+    "verify:copilot-version-sync": "node scripts/verify-copilot-version-sync.cjs",
     "build:css": "node scripts/build-tailwind.cjs",
     "build": "npm run build:css && rollup -c rollup.config.mjs",
     "build:production": "node scripts/build-production.cjs",

@@ -126,6 +126,7 @@ describe('custom-model-serialization', () => {
             url: 'https://api.example.com',
             proxyUrl: 'https://proxy.example.com',
             proxyDirect: false,
+            proxyKey: '',
             format: 'openai',
             tok: 'o200k_base',
             responsesMode: 'on',

@@ -4,6 +4,7 @@
  * Supports whitespace-separated key pools and JSON credential rotation (Vertex AI).
  * Dependency-injected via setGetArgFn() for testability.
  */
+import { MAX_KEY_RETRIES } from './constants.js';
 
 /**
  * KeyPool: key rotation. Keys are whitespace-separated in //@arg fields.
@@ -77,38 +78,53 @@ export const KeyPool = {
     },
 
     /**
-     * Pick key → fetchFn(key) → on retryable error, drain and retry.
+     * Internal rotation implementation shared by withRotation and withJsonRotation.
      * @param {string} argName
+     * @param {(argName: string) => Promise<string>} pickFn
+     * @param {(argName: string) => string} noKeyMsgFn
+     * @param {string} logLabel
      * @param {(key: string) => Promise<any>} fetchFn
-     * @param {{maxRetries?: number, isRetryable?: (result: any) => boolean}} [opts]
+     * @param {{maxRetries?: number, isRetryable?: (result: any) => boolean}} opts
      */
-    async withRotation(argName, fetchFn, opts = {}) {
-        const maxRetries = opts.maxRetries || 30;
+    async _withRotationImpl(argName, pickFn, noKeyMsgFn, logLabel, fetchFn, opts) {
+        const maxRetries = opts.maxRetries || MAX_KEY_RETRIES;
         const isRetryable = opts.isRetryable || ((/** @type {any} */ result) => {
             if (!result._status) return false;
             return result._status === 429 || result._status === 529 || result._status === 503;
         });
 
         for (let attempt = 0; attempt < maxRetries; attempt++) {
-            const key = await this.pick(argName);
+            const key = await pickFn.call(this, argName);
             if (!key) {
-                return { success: false, content: `[KeyPool] ${argName}에 사용 가능한 API 키가 없습니다. 설정에서 키를 확인하세요.` };
+                return { success: false, content: noKeyMsgFn(argName) };
             }
 
             const result = await fetchFn(key);
             if (result.success || !isRetryable(result)) return result;
 
             const remaining = this.drain(argName, key);
-            console.warn(`[KeyPool] 🔄 키 교체: ${argName} (HTTP ${result._status}, 남은 키: ${remaining}개, 시도: ${attempt + 1})`);
+            console.warn(`[KeyPool] 🔄 ${logLabel} 교체: ${argName} (HTTP ${result._status}, 남은 ${logLabel}: ${remaining}개, 시도: ${attempt + 1})`);
 
             if (remaining === 0) {
-                console.warn(`[KeyPool] ⚠️ ${argName}의 모든 키가 소진되었습니다. 키를 재파싱합니다.`);
+                console.warn(`[KeyPool] ⚠️ ${argName}의 모든 ${logLabel}가 소진되었습니다. 키를 재파싱합니다.`);
                 this.reset(argName);
-                // Don't return — reset() clears lastRaw so next pick() re-parses from settings.
-                // The loop continues and pick() will return a fresh key set.
             }
         }
         return { success: false, content: `[KeyPool] 최대 재시도 횟수(${maxRetries})를 초과했습니다.` };
+    },
+
+    /**
+     * Pick key → fetchFn(key) → on retryable error, drain and retry.
+     * @param {string} argName
+     * @param {(key: string) => Promise<any>} fetchFn
+     * @param {{maxRetries?: number, isRetryable?: (result: any) => boolean}} [opts]
+     */
+    async withRotation(argName, fetchFn, opts = {}) {
+        return this._withRotationImpl(
+            argName, this.pick,
+            (name) => `[KeyPool] ${name}에 사용 가능한 API 키가 없습니다. 설정에서 키를 확인하세요.`,
+            '키', fetchFn, opts,
+        );
     },
 
     // ── JSON Credential Rotation (Vertex AI 등 JSON 크레덴셜용) ──
@@ -199,36 +215,15 @@ export const KeyPool = {
      * @param {{maxRetries?: number, isRetryable?: (result: any) => boolean}} [opts]
      */
     async withJsonRotation(argName, fetchFn, opts = {}) {
-        const maxRetries = opts.maxRetries || 30;
-        const isRetryable = opts.isRetryable || ((/** @type {any} */ result) => {
-            if (!result._status) return false;
-            return result._status === 429 || result._status === 529 || result._status === 503;
-        });
-
-        for (let attempt = 0; attempt < maxRetries; attempt++) {
-            const credJson = await this.pickJson(argName);
-            if (!credJson) {
-                const errorMessage = this._pools[argName]?.error;
-                return {
-                    success: false,
-                    content: errorMessage
-                        ? `[KeyPool] ${errorMessage}`
-                        : `[KeyPool] ${argName}에 사용 가능한 JSON 인증 정보가 없습니다. 설정에서 확인하세요.`
-                };
-            }
-
-            const result = await fetchFn(credJson);
-            if (result.success || !isRetryable(result)) return result;
-
-            const remaining = this.drain(argName, credJson);
-            console.warn(`[KeyPool] 🔄 JSON 인증 교체: ${argName} (HTTP ${result._status}, 남은 인증: ${remaining}개, 시도: ${attempt + 1})`);
-
-            if (remaining === 0) {
-                console.warn(`[KeyPool] ⚠️ ${argName}의 모든 JSON 인증이 소진되었습니다. 키를 재파싱합니다.`);
-                this.reset(argName);
-                // Don't return — reset() clears lastRaw so next pickJson() re-parses from settings.
-            }
-        }
-        return { success: false, content: `[KeyPool] 최대 재시도 횟수(${maxRetries})를 초과했습니다.` };
+        return this._withRotationImpl(
+            argName, this.pickJson,
+            (name) => {
+                const errorMessage = this._pools[name]?.error;
+                return errorMessage
+                    ? `[KeyPool] ${errorMessage}`
+                    : `[KeyPool] ${name}에 사용 가능한 JSON 인증 정보가 없습니다. 설정에서 확인하세요.`;
+            },
+            'JSON 인증', fetchFn, opts,
+        );
     }
 };

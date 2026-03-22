@@ -72,6 +72,7 @@ export function normalizeCustomModel(raw, options = {}) {
             return _pUrl;
         })(),
         proxyDirect: toBool(raw?.proxyDirect),
+        proxyKey: toText(raw?.proxyKey),
         format: toText(raw?.format || 'openai') || 'openai',
         tok: toText(raw?.tok || 'o200k_base') || 'o200k_base',
         responsesMode: toText(raw?.responsesMode || 'auto') || 'auto',

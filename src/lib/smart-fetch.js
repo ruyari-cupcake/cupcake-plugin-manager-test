@@ -9,6 +9,8 @@
  * Dependency: Risu from shared-state.js
  */
 import { Risu, safeGetBoolArg } from './shared-state.js';
+import { BODY_WARN_BYTES } from './constants.js';
+import { isBodyCorruptionError } from './helpers.js';
 // checkStreamCapability removed — compat mode is manual-toggle only now
 
 /**
@@ -111,7 +113,7 @@ export async function smartNativeFetch(url, options = {}) {
     // overhead and could mask truncation bugs.
     if (options.method === 'POST' && typeof options.body === 'string') {
         const _bodyLen = options.body.length;
-        if (_bodyLen > 5_000_000) {
+        if (_bodyLen > BODY_WARN_BYTES) {
             console.warn(`[CupcakePM] ⚠️ Large request body: ${(_bodyLen / 1_048_576).toFixed(2)} MB — V3 bridge transfer may truncate.`);
         }
         // Quick JSON validity check (catches corruption before network)
@@ -193,7 +195,7 @@ export async function smartNativeFetch(url, options = {}) {
             if (nfRes && nfRes.status === 400 && (options.method || 'POST') !== 'GET') {
                 let _gErrText = '';
                 try { _gErrText = await nfRes.clone().text(); } catch (_) { /* ignore clone failure */ }
-                const _gIsBodyCorruption = /not valid JSON|invalid_request_body|Could not parse|Unexpected token|unexpected EOF|Invalid JSON/i.test(_gErrText);
+                const _gIsBodyCorruption = isBodyCorruptionError(_gErrText);
                 if (_gIsBodyCorruption) {
                     console.warn(`[CupcakePM] [Strategy:Google-nativeFetch] ❌ body-corruption 400 detected; falling through to risuFetch. Error: ${_gErrText.substring(0, 200)}`);
                     // Fall through to risuFetch below
@@ -235,7 +237,7 @@ export async function smartNativeFetch(url, options = {}) {
                     if (nfRes.status === 400) {
                         let _errText = '';
                         try { _errText = await nfRes.clone().text(); } catch (_) { /* ignore clone failure */ }
-                        const _isBodyCorruption = /not valid JSON|invalid_request_body|Could not parse|Unexpected token|unexpected EOF/i.test(_errText);
+                        const _isBodyCorruption = isBodyCorruptionError(_errText);
                         if (_isBodyCorruption) {
                             console.warn(`[CupcakePM] Copilot nativeFetch returned 400 body-corruption error; trying risuFetch fallback.`);
                             // Fall through to risuFetch below instead of returning the 400
@@ -363,7 +365,7 @@ export async function smartNativeFetch(url, options = {}) {
             if (res && res.status === 400) {
                 let _nfErrText = '';
                 try { _nfErrText = await res.clone().text(); } catch (_) { /* ignore */ }
-                const _nfIsBodyCorruption = /not valid JSON|invalid_request_body|Could not parse|Unexpected token|unexpected EOF|Invalid JSON/i.test(_nfErrText);
+                const _nfIsBodyCorruption = isBodyCorruptionError(_nfErrText);
                 if (_nfIsBodyCorruption) {
                     console.error(`[CupcakePM] [Strategy:nativeFetch-fallback] ❌ body-corruption 400 detected (last resort). Error: ${_nfErrText.substring(0, 200)}`);
                 }

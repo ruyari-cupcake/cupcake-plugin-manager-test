@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.10
-//@changes v1.22.10: Copilot 토큰 회전 디버그 로깅 + 400/403/401 재시도 강화
+//@version 1.22.11
+//@changes v1.22.11: Proxy Access Token (proxyKey) 필드 추가 — X-Proxy-Token 헤더 지원
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================
@@ -190,7 +190,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.22.10';
+    const CPM_VERSION = '1.22.11';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -386,6 +386,23 @@ var CupcakeProviderManager = (function (exports) {
             }
         } catch (_) {}
         return '.js,.mjs,text/javascript,application/javascript';
+    }
+
+    /**
+     * Body corruption detection regex — matches common API error messages
+     * that indicate the request JSON was truncated or corrupted in transit.
+     * @type {RegExp}
+     */
+    const _BODY_CORRUPTION_RE = /not valid JSON|invalid_request_body|Could not parse|Unexpected token|unexpected EOF|Invalid JSON/i;
+
+    /**
+     * Test whether an error response body looks like a JSON body-corruption error
+     * (truncated transfer, V3 bridge buffer neutering, etc.).
+     * @param {string} text - Error response text to check.
+     * @returns {boolean}
+     */
+    function isBodyCorruptionError(text) {
+        return _BODY_CORRUPTION_RE.test(text);
     }
 
     // @ts-check
@@ -1840,6 +1857,29 @@ var CupcakeProviderManager = (function (exports) {
 
     // @ts-check
     /**
+     * constants.js — Centralized magic numbers for the Cupcake Provider Manager.
+     *
+     * Avoids unnamed numeric literals scattered across modules.
+     * Each constant documents its purpose and where it is consumed.
+     */
+
+    /** Maximum request body size (bytes) before hard-reject. ~10 MB V3 bridge limit. */
+    const MAX_BODY_BYTES = 10_000_000;
+
+    /** Warning threshold for request body size (bytes). ~5 MB. */
+    const BODY_WARN_BYTES = 5_000_000;
+
+    /** Default max key-rotation retries before giving up (KeyPool). */
+    const MAX_KEY_RETRIES = 30;
+
+    /** Base delay (ms) for exponential back-off on HTTP retries. */
+    const RETRY_DELAY_BASE_MS = 1000;
+
+    /** Cap (ms) for exponential back-off delay. */
+    const RETRY_DELAY_CAP_MS = 16_000;
+
+    // @ts-check
+    /**
      * key-pool.js — API Key rotation engine.
      * Supports whitespace-separated key pools and JSON credential rotation (Vertex AI).
      * Dependency-injected via setGetArgFn() for testability.
@@ -1917,38 +1957,53 @@ var CupcakeProviderManager = (function (exports) {
         },
 
         /**
-         * Pick key → fetchFn(key) → on retryable error, drain and retry.
+         * Internal rotation implementation shared by withRotation and withJsonRotation.
          * @param {string} argName
+         * @param {(argName: string) => Promise<string>} pickFn
+         * @param {(argName: string) => string} noKeyMsgFn
+         * @param {string} logLabel
          * @param {(key: string) => Promise<any>} fetchFn
-         * @param {{maxRetries?: number, isRetryable?: (result: any) => boolean}} [opts]
+         * @param {{maxRetries?: number, isRetryable?: (result: any) => boolean}} opts
          */
-        async withRotation(argName, fetchFn, opts = {}) {
-            const maxRetries = opts.maxRetries || 30;
+        async _withRotationImpl(argName, pickFn, noKeyMsgFn, logLabel, fetchFn, opts) {
+            const maxRetries = opts.maxRetries || MAX_KEY_RETRIES;
             const isRetryable = opts.isRetryable || ((/** @type {any} */ result) => {
                 if (!result._status) return false;
                 return result._status === 429 || result._status === 529 || result._status === 503;
             });
 
             for (let attempt = 0; attempt < maxRetries; attempt++) {
-                const key = await this.pick(argName);
+                const key = await pickFn.call(this, argName);
                 if (!key) {
-                    return { success: false, content: `[KeyPool] ${argName}에 사용 가능한 API 키가 없습니다. 설정에서 키를 확인하세요.` };
+                    return { success: false, content: noKeyMsgFn(argName) };
                 }
 
                 const result = await fetchFn(key);
                 if (result.success || !isRetryable(result)) return result;
 
                 const remaining = this.drain(argName, key);
-                console.warn(`[KeyPool] 🔄 키 교체: ${argName} (HTTP ${result._status}, 남은 키: ${remaining}개, 시도: ${attempt + 1})`);
+                console.warn(`[KeyPool] 🔄 ${logLabel} 교체: ${argName} (HTTP ${result._status}, 남은 ${logLabel}: ${remaining}개, 시도: ${attempt + 1})`);
 
                 if (remaining === 0) {
-                    console.warn(`[KeyPool] ⚠️ ${argName}의 모든 키가 소진되었습니다. 키를 재파싱합니다.`);
+                    console.warn(`[KeyPool] ⚠️ ${argName}의 모든 ${logLabel}가 소진되었습니다. 키를 재파싱합니다.`);
                     this.reset(argName);
-                    // Don't return — reset() clears lastRaw so next pick() re-parses from settings.
-                    // The loop continues and pick() will return a fresh key set.
                 }
             }
             return { success: false, content: `[KeyPool] 최대 재시도 횟수(${maxRetries})를 초과했습니다.` };
+        },
+
+        /**
+         * Pick key → fetchFn(key) → on retryable error, drain and retry.
+         * @param {string} argName
+         * @param {(key: string) => Promise<any>} fetchFn
+         * @param {{maxRetries?: number, isRetryable?: (result: any) => boolean}} [opts]
+         */
+        async withRotation(argName, fetchFn, opts = {}) {
+            return this._withRotationImpl(
+                argName, this.pick,
+                (name) => `[KeyPool] ${name}에 사용 가능한 API 키가 없습니다. 설정에서 키를 확인하세요.`,
+                '키', fetchFn, opts,
+            );
         },
 
         // ── JSON Credential Rotation (Vertex AI 등 JSON 크레덴셜용) ──
@@ -2039,37 +2094,16 @@ var CupcakeProviderManager = (function (exports) {
          * @param {{maxRetries?: number, isRetryable?: (result: any) => boolean}} [opts]
          */
         async withJsonRotation(argName, fetchFn, opts = {}) {
-            const maxRetries = opts.maxRetries || 30;
-            const isRetryable = opts.isRetryable || ((/** @type {any} */ result) => {
-                if (!result._status) return false;
-                return result._status === 429 || result._status === 529 || result._status === 503;
-            });
-
-            for (let attempt = 0; attempt < maxRetries; attempt++) {
-                const credJson = await this.pickJson(argName);
-                if (!credJson) {
-                    const errorMessage = this._pools[argName]?.error;
-                    return {
-                        success: false,
-                        content: errorMessage
-                            ? `[KeyPool] ${errorMessage}`
-                            : `[KeyPool] ${argName}에 사용 가능한 JSON 인증 정보가 없습니다. 설정에서 확인하세요.`
-                    };
-                }
-
-                const result = await fetchFn(credJson);
-                if (result.success || !isRetryable(result)) return result;
-
-                const remaining = this.drain(argName, credJson);
-                console.warn(`[KeyPool] 🔄 JSON 인증 교체: ${argName} (HTTP ${result._status}, 남은 인증: ${remaining}개, 시도: ${attempt + 1})`);
-
-                if (remaining === 0) {
-                    console.warn(`[KeyPool] ⚠️ ${argName}의 모든 JSON 인증이 소진되었습니다. 키를 재파싱합니다.`);
-                    this.reset(argName);
-                    // Don't return — reset() clears lastRaw so next pickJson() re-parses from settings.
-                }
-            }
-            return { success: false, content: `[KeyPool] 최대 재시도 횟수(${maxRetries})를 초과했습니다.` };
+            return this._withRotationImpl(
+                argName, this.pickJson,
+                (name) => {
+                    const errorMessage = this._pools[name]?.error;
+                    return errorMessage
+                        ? `[KeyPool] ${errorMessage}`
+                        : `[KeyPool] ${name}에 사용 가능한 JSON 인증 정보가 없습니다. 설정에서 확인하세요.`;
+                },
+                'JSON 인증', fetchFn, opts,
+            );
         }
     };
 
@@ -3739,7 +3773,7 @@ var CupcakeProviderManager = (function (exports) {
         // overhead and could mask truncation bugs.
         if (options.method === 'POST' && typeof options.body === 'string') {
             const _bodyLen = options.body.length;
-            if (_bodyLen > 5_000_000) {
+            if (_bodyLen > BODY_WARN_BYTES) {
                 console.warn(`[CupcakePM] ⚠️ Large request body: ${(_bodyLen / 1_048_576).toFixed(2)} MB — V3 bridge transfer may truncate.`);
             }
             // Quick JSON validity check (catches corruption before network)
@@ -3821,7 +3855,7 @@ var CupcakeProviderManager = (function (exports) {
                 if (nfRes && nfRes.status === 400 && (options.method || 'POST') !== 'GET') {
                     let _gErrText = '';
                     try { _gErrText = await nfRes.clone().text(); } catch (_) { /* ignore clone failure */ }
-                    const _gIsBodyCorruption = /not valid JSON|invalid_request_body|Could not parse|Unexpected token|unexpected EOF|Invalid JSON/i.test(_gErrText);
+                    const _gIsBodyCorruption = isBodyCorruptionError(_gErrText);
                     if (_gIsBodyCorruption) {
                         console.warn(`[CupcakePM] [Strategy:Google-nativeFetch] ❌ body-corruption 400 detected; falling through to risuFetch. Error: ${_gErrText.substring(0, 200)}`);
                         // Fall through to risuFetch below
@@ -3863,7 +3897,7 @@ var CupcakeProviderManager = (function (exports) {
                         if (nfRes.status === 400) {
                             let _errText = '';
                             try { _errText = await nfRes.clone().text(); } catch (_) { /* ignore clone failure */ }
-                            const _isBodyCorruption = /not valid JSON|invalid_request_body|Could not parse|Unexpected token|unexpected EOF/i.test(_errText);
+                            const _isBodyCorruption = isBodyCorruptionError(_errText);
                             if (_isBodyCorruption) {
                                 console.warn(`[CupcakePM] Copilot nativeFetch returned 400 body-corruption error; trying risuFetch fallback.`);
                                 // Fall through to risuFetch below instead of returning the 400
@@ -3991,7 +4025,7 @@ var CupcakeProviderManager = (function (exports) {
                 if (res && res.status === 400) {
                     let _nfErrText = '';
                     try { _nfErrText = await res.clone().text(); } catch (_) { /* ignore */ }
-                    const _nfIsBodyCorruption = /not valid JSON|invalid_request_body|Could not parse|Unexpected token|unexpected EOF|Invalid JSON/i.test(_nfErrText);
+                    const _nfIsBodyCorruption = isBodyCorruptionError(_nfErrText);
                     if (_nfIsBodyCorruption) {
                         console.error(`[CupcakePM] [Strategy:nativeFetch-fallback] ❌ body-corruption 400 detected (last resort). Error: ${_nfErrText.substring(0, 200)}`);
                     }
@@ -6769,6 +6803,7 @@ var CupcakeProviderManager = (function (exports) {
         }
         const _isProxied = !!_proxyUrl;
         const _proxyDirect = !!config.proxyDirect;
+        const _proxyKey = (config.proxyKey || '').trim();
         // 범용 프록시 지원: Rewrite 전 원래 대상 URL 저장 (X-Target-URL 헤더로 전달)
         const _originalTargetUrl = effectiveUrl || '';
         if (_proxyUrl && effectiveUrl) {
@@ -6808,20 +6843,22 @@ var CupcakeProviderManager = (function (exports) {
          */
         const _smartFetch = (_proxyDirect && _proxyUrl)
             ? async (/** @type {string} */ url, /** @type {RequestInit & Record<string, any>} */ options = {}) => {
-                const directHeaders = {
+                const directHeaders = /** @type {Record<string, string>} */ ({
                     ...(/** @type {Record<string, string>} */ (options.headers) || {}),
                     'X-Target-URL': url,
-                };
+                });
+                if (_proxyKey) directHeaders['X-Proxy-Token'] = _proxyKey;
                 console.log(`[Cupcake PM] [direct proxy] → ${_proxyUrl.substring(0, 60)} (target: ${url.substring(0, 60)})`);
                 return smartNativeFetch(_proxyUrl, { ...options, headers: directHeaders });
             }
             : (_isProxied && _originalTargetUrl)
                 ? async (/** @type {string} */ url, /** @type {RequestInit & Record<string, any>} */ options = {}) => {
                     // Rewrite mode: 범용 프록시가 원래 대상을 알 수 있도록 X-Target-URL 전달
-                    const rewriteHeaders = {
+                    const rewriteHeaders = /** @type {Record<string, string>} */ ({
                         ...(/** @type {Record<string, string>} */ (options.headers) || {}),
                         'X-Target-URL': _originalTargetUrl,
-                    };
+                    });
+                    if (_proxyKey) rewriteHeaders['X-Proxy-Token'] = _proxyKey;
                     return smartNativeFetch(url, { ...options, headers: rewriteHeaders });
                 }
                 : smartNativeFetch;
@@ -6851,7 +6888,7 @@ var CupcakeProviderManager = (function (exports) {
                     response?.body?.cancel?.();
                     attempt++;
                     const retryAfterMs = _parseRetryAfterMs(response?.headers);
-                    const exponentialDelay = Math.min(1000 * Math.pow(2, attempt - 1), 16000);
+                    const exponentialDelay = Math.min(RETRY_DELAY_BASE_MS * Math.pow(2, attempt - 1), RETRY_DELAY_CAP_MS);
                     const retryDelay = retryAfterMs || exponentialDelay;
                     console.warn(`[Cupcake PM] ${label} retry ${attempt}/${maxAttempts - 1} after HTTP ${status} (delay: ${retryDelay}ms)`);
                     await sleep(retryDelay);
@@ -7024,10 +7061,10 @@ var CupcakeProviderManager = (function (exports) {
 
                 const finalBody = sanitizeBodyJSON(safeStringify(streamBody));
                 const _streamBodyLen = finalBody.length;
-                if (_streamBodyLen > 10_000_000) {
+                if (_streamBodyLen > MAX_BODY_BYTES) {
                     return { success: false, content: `[Cupcake PM] Request body too large (${(_streamBodyLen / 1_048_576).toFixed(1)} MB). V3 bridge limit is ~10 MB. Reduce chat history or remove images.` };
                 }
-                if (_streamBodyLen > 5_000_000) {
+                if (_streamBodyLen > BODY_WARN_BYTES) {
                     console.warn(`[Cupcake PM] ⚠️ Streaming body size: ${(_streamBodyLen / 1_048_576).toFixed(2)} MB (${body.messages?.length || 0} messages). Large bodies may cause 'unexpected EOF' if V3 bridge truncates data.`);
                 }
                 if (_reqId) updateApiRequest(_reqId, {
@@ -7157,10 +7194,10 @@ var CupcakeProviderManager = (function (exports) {
             // ── Non-streaming fallback ──
             const _nonStreamBody = sanitizeBodyJSON(safeStringify(body));
             const _nonStreamBodyLen = _nonStreamBody.length;
-            if (_nonStreamBodyLen > 10_000_000) {
+            if (_nonStreamBodyLen > MAX_BODY_BYTES) {
                 return { success: false, content: `[Cupcake PM] Request body too large (${(_nonStreamBodyLen / 1_048_576).toFixed(1)} MB). V3 bridge limit is ~10 MB. Reduce chat history or remove images.` };
             }
-            if (_nonStreamBodyLen > 5_000_000) {
+            if (_nonStreamBodyLen > BODY_WARN_BYTES) {
                 console.warn(`[Cupcake PM] ⚠️ Non-stream body size: ${(_nonStreamBodyLen / 1_048_576).toFixed(2)} MB (${body.messages?.length || 0} messages). Large bodies may cause 'unexpected EOF' if V3 bridge truncates data.`);
             }
             if (_reqId) updateApiRequest(_reqId, {
@@ -8794,6 +8831,7 @@ var CupcakeProviderManager = (function (exports) {
                 return _pUrl;
             })(),
             proxyDirect: toBool(raw?.proxyDirect),
+            proxyKey: toText(raw?.proxyKey),
             format: toText(raw?.format || 'openai') || 'openai',
             tok: toText(raw?.tok || 'o200k_base') || 'o200k_base',
             responsesMode: toText(raw?.responsesMode || 'auto') || 'auto',
@@ -8957,7 +8995,7 @@ var CupcakeProviderManager = (function (exports) {
                 <div class="md:col-span-2"><label class="block text-sm font-medium text-gray-400 mb-1">Base URL</label><input type="text" id="cpm-cm-url" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"></div>
                 <div class="md:col-span-2"><label class="block text-sm font-medium text-gray-400 mb-1">인증 방식 (Auth Type)</label><select id="cpm-cm-auth-type" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"><option value="api_key">API Key</option><option value="service_account">Service Account JSON (Vertex AI)</option></select><p id="cpm-cm-auth-type-hint" class="text-[11px] text-amber-400/70 mt-1 hidden">⚠️ Google Cloud Service Account JSON 전체를 아래 필드에 붙여넣으세요. Vertex AI 엔드포인트 전용입니다.</p></div>
                 <div class="md:col-span-2"><label class="block text-sm font-medium text-gray-400 mb-1" id="cpm-cm-key-label">API Key (여러 개 → 공백/줄바꿈 구분 → 자동 키회전)</label><textarea id="cpm-cm-key" rows="2" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white font-mono text-sm" spellcheck="false" placeholder="sk-xxxx"></textarea></div>
-                <div class="md:col-span-2"><label class="block text-sm font-medium text-gray-400 mb-1">CORS Proxy URL <span class="text-xs text-yellow-400">(선택사항 — 모든 API에 적용 가능)</span></label><input type="text" id="cpm-cm-proxy-url" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white font-mono text-sm" placeholder="https://my-proxy.example.com/proxy (비워두면 직접 요청)"><label class="flex items-center space-x-2 text-xs text-gray-400 mt-2 cursor-pointer"><input type="checkbox" id="cpm-cm-proxy-direct" class="form-checkbox bg-gray-800"> <span>Direct 모드 <span class="text-yellow-400">(프록시 URL로 직접 요청, 원본 URL은 X-Target-URL 헤더로 전달. 기본값은 도메인 교체 방식)</span></span></label></div>
+                <div class="md:col-span-2"><label class="block text-sm font-medium text-gray-400 mb-1">CORS Proxy URL <span class="text-xs text-yellow-400">(선택사항 — 모든 API에 적용 가능)</span></label><input type="text" id="cpm-cm-proxy-url" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white font-mono text-sm" placeholder="https://my-proxy.example.com/proxy (비워두면 직접 요청)"><label class="block text-sm font-medium text-gray-400 mb-1 mt-2">Proxy Access Token <span class="text-xs text-yellow-400">(선택사항 — 프록시 접근 제한용, X-Proxy-Token 헤더로 전송)</span></label><input type="text" id="cpm-cm-proxy-key" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white font-mono text-sm" placeholder="프록시 접근 토큰 (비워두면 전송 안 함)"><label class="flex items-center space-x-2 text-xs text-gray-400 mt-2 cursor-pointer"><input type="checkbox" id="cpm-cm-proxy-direct" class="form-checkbox bg-gray-800"> <span>Direct 모드 <span class="text-yellow-400">(프록시 URL로 직접 요청, 원본 URL은 X-Target-URL 헤더로 전달. 기본값은 도메인 교체 방식)</span></span></label></div>
                 <div class="md:col-span-2 mt-4 border-t border-gray-800 pt-4"><h5 class="text-sm font-bold text-gray-300 mb-3">Model Parameters</h5></div>
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">API Format</label><select id="cpm-cm-format" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"><option value="openai">OpenAI</option><option value="anthropic">Anthropic Claude</option><option value="google">Google Gemini</option></select></div>
                 <div><label class="block text-sm font-medium text-gray-400 mb-1">Tokenizer</label><select id="cpm-cm-tok" class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white"><option value="o200k_base">o200k_base</option><option value="llama3">llama3</option><option value="claude">Claude</option><option value="gemma">Gemma</option></select></div>
@@ -9010,6 +9048,7 @@ var CupcakeProviderManager = (function (exports) {
         getField('cpm-cm-auth-type').value = m.authType || 'api_key';
         _updateAuthTypeUI(m.authType || 'api_key');
         getField('cpm-cm-proxy-url').value = m.proxyUrl || '';
+        getField('cpm-cm-proxy-key').value = m.proxyKey || '';
         getCheckbox('cpm-cm-proxy-direct').checked = !!m.proxyDirect;
         getField('cpm-cm-format').value = m.format || 'openai';
         getField('cpm-cm-tok').value = m.tok || 'o200k_base';
@@ -9035,7 +9074,7 @@ var CupcakeProviderManager = (function (exports) {
 
     // ── Clear all editor fields ──
     function clearEditor() {
-        ['name', 'model', 'url', 'key', 'proxy-url'].forEach(f => { getField(`cpm-cm-${f}`).value = ''; });
+        ['name', 'model', 'url', 'key', 'proxy-url', 'proxy-key'].forEach(f => { getField(`cpm-cm-${f}`).value = ''; });
         getField('cpm-cm-auth-type').value = 'api_key';
         _updateAuthTypeUI('api_key');
         getCheckbox('cpm-cm-proxy-direct').checked = false;
@@ -9064,6 +9103,7 @@ var CupcakeProviderManager = (function (exports) {
             key: getField('cpm-cm-key').value,
             authType: getField('cpm-cm-auth-type').value || 'api_key',
             proxyUrl: getField('cpm-cm-proxy-url').value.trim(),
+            proxyKey: getField('cpm-cm-proxy-key').value.trim(),
             proxyDirect: getCheckbox('cpm-cm-proxy-direct').checked,
             format: getField('cpm-cm-format').value,
             tok: getField('cpm-cm-tok').value,

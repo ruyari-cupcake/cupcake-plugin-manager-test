@@ -45,6 +45,9 @@ jobs:
       - name: Verify release sync
         run: npm run verify:release-sync
 
+      - name: Verify Copilot version sync
+        run: npm run verify:copilot-version-sync
+
       - name: Test + Coverage (threshold gate)
         run: npm run test:coverage
 
