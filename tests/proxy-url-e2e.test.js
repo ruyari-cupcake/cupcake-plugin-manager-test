@@ -923,3 +923,163 @@ describe('Copilot Gemini Responses API auto-switch', () => {
         expect(fetchedUrl).not.toContain('/responses');
     });
 });
+
+// ──────────────────────────────────────────────────────────
+// Copilot Gemini → Responses API unsupported_api_for_model fallback
+// ──────────────────────────────────────────────────────────
+describe('Copilot Gemini Responses API unsupported fallback', () => {
+    beforeEach(() => {
+        vi.resetAllMocks();
+        h.mockGetArg.mockResolvedValue('');
+        h.mockGetBoolArg.mockResolvedValue(false);
+        h.mockEnsureCopilotApiToken.mockResolvedValue('copilot-api-tok-123');
+        h.state.CUSTOM_MODELS_CACHE = [];
+        h.state.ALL_DEFINED_MODELS = [];
+        for (const key of Object.keys(h.customFetchers)) delete h.customFetchers[key];
+    });
+
+    /** @param {Record<string,any>} overrides */
+    function makeCopilotGeminiModel(overrides = {}) {
+        return {
+            uniqueId: 'copilot-gemini-fallback',
+            name: '[Copilot] gemini-3.1-pro-preview',
+            model: 'gemini-3.1-pro-preview',
+            url: 'https://api.githubcopilot.com/chat/completions',
+            key: '',
+            format: 'openai',
+            sysfirst: false, altrole: false, mustuser: false, maxout: false, mergesys: false,
+            reasoning: 'medium', verbosity: 'none', responsesMode: 'auto',
+            thinking: 'none', tok: 'o200k_base', thinkingBudget: 0,
+            maxOutputLimit: 0, promptCacheRetention: 'none',
+            decoupled: false, thought: false, streaming: false,
+            customParams: '', effort: 'none', adaptiveThinking: false,
+            ...overrides,
+        };
+    }
+
+    function makeUnsupportedApiResponse() {
+        return {
+            ok: false, status: 400,
+            headers: { get: () => 'application/json' },
+            text: async () => JSON.stringify({
+                error: {
+                    message: 'model gemini-3.1-pro-preview does not support Responses API.',
+                    code: 'unsupported_api_for_model',
+                },
+            }),
+            body: { cancel: () => {} },
+        };
+    }
+
+    it('falls back to /chat/completions when Responses API returns unsupported_api_for_model', async () => {
+        h.state.CUSTOM_MODELS_CACHE = [makeCopilotGeminiModel()];
+
+        h.mockSmartFetch
+            .mockResolvedValueOnce(makeUnsupportedApiResponse())
+            .mockResolvedValueOnce(
+                makeOkJsonResponse({ choices: [{ message: { content: 'Hello from chat completions!' } }] })
+            );
+
+        const result = await fetchByProviderId(
+            { provider: 'Custom', name: '[Copilot] gemini-3.1-pro-preview', uniqueId: 'copilot-gemini-fallback' },
+            BASIC_ARGS,
+        );
+
+        expect(result.success).toBe(true);
+        expect(result.content).toContain('Hello from chat completions!');
+
+        const firstUrl = h.mockSmartFetch.mock.calls[0][0];
+        expect(firstUrl).toContain('/responses');
+
+        const secondUrl = h.mockSmartFetch.mock.calls[1][0];
+        expect(secondUrl).toContain('/chat/completions');
+        expect(secondUrl).not.toContain('/responses');
+
+        const fallbackBody = JSON.parse(h.mockSmartFetch.mock.calls[1][1].body);
+        expect(fallbackBody).toHaveProperty('messages');
+        expect(fallbackBody).not.toHaveProperty('input');
+    });
+
+    it('fallback works with proxy Rewrite mode', async () => {
+        // Provide OAuth token for proxied Copilot auth
+        h.mockGetArg.mockImplementation(async (key) => {
+            if (key === 'tools_githubCopilotToken') return 'gho_testtoken123';
+            return '';
+        });
+        h.state.CUSTOM_MODELS_CACHE = [makeCopilotGeminiModel({
+            proxyUrl: 'https://my-proxy.workers.dev',
+        })];
+
+        h.mockSmartFetch
+            .mockResolvedValueOnce(makeUnsupportedApiResponse())
+            .mockResolvedValueOnce(
+                makeOkJsonResponse({ choices: [{ message: { content: 'Proxied fallback OK' } }] })
+            );
+
+        const result = await fetchByProviderId(
+            { provider: 'Custom', name: '[Copilot] gemini-3.1-pro-preview', uniqueId: 'copilot-gemini-fallback' },
+            BASIC_ARGS,
+        );
+
+        expect(result.success).toBe(true);
+
+        const firstUrl = h.mockSmartFetch.mock.calls[0][0];
+        expect(firstUrl).toContain('my-proxy.workers.dev');
+        expect(firstUrl).toContain('/responses');
+
+        const secondUrl = h.mockSmartFetch.mock.calls[1][0];
+        expect(secondUrl).toContain('my-proxy.workers.dev');
+        expect(secondUrl).toContain('/chat/completions');
+        expect(secondUrl).not.toContain('/responses');
+    });
+
+    it('does NOT fallback for other 400 errors (e.g. model_not_supported)', async () => {
+        h.state.CUSTOM_MODELS_CACHE = [makeCopilotGeminiModel()];
+
+        // Provide 2 mock responses: 1 for initial request, 1 for rotation retry
+        const modelNotSupportedResponse = {
+            ok: false, status: 400,
+            headers: { get: () => 'application/json' },
+            text: async () => JSON.stringify({
+                error: { message: 'model_not_supported', code: 'model_not_supported' },
+            }),
+            body: { cancel: () => {} },
+        };
+        h.mockSmartFetch
+            .mockResolvedValueOnce(modelNotSupportedResponse)
+            .mockResolvedValueOnce(modelNotSupportedResponse);
+
+        await fetchByProviderId(
+            { provider: 'Custom', name: '[Copilot] gemini-3.1-pro-preview', uniqueId: 'copilot-gemini-fallback' },
+            BASIC_ARGS,
+        );
+
+        // The first call should target /responses (auto-detected for Gemini)
+        const firstUrl = h.mockSmartFetch.mock.calls[0][0];
+        expect(firstUrl).toContain('/responses');
+
+        // No call should go to /chat/completions (unsupported_api_for_model fallback should NOT trigger)
+        const allUrls = h.mockSmartFetch.mock.calls.map(c => c[0]);
+        const hasChatCompletionsFallback = allUrls.some(url => url.includes('/chat/completions'));
+        expect(hasChatCompletionsFallback).toBe(false);
+    });
+
+    it('fallback body restores reasoning_effort (not reasoning object)', async () => {
+        h.state.CUSTOM_MODELS_CACHE = [makeCopilotGeminiModel({ reasoning: 'high' })];
+
+        h.mockSmartFetch
+            .mockResolvedValueOnce(makeUnsupportedApiResponse())
+            .mockResolvedValueOnce(
+                makeOkJsonResponse({ choices: [{ message: { content: 'OK' } }] })
+            );
+
+        await fetchByProviderId(
+            { provider: 'Custom', name: '[Copilot] gemini-3.1-pro-preview', uniqueId: 'copilot-gemini-fallback' },
+            BASIC_ARGS,
+        );
+
+        const fallbackBody = JSON.parse(h.mockSmartFetch.mock.calls[1][1].body);
+        expect(fallbackBody.reasoning_effort).toBe('high');
+        expect(fallbackBody).not.toHaveProperty('reasoning');
+    });
+});

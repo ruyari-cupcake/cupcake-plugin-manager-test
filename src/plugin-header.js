@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.14
-//@changes v1.22.14: Copilot Gemini Responses API 자동 전환 (thinking chain 표시), OFF 6h 쿨다운, proxyKey 버그수정
+//@version 1.22.15
+//@changes v1.22.15: Copilot Gemini unsupported_api_for_model 자동 fallback (/responses → /chat/completions), 프록시 디버깅 강화
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================

@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.14
-//@changes v1.22.14: Copilot Gemini Responses API 자동 전환 (thinking chain 표시), OFF 6h 쿨다운, proxyKey 버그수정
+//@version 1.22.15
+//@changes v1.22.15: Copilot Gemini unsupported_api_for_model 자동 fallback (/responses → /chat/completions), 프록시 디버깅 강화
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================
@@ -190,7 +190,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.22.14';
+    const CPM_VERSION = '1.22.15';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -6804,6 +6804,9 @@ var CupcakeProviderManager = (function (exports) {
         const _autoResponsesMatch = _isManualResponsesEndpoint || (_isCopilotDomain && needsCopilotResponsesAPI(config.model));
         const _useResponsesAPI = !!(format === 'openai' && !_responsesForceOff && _canUseResponsesByUrl && (_responsesForceOn || _autoResponsesMatch));
 
+        // Snapshot body+URL before Responses API transformation for fallback to /chat/completions
+        const _savedChatBody = _useResponsesAPI ? JSON.parse(JSON.stringify(body)) : null;
+
         if (_useResponsesAPI) {
             if (_isCopilotDomain && !_isManualResponsesEndpoint && (_responsesForceOn || needsCopilotResponsesAPI(config.model))) {
                 const _copilotBase = (config.url.match(/https:\/\/[^/]+/) || ['https://api.githubcopilot.com'])[0];
@@ -6831,7 +6834,7 @@ var CupcakeProviderManager = (function (exports) {
 
             console.log(`[Cupcake PM] Copilot + Responses API detected (model=${config.model}) → URL=${effectiveUrl}`);
         }
-        const _isResponsesEndpoint = _useResponsesAPI || (effectiveUrl && /\/responses(?:\?|$)/.test(effectiveUrl));
+        let _isResponsesEndpoint = _useResponsesAPI || (effectiveUrl && /\/responses(?:\?|$)/.test(effectiveUrl));
 
         // ── CORS Proxy: proxyUrl이 설정되어 있으면 도메인을 프록시로 교체 ──
         // Responses API URL 재작성 후에 적용해야 올바른 경로를 프록시로 보냄
@@ -6846,7 +6849,7 @@ var CupcakeProviderManager = (function (exports) {
         const _proxyDirect = !!config.proxyDirect;
         const _proxyKey = (config.proxyKey || '').trim().replace(/[\r\n]/g, '');
         // 범용 프록시 지원: Rewrite 전 원래 대상 URL 저장 (X-Target-URL 헤더로 전달)
-        const _originalTargetUrl = effectiveUrl || '';
+        let _originalTargetUrl = effectiveUrl || '';
         if (_proxyUrl && effectiveUrl) {
             if (_proxyDirect) {
                 // Direct mode: 프록시 URL로 직접 요청, effectiveUrl은 X-Target-URL 헤더로 전달
@@ -7301,7 +7304,11 @@ var CupcakeProviderManager = (function (exports) {
         // access the requested model.  Rotate to next OAuth token and retry once.
         // Works for both direct and proxied paths.
         if (_result && !_result.success && _isCopilotDomain) {
-            console.log(`[Cupcake PM v1.22.10] 🔍 Copilot fail-check: status=${_result._status}, statusType=${typeof _result._status}, success=${_result.success}, isCopilotDomain=${_isCopilotDomain}, isProxied=${_isProxied}, contentSnippet="${String(_result.content || '').substring(0, 120)}"`);
+            console.log(`[Cupcake PM] 🔍 Copilot fail-check: status=${_result._status}, statusType=${typeof _result._status}, success=${_result.success}, isCopilotDomain=${_isCopilotDomain}, isProxied=${_isProxied}, responsesAPI=${_useResponsesAPI}, url=${effectiveUrl?.substring(0, 80)}, contentSnippet="${String(_result.content || '').substring(0, 150)}"`);
+        }
+        // ── Proxy debug: log proxy routing details on any error ──
+        if (_result && !_result.success && _isProxied) {
+            console.log(`[Cupcake PM] 🔍 Proxy debug: mode=${_proxyDirect ? 'Direct' : 'Rewrite'}, proxyUrl=${_proxyUrl?.substring(0, 60)}, target=${_originalTargetUrl?.substring(0, 80)}, proxyKey=${_proxyKey ? '***set***' : '(none)'}, status=${_result._status}`);
         }
         const _isCopilotRotatable = _result && !_result.success && _isCopilotDomain && (
             _result._status === 403 || _result._status === 401 ||
@@ -7330,7 +7337,27 @@ var CupcakeProviderManager = (function (exports) {
                 console.warn(`[Cupcake PM] Retry after rotation also failed: status=${_result._status}`);
             }
         } else if (_result && !_result.success && _isCopilotDomain && (_result._status === 400 || _result._status === 403 || _result._status === 401)) {
-            console.warn(`[Cupcake PM v1.22.10] ⚠️ Copilot error NOT matched for rotation: _status=${_result._status} (type=${typeof _result._status}), content_has_model_not_supported=${/model_not_supported/i.test(String(_result.content || ''))}`);
+            console.warn(`[Cupcake PM] ⚠️ Copilot error NOT matched for rotation: _status=${_result._status} (type=${typeof _result._status}), content_has_model_not_supported=${/model_not_supported/i.test(String(_result.content || ''))}`);
+        }
+
+        // ── Responses API unsupported → fallback to /chat/completions ──
+        // Some models (e.g. gemini-3.1-pro-preview) detected as Responses API candidates
+        // may not actually support it. When the API returns unsupported_api_for_model,
+        // restore the original Chat Completions body and retry.
+        if (_result && !_result.success && _result._status === 400 && _useResponsesAPI && _savedChatBody
+            && /unsupported_api_for_model/i.test(String(_result.content || ''))) {
+            console.warn(`[Cupcake PM] ⚠️ Model "${config.model}" does not support Responses API — falling back to /chat/completions`);
+            // Restore body to pre-Responses-API state
+            for (const k of Object.keys(body)) delete body[k];
+            Object.assign(body, _savedChatBody);
+            // Switch URL path: /responses → /chat/completions (works with proxy Rewrite + Direct)
+            effectiveUrl = effectiveUrl.replace(/\/responses(?=$|\?)/, '/chat/completions');
+            _originalTargetUrl = _originalTargetUrl.replace(/\/responses(?=$|\?)/, '/chat/completions');
+            _isResponsesEndpoint = false;
+            _result = await _dispatchFetch();
+            if (_result && _result.success) {
+                console.log(`[Cupcake PM] ✅ Fallback to /chat/completions succeeded for model "${config.model}"`);
+            }
         }
 
         // ── temperature+top_p conflict auto-retry (once) ──
