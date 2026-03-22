@@ -10,6 +10,7 @@ const h = vi.hoisted(() => ({
     mockSmartFetch: vi.fn(),
     mockGetArg: vi.fn().mockResolvedValue(''),
     mockGetBoolArg: vi.fn().mockResolvedValue(false),
+    mockEnsureCopilotApiToken: vi.fn().mockResolvedValue(''),
     state: {
         ALL_DEFINED_MODELS: [],
         CUSTOM_MODELS_CACHE: [],
@@ -30,7 +31,8 @@ vi.mock('../src/lib/smart-fetch.js', () => ({
 }));
 
 vi.mock('../src/lib/copilot-token.js', () => ({
-    ensureCopilotApiToken: vi.fn().mockResolvedValue(''),
+    ensureCopilotApiToken: (...args) => h.mockEnsureCopilotApiToken(...args),
+    clearCopilotTokenCache: vi.fn(),
 }));
 
 vi.mock('../src/lib/shared-state.js', () => ({
@@ -64,7 +66,11 @@ vi.mock('../src/lib/slot-inference.js', () => ({
 }));
 
 vi.mock('../src/lib/token-usage.js', () => ({
+    _tokenUsageStore: new Map(),
+    _tokenUsageKey: vi.fn((id, stream) => `${id}_${stream ? 'stream' : 'non'}`),
+    _setTokenUsage: vi.fn(),
     _takeTokenUsage: vi.fn(() => null),
+    _normalizeTokenUsage: vi.fn(() => ({ prompt: 0, completion: 0, total: 0 })),
 }));
 
 vi.mock('../src/lib/token-toast.js', () => ({
@@ -752,5 +758,168 @@ describe('Copilot Gemini reasoning_effort injection', () => {
         const fetchedOptions = h.mockSmartFetch.mock.calls[0][1];
         const body = JSON.parse(fetchedOptions.body);
         expect(body).not.toHaveProperty('reasoning_effort');
+    });
+});
+
+// ──────────────────────────────────────────────────────────
+// Copilot Gemini → Responses API auto-switch (thinking chain 표시)
+// ──────────────────────────────────────────────────────────
+describe('Copilot Gemini Responses API auto-switch', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        h.mockGetArg.mockResolvedValue('');
+        h.mockGetBoolArg.mockResolvedValue(false);
+        h.mockEnsureCopilotApiToken.mockResolvedValue('copilot-api-tok-123');
+        h.state.CUSTOM_MODELS_CACHE = [];
+        h.state.ALL_DEFINED_MODELS = [];
+        for (const key of Object.keys(h.customFetchers)) delete h.customFetchers[key];
+    });
+
+    /** @param {Record<string,any>} overrides */
+    function makeCopilotGeminiModel(overrides = {}) {
+        return {
+            uniqueId: 'copilot-gemini-resp',
+            name: '[Copilot] gemini-2.5-flash',
+            model: 'gemini-2.5-flash',
+            url: 'https://api.githubcopilot.com/chat/completions',
+            key: '',
+            format: 'openai',
+            sysfirst: false, altrole: false, mustuser: false, maxout: false, mergesys: false,
+            reasoning: 'medium', verbosity: 'none', responsesMode: 'auto',
+            thinking: 'none', tok: 'o200k_base', thinkingBudget: 0,
+            maxOutputLimit: 0, promptCacheRetention: 'none',
+            decoupled: false, thought: false, streaming: false,
+            customParams: '', effort: 'none', adaptiveThinking: false,
+            ...overrides,
+        };
+    }
+
+    function makeResponsesAPINonStreamingResponse(reasoning, content) {
+        return {
+            ok: true, status: 200,
+            headers: { get: () => 'application/json' },
+            text: async () => JSON.stringify({
+                output: [
+                    ...(reasoning ? [{
+                        type: 'reasoning',
+                        summary: [{ type: 'summary_text', text: reasoning }],
+                    }] : []),
+                    {
+                        type: 'message',
+                        content: [{ type: 'output_text', text: content }],
+                    },
+                ],
+                usage: { input_tokens: 10, output_tokens: 20 },
+            }),
+            json: async function() { return JSON.parse(await this.text()); },
+        };
+    }
+
+    it('URL is rewritten from /chat/completions to /responses for Copilot Gemini', async () => {
+        h.state.CUSTOM_MODELS_CACHE = [makeCopilotGeminiModel()];
+
+        h.mockSmartFetch.mockResolvedValueOnce(
+            makeResponsesAPINonStreamingResponse('I think step by step...', 'The answer is 42.')
+        );
+
+        const result = await fetchByProviderId(
+            { provider: 'Custom', name: '[Copilot] gemini-2.5-flash', uniqueId: 'copilot-gemini-resp' },
+            BASIC_ARGS,
+        );
+
+        expect(result.success).toBe(true);
+
+        // Verify URL was rewritten to /responses
+        const fetchedUrl = h.mockSmartFetch.mock.calls[0][0];
+        expect(fetchedUrl).toContain('/responses');
+        expect(fetchedUrl).not.toContain('/chat/completions');
+    });
+
+    it('body transforms: messages→input, reasoning_effort→reasoning.effort+summary', async () => {
+        h.state.CUSTOM_MODELS_CACHE = [makeCopilotGeminiModel({ reasoning: 'high' })];
+
+        h.mockSmartFetch.mockResolvedValueOnce(
+            makeResponsesAPINonStreamingResponse('Deep thinking...', 'Result')
+        );
+
+        await fetchByProviderId(
+            { provider: 'Custom', name: '[Copilot] gemini-2.5-flash', uniqueId: 'copilot-gemini-resp' },
+            BASIC_ARGS,
+        );
+
+        const fetchedOptions = h.mockSmartFetch.mock.calls[0][1];
+        const body = JSON.parse(fetchedOptions.body);
+
+        // messages should be converted to input
+        expect(body).not.toHaveProperty('messages');
+        expect(body).toHaveProperty('input');
+        expect(Array.isArray(body.input)).toBe(true);
+
+        // reasoning_effort should be converted to reasoning object
+        expect(body).not.toHaveProperty('reasoning_effort');
+        expect(body.reasoning).toEqual({ effort: 'high', summary: 'auto' });
+    });
+
+    it('thinking content from Responses API is parsed into <Thoughts> tags', async () => {
+        h.state.CUSTOM_MODELS_CACHE = [makeCopilotGeminiModel()];
+
+        h.mockSmartFetch.mockResolvedValueOnce(
+            makeResponsesAPINonStreamingResponse('Step 1: analyze the question...', 'The answer is 42.')
+        );
+
+        const result = await fetchByProviderId(
+            { provider: 'Custom', name: '[Copilot] gemini-2.5-flash', uniqueId: 'copilot-gemini-resp' },
+            BASIC_ARGS,
+        );
+
+        expect(result.success).toBe(true);
+        expect(result.content).toContain('<Thoughts>');
+        expect(result.content).toContain('Step 1: analyze the question...');
+        expect(result.content).toContain('</Thoughts>');
+        expect(result.content).toContain('The answer is 42.');
+    });
+
+    it('reasoning="none" still uses Responses API for Copilot Gemini but no reasoning object', async () => {
+        h.state.CUSTOM_MODELS_CACHE = [makeCopilotGeminiModel({ reasoning: 'none' })];
+
+        h.mockSmartFetch.mockResolvedValueOnce(
+            makeResponsesAPINonStreamingResponse(null, 'No thinking here.')
+        );
+
+        const result = await fetchByProviderId(
+            { provider: 'Custom', name: '[Copilot] gemini-2.5-flash', uniqueId: 'copilot-gemini-resp' },
+            BASIC_ARGS,
+        );
+
+        expect(result.success).toBe(true);
+
+        // Still uses /responses endpoint
+        const fetchedUrl = h.mockSmartFetch.mock.calls[0][0];
+        expect(fetchedUrl).toContain('/responses');
+
+        // No reasoning object in body
+        const body = JSON.parse(h.mockSmartFetch.mock.calls[0][1].body);
+        expect(body).not.toHaveProperty('reasoning');
+        expect(body).not.toHaveProperty('reasoning_effort');
+    });
+
+    it('responsesMode="off" forces Chat Completions even for Copilot Gemini', async () => {
+        h.state.CUSTOM_MODELS_CACHE = [makeCopilotGeminiModel({ responsesMode: 'off' })];
+
+        h.mockSmartFetch.mockResolvedValueOnce(
+            makeOkJsonResponse({ choices: [{ message: { content: 'fallback' } }] })
+        );
+
+        const result = await fetchByProviderId(
+            { provider: 'Custom', name: '[Copilot] gemini-2.5-flash', uniqueId: 'copilot-gemini-resp' },
+            BASIC_ARGS,
+        );
+
+        expect(result.success).toBe(true);
+
+        // Should use /chat/completions, NOT /responses
+        const fetchedUrl = h.mockSmartFetch.mock.calls[0][0];
+        expect(fetchedUrl).toContain('/chat/completions');
+        expect(fetchedUrl).not.toContain('/responses');
     });
 });
