@@ -68,7 +68,7 @@ jobs:
           ### 사용법
           1. \`provider-manager.js\`를 다운로드
           2. RisuAI 설정 → 플러그인 → + 버튼으로 설치
-          3. 또는 update-url을 \`https://cupcake-plugin-manager-test.vercel.app/api/main-plugin\`로 설정
+          3. 또는 update-url을 \`https://test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app/api/main-plugin\`로 설정
 
           ---
           *이 릴리즈는 테스트 레포에서 자동 생성되었습니다.*

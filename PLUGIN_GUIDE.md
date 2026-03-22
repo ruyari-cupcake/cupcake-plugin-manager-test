@@ -1345,14 +1345,15 @@ When you update a sub-plugin, you must update **4 things**:
 
 ### 16.7 Main Engine (`provider-manager.js`) Updates
 
-The `provider-manager.js` main engine has its own `@update-url` pointing to the Vercel API endpoint. The source always contains the test URL:
+The `provider-manager.js` main engine has its own `@update-url` pointing to the Vercel API endpoint. The source contains the test2 URL (default build target):
 
 ```
-//@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
+//@update-url https://test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app/api/main-plugin
 ```
 
 At build time, `rollup.config.mjs` substitutes the URL based on `CPM_ENV`:
-- **test** (default): `cupcake-plugin-manager-test.vercel.app`
+- **test2** (default): `test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app`
+- **test** (legacy — 사용 자제): `cupcake-plugin-manager-test.vercel.app`
 - **production**: `cupcake-plugin-manager.vercel.app`
 
 This is separate from the sub-plugin update bundle. RisuAI handles main engine updates via its native plugin update mechanism. To update the main engine:

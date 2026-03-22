@@ -10,7 +10,7 @@
  * 2026-03-15 사고 재발 방지를 위해 추가됨.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 
 const PRODUCTION_DOMAIN = 'cupcake-plugin-manager.vercel.app';
 const TEST_DOMAIN = 'cupcake-plugin-manager-test.vercel.app';
@@ -123,6 +123,36 @@ describe('production URL guard (2026-03-15 사고 재발 방지)', () => {
         if (env === 'test' || env === 'test2') {
             expect(url, 'test 빌드인데 @update-url이 프로덕션 서버를 가리킴!').not.toContain(PRODUCTION_DOMAIN);
             expect(containsAnyTestDomain(url), 'test 빌드인데 @update-url이 테스트 서버가 아님!').toBe(true);
+        }
+    });
+
+    it('sub-plugin @update-url must point to production repo, not test repo', () => {
+        const rootDir = new URL('..', import.meta.url);
+        const subPlugins = readdirSync(rootDir)
+            .filter(f => f.startsWith('cpm-') && f.endsWith('.js'));
+
+        const testRepoPattern = /cupcake-plugin-manager-test2?\b/i;
+        const issues = [];
+
+        for (const file of subPlugins) {
+            const content = readFileSync(new URL(`../${file}`, import.meta.url), 'utf-8');
+            const url = extractUpdateUrl(content);
+            if (url && testRepoPattern.test(url)) {
+                issues.push(`${file}: @update-url이 테스트 레포를 가리킴 → ${url}`);
+            }
+        }
+
+        expect(issues, `서브 플러그인 @update-url이 테스트 레포를 가리킴:\n${issues.join('\n')}`).toHaveLength(0);
+    });
+
+    it('rollup URL map and cpm-url.config.js URL map must contain the same domains', () => {
+        const rollupSrc = readFileSync(new URL('../rollup.config.mjs', import.meta.url), 'utf-8');
+        const urlConfigSrc = readFileSync(new URL('../src/cpm-url.config.js', import.meta.url), 'utf-8');
+
+        // Extract domains from both files
+        for (const domain of [PRODUCTION_DOMAIN, TEST_DOMAIN, TEST2_DOMAIN]) {
+            expect(rollupSrc, `rollup.config.mjs에 ${domain} 누락`).toContain(domain);
+            expect(urlConfigSrc, `cpm-url.config.js에 ${domain} 누락`).toContain(domain);
         }
     });
 });

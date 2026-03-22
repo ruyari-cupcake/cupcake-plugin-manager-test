@@ -18,8 +18,9 @@
 > - `git push test2 main && git push origin main` — **둘 다 push**
 >
 > ### 규칙 요약
-> - `git push` 시 리모트를 반드시 명시한다 (`test` 또는 `origin`)
-> - 사용자가 대상을 지정하지 않으면 → **무조건 `test`**
+> - `git push` 시 리모트를 반드시 명시한다 (`test2` 또는 `origin`)
+> - 사용자가 대상을 지정하지 않으면 → **무조건 `test2`**
+> - ⚠️ legacy `test` 리모트는 교차 오염 복구용으로만 사용. 신규 push 금지.
 > - `origin`은 사용자가 현재 대화에서 "본서버"/"origin"/"프로덕션"을 **직접 말한 경우에만** 사용
 > - **`origin/main`에 push하면 Vercel 자동 배포 → 실사용자 수백 명에게 즉시 반영 → 버그 전파**
 >

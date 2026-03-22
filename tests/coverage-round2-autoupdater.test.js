@@ -424,6 +424,6 @@ describe('cpm-url.config.js', () => {
     it('exports CPM_ENV as a string', async () => {
         const mod = await import('../src/cpm-url.config.js');
         expect(typeof mod.CPM_ENV).toBe('string');
-        expect(['production', 'test']).toContain(mod.CPM_ENV);
+        expect(['production', 'test', 'test2']).toContain(mod.CPM_ENV);
     });
 });
