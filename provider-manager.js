@@ -4944,18 +4944,18 @@ var CupcakeProviderManager = (function (exports) {
                     return false;
                 }
 
+                console.log(`[CPM Retry] Retrying pending main update on boot: ${installedVersion || 'unknown'} → ${pending.version}`);
+                if (await safeGetBoolArg('cpm_disable_autoupdate', false)) {
+                    console.log(`[CPM Retry] Auto-update disabled by user. Skipping boot retry.`);
+                    return false;
+                }
+
                 await this._writePendingMainUpdate({
                     ...pending,
                     attempts: (pending.attempts || 0) + 1,
                     lastAttemptTs: Date.now(),
                     lastError: '',
                 });
-
-                console.log(`[CPM Retry] Retrying pending main update on boot: ${installedVersion || 'unknown'} → ${pending.version}`);
-                if (await safeGetBoolArg('cpm_disable_autoupdate', false)) {
-                    console.log(`[CPM Retry] Auto-update disabled by user. Skipping boot retry.`);
-                    return false;
-                }
                 const result = await this.safeMainPluginUpdate(pending.version, pending.changes || '');
                 if (!result.ok) {
                     const latest = await this._readPendingMainUpdate();
@@ -5905,7 +5905,7 @@ var CupcakeProviderManager = (function (exports) {
                 await body.appendChild(toast);
 
                 // 6시간 쿨다운 기록: OFF 사용자의 반복 토스트 방지
-                try { localStorage.setItem('cpm_update_toast_dismissed', String(Date.now())); } catch (_) { /* ignore */ }
+                try { localStorage.setItem(this._TOAST_DISMISS_STORAGE_KEY, String(Date.now())); } catch (_) { /* ignore */ }
 
                 setTimeout(async () => { try { await toast.setStyle('opacity', '1'); await toast.setStyle('transform', 'translateY(0)'); } catch (_) { } }, 50);
                 setTimeout(async () => {

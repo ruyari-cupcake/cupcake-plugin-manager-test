@@ -266,18 +266,18 @@ export const autoUpdaterMethods = {
                 return false;
             }
 
+            console.log(`[CPM Retry] Retrying pending main update on boot: ${installedVersion || 'unknown'} → ${pending.version}`);
+            if (await safeGetBoolArg('cpm_disable_autoupdate', false)) {
+                console.log(`[CPM Retry] Auto-update disabled by user. Skipping boot retry.`);
+                return false;
+            }
+
             await this._writePendingMainUpdate({
                 ...pending,
                 attempts: (pending.attempts || 0) + 1,
                 lastAttemptTs: Date.now(),
                 lastError: '',
             });
-
-            console.log(`[CPM Retry] Retrying pending main update on boot: ${installedVersion || 'unknown'} → ${pending.version}`);
-            if (await safeGetBoolArg('cpm_disable_autoupdate', false)) {
-                console.log(`[CPM Retry] Auto-update disabled by user. Skipping boot retry.`);
-                return false;
-            }
             const result = await this.safeMainPluginUpdate(pending.version, pending.changes || '');
             if (!result.ok) {
                 const latest = await this._readPendingMainUpdate();
