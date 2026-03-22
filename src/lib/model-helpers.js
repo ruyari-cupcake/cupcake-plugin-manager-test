@@ -102,7 +102,8 @@ export function supportsOpenAIReasoningEffort(modelName) {
 
 /**
  * Detect models that require the OpenAI Responses API on GitHub Copilot.
- * GPT-5.4+ models use /responses endpoint instead of /chat/completions.
+ * GPT-5.4+ and Gemini (thinking-capable) models use /responses endpoint on Copilot
+ * to enable visible reasoning/thinking output via summary: 'auto'.
  * @param {string} modelName
  * @returns {boolean}
  */
@@ -111,6 +112,7 @@ export function needsCopilotResponsesAPI(modelName) {
     const m = String(modelName).toLowerCase();
     const match = m.match(/(?:^|\/)gpt-5\.(\d+)/);
     if (match && parseInt(match[1]) >= 4) return true;
+    if (isGeminiFamily(modelName)) return true;
     return false;
 }
 

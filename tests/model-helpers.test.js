@@ -252,6 +252,19 @@ describe('needsCopilotResponsesAPI', () => {
     it('handles slash prefix', () => {
         expect(needsCopilotResponsesAPI('openai/gpt-5.4')).toBe(true);
     });
+
+    it('returns true for Gemini family models (thinking-capable)', () => {
+        expect(needsCopilotResponsesAPI('gemini-3.1-pro-preview')).toBe(true);
+        expect(needsCopilotResponsesAPI('gemini-2.5-flash')).toBe(true);
+        expect(needsCopilotResponsesAPI('gemini-2.5-pro')).toBe(true);
+        expect(needsCopilotResponsesAPI('models/gemini-3.1-pro-preview')).toBe(true);
+    });
+
+    it('returns false for non-GPT5.4/non-Gemini models', () => {
+        expect(needsCopilotResponsesAPI('gpt-4.1')).toBe(false);
+        expect(needsCopilotResponsesAPI('claude-sonnet-4')).toBe(false);
+        expect(needsCopilotResponsesAPI('o3-mini')).toBe(false);
+    });
 });
 
 describe('shouldStripOpenAISamplingParams', () => {

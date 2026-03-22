@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.13
-//@changes v1.22.13: 자동업뎃 OFF시 6시간 쿨다운 + 네트워크 차단, Gemini reasoning_effort 지원, proxyKey router 버그 수정
+//@version 1.22.14
+//@changes v1.22.14: Copilot Gemini Responses API 자동 전환 (thinking chain 표시), OFF 6h 쿨다운, proxyKey 버그수정
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================

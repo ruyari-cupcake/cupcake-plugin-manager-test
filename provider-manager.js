@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.13
-//@changes v1.22.13: 자동업뎃 OFF시 6시간 쿨다운 + 네트워크 차단, Gemini reasoning_effort 지원, proxyKey router 버그 수정
+//@version 1.22.14
+//@changes v1.22.14: Copilot Gemini Responses API 자동 전환 (thinking chain 표시), OFF 6h 쿨다운, proxyKey 버그수정
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================
@@ -190,7 +190,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.22.13';
+    const CPM_VERSION = '1.22.14';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -1380,7 +1380,8 @@ var CupcakeProviderManager = (function (exports) {
 
     /**
      * Detect models that require the OpenAI Responses API on GitHub Copilot.
-     * GPT-5.4+ models use /responses endpoint instead of /chat/completions.
+     * GPT-5.4+ and Gemini (thinking-capable) models use /responses endpoint on Copilot
+     * to enable visible reasoning/thinking output via summary: 'auto'.
      * @param {string} modelName
      * @returns {boolean}
      */
@@ -1389,6 +1390,7 @@ var CupcakeProviderManager = (function (exports) {
         const m = String(modelName).toLowerCase();
         const match = m.match(/(?:^|\/)gpt-5\.(\d+)/);
         if (match && parseInt(match[1]) >= 4) return true;
+        if (isGeminiFamily(modelName)) return true;
         return false;
     }
 
