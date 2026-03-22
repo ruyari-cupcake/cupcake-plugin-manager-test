@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-03-22T16:54:48.455Z",
+  "timestamp": "2026-03-22T17:49:48.144Z",
   "version": "1.22.16",
   "files": {
     "cpm-provider-vertex.js": {
@@ -59,9 +59,9 @@
     },
     "provider-manager.js": {
       "version": "1.22.16",
-      "sha256": "a0c26d9b1e3430a0bbd9ad38ea3e1a484976439efa81ed3386eb49304f02d577",
-      "size": 615488
+      "sha256": "300feaafc9b207e2fc86f8ef7f885d7695125c91a28ef42f8648eca3b55b2d4f",
+      "size": 615689
     }
   },
-  "bundleHash": "5da915a82b527510c89abe95e670956e6d710e7a9543129526e9442ee6b81d59"
+  "bundleHash": "62975f5a05a1535ab66275385c02dbcd05a3e914790938aadb18ee7f562aa289"
 }

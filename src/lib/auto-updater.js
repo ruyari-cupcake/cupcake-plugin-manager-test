@@ -22,6 +22,7 @@ import {
     VERSIONS_URL as _VERSIONS_URL,
     MAIN_UPDATE_URL as _MAIN_UPDATE_URL,
     UPDATE_BUNDLE_URL as _UPDATE_BUNDLE_URL,
+    CPM_ENV as _CPM_ENV,
 } from './endpoints.js';
 
 // ────────────────────────────────────────────────────────────────
@@ -734,6 +735,15 @@ export const autoUpdaterMethods = {
             return { ok: false, error: `버전 불일치: 기대 ${remoteVersion}, 실제 ${parsedVersion}` };
         }
 
+        // Runtime guard: production 환경에서 test 서버 URL이 포함된 업데이트 차단
+        if (_CPM_ENV === 'production' && parsedUpdateURL) {
+            const _TEST_URL_PATTERN = /cupcake-plugin-manager-test\.vercel\.app|test-2-[a-z0-9]+-[a-z0-9]+-[a-z0-9]+-projects\.vercel\.app/i;
+            if (_TEST_URL_PATTERN.test(parsedUpdateURL)) {
+                console.warn(`${LOG} BLOCKED: 프로덕션 환경에서 테스트 서버 URL 업데이트 차단: ${parsedUpdateURL}`);
+                return { ok: false, error: `프로덕션 환경에서 테스트 서버 URL 업데이트 차단` };
+            }
+        }
+
         try {
             const db = await Risu.getDatabase();
             if (!db) {
@@ -991,6 +1001,16 @@ export const autoUpdaterMethods = {
             console.log(`[CPM Update] ✓ Apply-time integrity OK for ${p.name}`);
             console.log(`[CPM Update] Applying update for ${p.name} (${(prefetchedCode.length / 1024).toFixed(1)}KB)`);
             const meta = this.extractMetadata(prefetchedCode);
+
+            // Runtime guard: production 환경에서 test URL이 포함된 서브 플러그인 업데이트 차단
+            if (_CPM_ENV === 'production' && meta.updateUrl) {
+                const _TEST_URL_PATTERN = /cupcake-plugin-manager-test2?\b/i;
+                if (_TEST_URL_PATTERN.test(meta.updateUrl)) {
+                    console.error(`[CPM Update] BLOCKED: 프로덕션에서 테스트 레포 URL 감지: ${meta.updateUrl}`);
+                    return false;
+                }
+            }
+
             if (meta.name && p.name && meta.name !== p.name) {
                 console.error(`[CPM Update] BLOCKED: Tried to apply "${meta.name}" code to plugin "${p.name}". Names don't match.`);
                 return false;

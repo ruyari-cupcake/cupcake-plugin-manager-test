@@ -133,6 +133,9 @@ var CupcakeProviderManager = (function (exports) {
     /** @type {string} */
     const CPM_BASE_URL = _URLS[_env];
 
+    /** @type {string} */
+    const CPM_ENV = _env;
+
     // @ts-check
     /**
      * endpoints.js — Centralized endpoint URL constants.
@@ -5669,6 +5672,10 @@ var CupcakeProviderManager = (function (exports) {
                 console.log(`[CPM Update] ✓ Apply-time integrity OK for ${p.name}`);
                 console.log(`[CPM Update] Applying update for ${p.name} (${(prefetchedCode.length / 1024).toFixed(1)}KB)`);
                 const meta = this.extractMetadata(prefetchedCode);
+
+                // Runtime guard: production 환경에서 test URL이 포함된 서브 플러그인 업데이트 차단
+                if (CPM_ENV === 'production' && meta.updateUrl) ;
+
                 if (meta.name && p.name && meta.name !== p.name) {
                     console.error(`[CPM Update] BLOCKED: Tried to apply "${meta.name}" code to plugin "${p.name}". Names don't match.`);
                     return false;

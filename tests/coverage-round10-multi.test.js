@@ -42,6 +42,7 @@ vi.mock('../src/lib/endpoints.js', () => ({
     VERSIONS_URL: 'https://test/v.json',
     MAIN_UPDATE_URL: 'https://test/pm.js',
     UPDATE_BUNDLE_URL: 'https://test/ub.json',
+    CPM_ENV: 'test',
 }));
 
 vi.mock('../src/lib/schema.js', () => ({

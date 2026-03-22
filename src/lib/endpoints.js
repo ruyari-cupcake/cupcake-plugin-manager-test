@@ -12,9 +12,9 @@
  * `npm run build:production`). See rollup.config.mjs for details.
  */
 
-import { CPM_BASE_URL } from '../cpm-url.config.js';
+import { CPM_BASE_URL, CPM_ENV } from '../cpm-url.config.js';
 
-export { CPM_BASE_URL };
+export { CPM_BASE_URL, CPM_ENV };
 
 /** Version manifest endpoint (GET → JSON). */
 export const VERSIONS_URL = `${CPM_BASE_URL}/api/versions`;
