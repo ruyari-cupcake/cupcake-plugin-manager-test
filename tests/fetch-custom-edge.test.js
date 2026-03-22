@@ -144,6 +144,70 @@ describe('fetchCustom — CORS proxy URL rewriting', () => {
         const headers = mockFetch.mock.calls[0][1].headers;
         expect(headers['Authorization']).toBe('Bearer ghu_abc123');
     });
+
+    it('Rewrite mode preserves proxy URL query params alongside original URL params', async () => {
+        mockFetch.mockResolvedValueOnce(
+            makeOkJsonResponse({ choices: [{ message: { content: 'ok' } }] })
+        );
+
+        await fetchCustom(
+            {
+                url: 'https://api.openai.com/v1/chat/completions?stream=true',
+                key: 'sk-test',
+                model: 'gpt-4o',
+                format: 'openai',
+                proxyUrl: 'https://my-proxy.kr/api?auth=secret123',
+            },
+            BASIC_MESSAGES, 0.7, 1024, {},
+        );
+
+        const calledUrl = mockFetch.mock.calls[0][0];
+        expect(calledUrl).toContain('auth=secret123');
+        expect(calledUrl).toContain('stream=true');
+    });
+
+    it('Rewrite mode merges proxy URL query params with original URL query params', async () => {
+        mockFetch.mockResolvedValueOnce(
+            makeOkJsonResponse({ choices: [{ message: { content: 'ok' } }] })
+        );
+
+        await fetchCustom(
+            {
+                url: 'https://api.openai.com/v1/chat/completions?stream=true',
+                key: 'sk-test',
+                model: 'gpt-4o',
+                format: 'openai',
+                proxyUrl: 'https://proxy.example.com?key=abc',
+            },
+            BASIC_MESSAGES, 0.7, 1024, {},
+        );
+
+        const calledUrl = mockFetch.mock.calls[0][0];
+        expect(calledUrl).toContain('?key=abc&stream=true');
+    });
+
+    it('proxyKey with embedded newlines is sanitized (CRLF injection prevention)', async () => {
+        mockFetch.mockResolvedValueOnce(
+            makeOkJsonResponse({ choices: [{ message: { content: 'ok' } }] })
+        );
+
+        await fetchCustom(
+            {
+                url: 'https://api.openai.com/v1/chat/completions',
+                key: 'sk-test',
+                model: 'gpt-4o',
+                format: 'openai',
+                proxyUrl: 'https://my-proxy.workers.dev',
+                proxyKey: 'valid-key\r\nX-Injected: malicious',
+            },
+            BASIC_MESSAGES, 0.7, 1024, {},
+        );
+
+        const headers = mockFetch.mock.calls[0][1].headers;
+        expect(headers['X-Proxy-Token']).not.toContain('\r');
+        expect(headers['X-Proxy-Token']).not.toContain('\n');
+        expect(headers['X-Proxy-Token']).toBe('valid-keyX-Injected: malicious');
+    });
 });
 
 describe('fetchCustom — Compatibility mode & streaming interaction', () => {

@@ -408,7 +408,7 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
     }
     const _isProxied = !!_proxyUrl;
     const _proxyDirect = !!config.proxyDirect;
-    const _proxyKey = (config.proxyKey || '').trim();
+    const _proxyKey = (config.proxyKey || '').trim().replace(/[\r\n]/g, '');
     // 범용 프록시 지원: Rewrite 전 원래 대상 URL 저장 (X-Target-URL 헤더로 전달)
     const _originalTargetUrl = effectiveUrl || '';
     if (_proxyUrl && effectiveUrl) {
@@ -427,7 +427,10 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
                     _proxyPath = _proxyPath.substring(4);
                     console.log(`[Cupcake PM] Proxy Rewrite: stripped /api prefix → ${_proxyPath}`);
                 }
-                effectiveUrl = _proxyBase.origin + _proxyBase.pathname.replace(/\/+$/, '') + _proxyPath + _origUrl.search;
+                effectiveUrl = _proxyBase.origin + _proxyBase.pathname.replace(/\/+$/, '') + _proxyPath
+                    + (_proxyBase.search && _origUrl.search
+                        ? _proxyBase.search + '&' + _origUrl.search.substring(1)
+                        : _proxyBase.search || _origUrl.search);
                 console.log(`[Cupcake PM] CORS Proxy (Rewrite mode) active → ${effectiveUrl}`);
             } catch (_e) {
                 console.error(`[Cupcake PM] ❌ Invalid proxyUrl "${_proxyUrl}" — proxy NOT applied. URL 형식을 확인하세요 (예: https://my-server.kr/proxy).`, _e);
