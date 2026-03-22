@@ -73,19 +73,31 @@ export function isGeminiNoCivicModel(modelId) {
     return /gemini-2\.0-flash-lite-preview|gemini-2\.0-pro-exp/.test(String(modelId).toLowerCase());
 }
 
+/**
+ * Detect any Gemini model (2.x, 3.x, etc.).
+ * Matches: gemini-2.5-flash, gemini-3-pro, gemini-2.5-flash-preview, etc.
+ * @param {string} modelName
+ * @returns {boolean}
+ */
+export function isGeminiFamily(modelName) {
+    if (!modelName) return false;
+    return /gemini/i.test(String(modelName));
+}
+
 // ═══════════════════════════════════════════════════════
 //  OpenAI / Copilot higher-level helpers
 // ═══════════════════════════════════════════════════════
 
 /**
  * Check if a model supports OpenAI reasoning_effort parameter.
- * Matches o3/o4 variants and GPT-5 family.
+ * Matches o3/o4 variants, GPT-5 family, and Gemini models (via Copilot API).
+ * Gemini models on Copilot use reasoning_effort for thinking control.
  * @param {string} modelName
  * @returns {boolean}
  */
 export function supportsOpenAIReasoningEffort(modelName) {
     if (!modelName) return false;
-    return isO3O4Family(modelName) || isGPT5Family(modelName);
+    return isO3O4Family(modelName) || isGPT5Family(modelName) || isGeminiFamily(modelName);
 }
 
 /**

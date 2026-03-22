@@ -309,3 +309,380 @@ describe('proxyUrl end-to-end: CUSTOM_MODELS_CACHE → router → fetchCustom �
         expect(afterReload[0].proxyUrl).toBe('https://myserver.kr/proxy2');
     });
 });
+
+// ──────────────────────────────────────────────────────────
+// proxyDirect + proxyKey: Direct mode & X-Proxy-Token header
+// ──────────────────────────────────────────────────────────
+describe('proxyDirect + proxyKey end-to-end', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        h.mockGetArg.mockResolvedValue('');
+        h.mockGetBoolArg.mockResolvedValue(false);
+        h.state.CUSTOM_MODELS_CACHE = [];
+        h.state.ALL_DEFINED_MODELS = [];
+        for (const key of Object.keys(h.customFetchers)) delete h.customFetchers[key];
+    });
+
+    /** @param {Record<string,any>} overrides */
+    function makeModel(overrides = {}) {
+        return {
+            uniqueId: 'proxy-direct-test',
+            name: '[Test] Proxy Direct',
+            model: 'gpt-4o',
+            url: 'https://api.openai.com/v1/chat/completions',
+            key: 'sk-test123',
+            proxyUrl: 'https://my-proxy.example.com',
+            proxyDirect: true,
+            proxyKey: '',
+            format: 'openai',
+            sysfirst: false, altrole: false, mustuser: false, maxout: false, mergesys: false,
+            reasoning: 'none', verbosity: 'none', responsesMode: 'auto',
+            thinking: 'none', tok: 'o200k_base', thinkingBudget: 0,
+            maxOutputLimit: 0, promptCacheRetention: 'none',
+            decoupled: false, thought: false, streaming: false,
+            customParams: '', effort: 'none', adaptiveThinking: false,
+            ...overrides,
+        };
+    }
+
+    it('Direct mode sends request to proxyUrl with X-Target-URL header', async () => {
+        h.state.CUSTOM_MODELS_CACHE = [makeModel()];
+
+        h.mockSmartFetch.mockResolvedValueOnce(
+            makeOkJsonResponse({ choices: [{ message: { content: 'direct ok' } }] })
+        );
+
+        const result = await fetchByProviderId(
+            { provider: 'Custom', name: '[Test] Proxy Direct', uniqueId: 'proxy-direct-test' },
+            BASIC_ARGS,
+        );
+
+        expect(result.success).toBe(true);
+        expect(h.mockSmartFetch).toHaveBeenCalled();
+
+        // Direct mode: URL should be the proxy URL itself, NOT the original target
+        const fetchedUrl = h.mockSmartFetch.mock.calls[0][0];
+        expect(fetchedUrl).toBe('https://my-proxy.example.com');
+
+        // Headers should contain X-Target-URL
+        const fetchedOptions = h.mockSmartFetch.mock.calls[0][1];
+        expect(fetchedOptions.headers['X-Target-URL']).toBe(
+            'https://api.openai.com/v1/chat/completions'
+        );
+    });
+
+    it('Direct mode + proxyKey injects X-Proxy-Token header', async () => {
+        h.state.CUSTOM_MODELS_CACHE = [makeModel({ proxyKey: 'my-secret-token-123' })];
+
+        h.mockSmartFetch.mockResolvedValueOnce(
+            makeOkJsonResponse({ choices: [{ message: { content: 'authed' } }] })
+        );
+
+        await fetchByProviderId(
+            { provider: 'Custom', name: '[Test] Proxy Direct', uniqueId: 'proxy-direct-test' },
+            BASIC_ARGS,
+        );
+
+        const fetchedOptions = h.mockSmartFetch.mock.calls[0][1];
+        expect(fetchedOptions.headers['X-Proxy-Token']).toBe('my-secret-token-123');
+        expect(fetchedOptions.headers['X-Target-URL']).toBe(
+            'https://api.openai.com/v1/chat/completions'
+        );
+    });
+
+    it('Direct mode without proxyKey does NOT send X-Proxy-Token', async () => {
+        h.state.CUSTOM_MODELS_CACHE = [makeModel({ proxyKey: '' })];
+
+        h.mockSmartFetch.mockResolvedValueOnce(
+            makeOkJsonResponse({ choices: [{ message: { content: 'no token' } }] })
+        );
+
+        await fetchByProviderId(
+            { provider: 'Custom', name: '[Test] Proxy Direct', uniqueId: 'proxy-direct-test' },
+            BASIC_ARGS,
+        );
+
+        const fetchedOptions = h.mockSmartFetch.mock.calls[0][1];
+        expect(fetchedOptions.headers).not.toHaveProperty('X-Proxy-Token');
+        expect(fetchedOptions.headers['X-Target-URL']).toBeDefined();
+    });
+
+    it('Rewrite mode + proxyKey injects X-Proxy-Token header', async () => {
+        // proxyDirect: false → Rewrite mode (default)
+        h.state.CUSTOM_MODELS_CACHE = [makeModel({
+            proxyDirect: false,
+            proxyKey: 'rewrite-secret-456',
+        })];
+
+        h.mockSmartFetch.mockResolvedValueOnce(
+            makeOkJsonResponse({ choices: [{ message: { content: 'rewrite authed' } }] })
+        );
+
+        await fetchByProviderId(
+            { provider: 'Custom', name: '[Test] Proxy Direct', uniqueId: 'proxy-direct-test' },
+            BASIC_ARGS,
+        );
+
+        // Rewrite mode: URL should be rewritten (proxy domain + original path)
+        const fetchedUrl = h.mockSmartFetch.mock.calls[0][0];
+        expect(fetchedUrl).toContain('my-proxy.example.com');
+        expect(fetchedUrl).toContain('/v1/chat/completions');
+
+        const fetchedOptions = h.mockSmartFetch.mock.calls[0][1];
+        expect(fetchedOptions.headers['X-Proxy-Token']).toBe('rewrite-secret-456');
+        expect(fetchedOptions.headers['X-Target-URL']).toBe(
+            'https://api.openai.com/v1/chat/completions'
+        );
+    });
+
+    it('proxyKey with whitespace is trimmed', async () => {
+        h.state.CUSTOM_MODELS_CACHE = [makeModel({ proxyKey: '  trimmed-token  ' })];
+
+        h.mockSmartFetch.mockResolvedValueOnce(
+            makeOkJsonResponse({ choices: [{ message: { content: 'trimmed' } }] })
+        );
+
+        await fetchByProviderId(
+            { provider: 'Custom', name: '[Test] Proxy Direct', uniqueId: 'proxy-direct-test' },
+            BASIC_ARGS,
+        );
+
+        const fetchedOptions = h.mockSmartFetch.mock.calls[0][1];
+        expect(fetchedOptions.headers['X-Proxy-Token']).toBe('trimmed-token');
+    });
+
+    it('proxyKey survives normalizeCustomModel round-trip', async () => {
+        const { normalizeCustomModel, parseCustomModelsValue } = await import('../src/lib/custom-model-serialization.js');
+
+        const rawJson = JSON.stringify([{
+            uniqueId: 'proxy-key-rt',
+            name: '[Test] ProxyKey RT',
+            model: 'gpt-4o',
+            url: 'https://api.openai.com/v1/chat/completions',
+            key: 'sk-test',
+            proxyUrl: 'https://my-proxy.example.com',
+            proxyDirect: true,
+            proxyKey: 'roundtrip-secret',
+            format: 'openai',
+        }]);
+
+        const parsed = parseCustomModelsValue(rawJson).map(m => normalizeCustomModel(m));
+        expect(parsed[0].proxyKey).toBe('roundtrip-secret');
+        expect(parsed[0].proxyDirect).toBe(true);
+
+        // Serialize → deserialize
+        const json2 = JSON.stringify(parsed);
+        const restored = parseCustomModelsValue(json2).map(m => normalizeCustomModel(m));
+        expect(restored[0].proxyKey).toBe('roundtrip-secret');
+    });
+
+    it('old data without proxyKey normalizes to empty string', async () => {
+        const { normalizeCustomModel } = await import('../src/lib/custom-model-serialization.js');
+
+        const old = normalizeCustomModel({
+            uniqueId: 'old-no-key',
+            name: '[Old] No ProxyKey',
+            model: 'gpt-4o',
+            url: 'https://api.openai.com/v1/chat/completions',
+            key: 'sk-test',
+            format: 'openai',
+            // no proxyKey field
+        });
+
+        expect(old).toHaveProperty('proxyKey');
+        expect(old.proxyKey).toBe('');
+    });
+
+    it('proxyKey only-whitespace treated as empty (no X-Proxy-Token sent)', async () => {
+        h.state.CUSTOM_MODELS_CACHE = [makeModel({ proxyKey: '   ' })];
+
+        h.mockSmartFetch.mockResolvedValueOnce(
+            makeOkJsonResponse({ choices: [{ message: { content: 'ws only' } }] })
+        );
+
+        await fetchByProviderId(
+            { provider: 'Custom', name: '[Test] Proxy Direct', uniqueId: 'proxy-direct-test' },
+            BASIC_ARGS,
+        );
+
+        const fetchedOptions = h.mockSmartFetch.mock.calls[0][1];
+        expect(fetchedOptions.headers).not.toHaveProperty('X-Proxy-Token');
+    });
+
+    it('proxyDirect false + proxyUrl sends API key in Authorization header (not leaked via X-Proxy-Token)', async () => {
+        h.state.CUSTOM_MODELS_CACHE = [makeModel({
+            proxyDirect: false,
+            proxyKey: '',
+        })];
+
+        h.mockSmartFetch.mockResolvedValueOnce(
+            makeOkJsonResponse({ choices: [{ message: { content: 'no leak' } }] })
+        );
+
+        await fetchByProviderId(
+            { provider: 'Custom', name: '[Test] Proxy Direct', uniqueId: 'proxy-direct-test' },
+            BASIC_ARGS,
+        );
+
+        const fetchedOptions = h.mockSmartFetch.mock.calls[0][1];
+        expect(fetchedOptions.headers).not.toHaveProperty('X-Proxy-Token');
+        // Authorization should contain the API key, not the proxyKey
+        expect(fetchedOptions.headers['Authorization']).toContain('sk-test123');
+    });
+
+    it('proxyDirect + proxyUrl without proxyUrl gives no proxy at all', async () => {
+        // If proxyUrl is empty, proxyDirect should have no effect
+        h.state.CUSTOM_MODELS_CACHE = [makeModel({
+            proxyUrl: '',
+            proxyDirect: true,
+            proxyKey: 'should-not-appear',
+        })];
+
+        h.mockSmartFetch.mockResolvedValueOnce(
+            makeOkJsonResponse({ choices: [{ message: { content: 'no proxy' } }] })
+        );
+
+        await fetchByProviderId(
+            { provider: 'Custom', name: '[Test] Proxy Direct', uniqueId: 'proxy-direct-test' },
+            BASIC_ARGS,
+        );
+
+        const fetchedUrl = h.mockSmartFetch.mock.calls[0][0];
+        // Should go to original URL since proxyUrl is empty
+        expect(fetchedUrl).toBe('https://api.openai.com/v1/chat/completions');
+        const fetchedOptions = h.mockSmartFetch.mock.calls[0][1];
+        expect(fetchedOptions.headers).not.toHaveProperty('X-Proxy-Token');
+        expect(fetchedOptions.headers).not.toHaveProperty('X-Target-URL');
+    });
+});
+
+// ──────────────────────────────────────────────────────────
+// Copilot Gemini reasoning_effort via custom model
+// ──────────────────────────────────────────────────────────
+describe('Copilot Gemini reasoning_effort injection', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        h.mockGetArg.mockResolvedValue('');
+        h.mockGetBoolArg.mockResolvedValue(false);
+        h.state.CUSTOM_MODELS_CACHE = [];
+        h.state.ALL_DEFINED_MODELS = [];
+        for (const key of Object.keys(h.customFetchers)) delete h.customFetchers[key];
+    });
+
+    /** @param {Record<string,any>} overrides */
+    function makeCopilotGeminiModel(overrides = {}) {
+        return {
+            uniqueId: 'copilot-gemini-test',
+            name: '[Copilot] gemini-2.5-flash',
+            model: 'gemini-2.5-flash',
+            url: 'https://api.example.com/v1/chat/completions',
+            key: 'test-key-123',
+            format: 'openai',
+            sysfirst: false, altrole: false, mustuser: false, maxout: false, mergesys: false,
+            reasoning: 'none', verbosity: 'none', responsesMode: 'auto',
+            thinking: 'none', tok: 'o200k_base', thinkingBudget: 0,
+            maxOutputLimit: 0, promptCacheRetention: 'none',
+            decoupled: false, thought: false, streaming: false,
+            customParams: '', effort: 'none', adaptiveThinking: false,
+            ...overrides,
+        };
+    }
+
+    it('Gemini model with reasoning="medium" injects reasoning_effort into body', async () => {
+        h.state.CUSTOM_MODELS_CACHE = [makeCopilotGeminiModel({ reasoning: 'medium' })];
+
+        h.mockSmartFetch.mockResolvedValueOnce(
+            makeOkJsonResponse({ choices: [{ message: { content: 'gemini thinking' } }] })
+        );
+
+        const result = await fetchByProviderId(
+            { provider: 'Custom', name: '[Copilot] gemini-2.5-flash', uniqueId: 'copilot-gemini-test' },
+            BASIC_ARGS,
+        );
+
+        expect(result.success).toBe(true);
+
+        // Verify reasoning_effort is in the request body
+        const fetchedOptions = h.mockSmartFetch.mock.calls[0][1];
+        const body = JSON.parse(fetchedOptions.body);
+        expect(body.reasoning_effort).toBe('medium');
+    });
+
+    it('Gemini model with reasoning="none" does NOT inject reasoning_effort', async () => {
+        h.state.CUSTOM_MODELS_CACHE = [makeCopilotGeminiModel({ reasoning: 'none' })];
+
+        h.mockSmartFetch.mockResolvedValueOnce(
+            makeOkJsonResponse({ choices: [{ message: { content: 'no reasoning' } }] })
+        );
+
+        await fetchByProviderId(
+            { provider: 'Custom', name: '[Copilot] gemini-2.5-flash', uniqueId: 'copilot-gemini-test' },
+            BASIC_ARGS,
+        );
+
+        const fetchedOptions = h.mockSmartFetch.mock.calls[0][1];
+        const body = JSON.parse(fetchedOptions.body);
+        expect(body).not.toHaveProperty('reasoning_effort');
+    });
+
+    it('slot _cpmSlotThinkingConfig overrides model reasoning for Gemini', async () => {
+        h.state.CUSTOM_MODELS_CACHE = [makeCopilotGeminiModel({ reasoning: 'low' })];
+
+        h.mockSmartFetch.mockResolvedValueOnce(
+            makeOkJsonResponse({ choices: [{ message: { content: 'slot override' } }] })
+        );
+
+        // Slot override: reasoning = 'high'
+        const result = await fetchByProviderId(
+            { provider: 'Custom', name: '[Copilot] gemini-2.5-flash', uniqueId: 'copilot-gemini-test' },
+            { ...BASIC_ARGS, _cpmSlotThinkingConfig: { reasoning: 'high' } },
+        );
+
+        expect(result.success).toBe(true);
+        const fetchedOptions = h.mockSmartFetch.mock.calls[0][1];
+        const body = JSON.parse(fetchedOptions.body);
+        expect(body.reasoning_effort).toBe('high');
+    });
+
+    it('Gemini 3 model also supports reasoning_effort', async () => {
+        h.state.CUSTOM_MODELS_CACHE = [makeCopilotGeminiModel({
+            model: 'gemini-3-pro',
+            name: '[Copilot] gemini-3-pro',
+            reasoning: 'high',
+        })];
+
+        h.mockSmartFetch.mockResolvedValueOnce(
+            makeOkJsonResponse({ choices: [{ message: { content: 'gemini3 thinking' } }] })
+        );
+
+        await fetchByProviderId(
+            { provider: 'Custom', name: '[Copilot] gemini-3-pro', uniqueId: 'copilot-gemini-test' },
+            BASIC_ARGS,
+        );
+
+        const fetchedOptions = h.mockSmartFetch.mock.calls[0][1];
+        const body = JSON.parse(fetchedOptions.body);
+        expect(body.reasoning_effort).toBe('high');
+    });
+
+    it('non-Gemini non-o3 model does NOT get reasoning_effort even with reasoning set', async () => {
+        h.state.CUSTOM_MODELS_CACHE = [makeCopilotGeminiModel({
+            model: 'gpt-4o',
+            name: '[Copilot] gpt-4o',
+            reasoning: 'medium',
+        })];
+
+        h.mockSmartFetch.mockResolvedValueOnce(
+            makeOkJsonResponse({ choices: [{ message: { content: 'no reasoning for gpt4o' } }] })
+        );
+
+        await fetchByProviderId(
+            { provider: 'Custom', name: '[Copilot] gpt-4o', uniqueId: 'copilot-gemini-test' },
+            BASIC_ARGS,
+        );
+
+        const fetchedOptions = h.mockSmartFetch.mock.calls[0][1];
+        const body = JSON.parse(fetchedOptions.body);
+        expect(body).not.toHaveProperty('reasoning_effort');
+    });
+});

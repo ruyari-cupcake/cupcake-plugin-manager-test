@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.11
-//@changes v1.22.11: Proxy Access Token (proxyKey) 필드 추가 — X-Proxy-Token 헤더 지원
+//@version 1.22.12
+//@changes v1.22.12: Gemini reasoning_effort 지원 (isGeminiFamily + supportsOpenAIReasoningEffort 수정), proxyKey router 버그 수정
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================

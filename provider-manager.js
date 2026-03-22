@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.11
-//@changes v1.22.11: Proxy Access Token (proxyKey) 필드 추가 — X-Proxy-Token 헤더 지원
+//@version 1.22.12
+//@changes v1.22.12: Gemini reasoning_effort 지원 (isGeminiFamily + supportsOpenAIReasoningEffort 수정), proxyKey router 버그 수정
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================
@@ -190,7 +190,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.22.11';
+    const CPM_VERSION = '1.22.12';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -1351,19 +1351,31 @@ var CupcakeProviderManager = (function (exports) {
         return /gemini-2\.0-flash-lite-preview|gemini-2\.0-pro-exp/.test(String(modelId).toLowerCase());
     }
 
+    /**
+     * Detect any Gemini model (2.x, 3.x, etc.).
+     * Matches: gemini-2.5-flash, gemini-3-pro, gemini-2.5-flash-preview, etc.
+     * @param {string} modelName
+     * @returns {boolean}
+     */
+    function isGeminiFamily(modelName) {
+        if (!modelName) return false;
+        return /gemini/i.test(String(modelName));
+    }
+
     // ═══════════════════════════════════════════════════════
     //  OpenAI / Copilot higher-level helpers
     // ═══════════════════════════════════════════════════════
 
     /**
      * Check if a model supports OpenAI reasoning_effort parameter.
-     * Matches o3/o4 variants and GPT-5 family.
+     * Matches o3/o4 variants, GPT-5 family, and Gemini models (via Copilot API).
+     * Gemini models on Copilot use reasoning_effort for thinking control.
      * @param {string} modelName
      * @returns {boolean}
      */
     function supportsOpenAIReasoningEffort(modelName) {
         if (!modelName) return false;
-        return isO3O4Family(modelName) || isGPT5Family(modelName);
+        return isO3O4Family(modelName) || isGPT5Family(modelName) || isGeminiFamily(modelName);
     }
 
     /**
@@ -8359,7 +8371,7 @@ var CupcakeProviderManager = (function (exports) {
                 const _so = args._cpmSlotThinkingConfig || {};
 
                 const _fetchConfig = {
-                    url: cDef.url, key: cDef.key, model: cDef.model, proxyUrl: cDef.proxyUrl || '', proxyDirect: !!cDef.proxyDirect,
+                    url: cDef.url, key: cDef.key, model: cDef.model, proxyUrl: cDef.proxyUrl || '', proxyDirect: !!cDef.proxyDirect, proxyKey: cDef.proxyKey || '',
                     format: cDef.format || 'openai',
                     authType: cDef.authType || 'api_key',
                     sysfirst: !!cDef.sysfirst, altrole: !!cDef.altrole,
