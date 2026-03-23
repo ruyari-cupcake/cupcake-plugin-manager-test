@@ -20,8 +20,8 @@ describe('cpm-chat-limiter.js — header metadata', () => {
         expect(PLUGIN_SRC).toMatch(/\/\/@name\s+CPM Component - Chat Limiter/);
     });
 
-    it('has correct @version 0.2.0', () => {
-        expect(PLUGIN_SRC).toMatch(/\/\/@version\s+0\.2\.0/);
+    it('has correct @version 0.2.1', () => {
+        expect(PLUGIN_SRC).toMatch(/\/\/@version\s+0\.2\.1/);
     });
 
     it('has @update-url pointing to test2 repo', () => {
@@ -326,7 +326,7 @@ describe('cpm-chat-limiter — code structure', () => {
         const versions = JSON.parse(fs.readFileSync(path.resolve('versions.json'), 'utf-8'));
         const entry = versions['CPM Component - Chat Limiter'];
         expect(entry).toBeDefined();
-        expect(entry.version).toBe('0.2.0');
+        expect(entry.version).toBe('0.2.1');
         expect(entry.file).toBe('cpm-chat-limiter.js');
     });
 });
@@ -359,5 +359,62 @@ describe('cpm-chat-limiter — conflict verification', () => {
     it('Resizer CSS does not use nth-child for message hiding', () => {
         expect(RESIZER_SRC).not.toContain('nth-child');
         expect(RESIZER_SRC).not.toContain('display: none !important');
+    });
+});
+
+// ════════════════════════════════════════════
+// v0.2.1 cleanup improvements
+// ════════════════════════════════════════════
+describe('cpm-chat-limiter v0.2.1 — listener cleanup', () => {
+    it('defines _cpmLimiterUICleanup for re-render safety', () => {
+        expect(PLUGIN_SRC).toContain('_cpmLimiterUICleanup');
+    });
+
+    it('calls _cpmLimiterUICleanup before registering new listeners', () => {
+        const cleanupCallIdx = PLUGIN_SRC.indexOf('if (window._cpmLimiterUICleanup) window._cpmLimiterUICleanup()');
+        const addListenerIdx = PLUGIN_SRC.indexOf("checkbox.addEventListener('change'");
+        expect(cleanupCallIdx).toBeGreaterThan(-1);
+        expect(addListenerIdx).toBeGreaterThan(-1);
+        expect(cleanupCallIdx).toBeLessThan(addListenerIdx);
+    });
+
+    it('assigns cleanup that removes all three UI listeners', () => {
+        expect(PLUGIN_SRC).toContain("checkbox.removeEventListener('change'");
+        expect(PLUGIN_SRC).toContain("slider.removeEventListener('input'");
+        expect(PLUGIN_SRC).toContain("countInput.removeEventListener('change'");
+    });
+
+    it('uses named functions for event handlers (not anonymous)', () => {
+        expect(PLUGIN_SRC).toContain('const onCheckboxChange');
+        expect(PLUGIN_SRC).toContain('const onSliderInput');
+        expect(PLUGIN_SRC).toContain('const onCountChange');
+    });
+});
+
+// ════════════════════════════════════════════
+// Navigation & Resizer cleanup registration
+// ════════════════════════════════════════════
+describe('sub-plugin cleanup registration', () => {
+    const NAV_SRC = fs.readFileSync(path.resolve('cpm-chat-navigation.js'), 'utf-8');
+    const RESIZER_SRC_2 = fs.readFileSync(path.resolve('cpm-chat-resizer.js'), 'utf-8');
+
+    it('Navigation registers risuai.onUnload', () => {
+        expect(NAV_SRC).toContain('risuai.onUnload(window._cpmNaviCleanup)');
+    });
+
+    it('Resizer registers risuai.onUnload', () => {
+        expect(RESIZER_SRC_2).toContain('risuai.onUnload(window._cpmResizerCleanup)');
+    });
+
+    it('Navigation CupcakePM_SubPlugins name has NO emoji prefix', () => {
+        // Name should be plain "Chat Navigation", not "🧭 Chat Navigation"
+        const regMatch = NAV_SRC.match(/CupcakePM_SubPlugins\.push\(\{[^}]*name:\s*'([^']+)'/s);
+        expect(regMatch).not.toBeNull();
+        expect(regMatch[1]).toBe('Chat Navigation');
+        expect(regMatch[1]).not.toMatch(/^\p{Emoji}/u);
+    });
+
+    it('Navigation icon field retains compass emoji', () => {
+        expect(NAV_SRC).toContain("icon: '🧭'");
     });
 });
