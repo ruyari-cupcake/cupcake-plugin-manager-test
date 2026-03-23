@@ -60,8 +60,8 @@
     "changes": "v0.2.0: 실시간 슬라이더, 메시지 카운트 표시, MutationObserver, Navigation 연동 API, Auto-scroll"
   },
   "Cupcake Provider Manager": {
-    "version": "1.22.26",
+    "version": "1.22.27",
     "file": "provider-manager.js",
-    "changes": "v1.22.26: Chat Limiter v0.2.0 (슬라이더/카운트/Observer/Navigation연동), ESLint 정리"
+    "changes": "v1.22.27: Auto-Bootstrap — 번들 내 미설치 서브플러그인 자동 설치, Chat Limiter v0.2.0, Navigation v2.1.4"
   }
 }

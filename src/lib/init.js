@@ -163,6 +163,11 @@ setupCupcakeAPI();
             _phaseDone('subplugin-registry');
         } catch (e) { _phaseFail('subplugin-registry', e); }
 
+        // ── Phase: Auto-Bootstrap Bundled Plugins ──
+        try {
+            await /** @type {any} */ (SubPluginManager).autoBootstrapBundledPlugins();
+        } catch (_) { /* non-blocking */ }
+
         // ── Phase: Execute Sub-Plugins ──
         _phaseStart('subplugin-execute');
         try {

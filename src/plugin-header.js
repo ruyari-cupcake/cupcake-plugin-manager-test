@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.26
-//@changes v1.22.26: Chat Limiter v0.2.0 (슬라이더/카운트/Observer/Navigation연동), ESLint 정리
+//@version 1.22.27
+//@changes v1.22.27: 서브플러그인 Auto-Bootstrap — 번들 내 미설치 플러그인 자동 설치
 //@update-url https://test-2-wheat-omega.vercel.app/api/main-plugin
 
 // ==========================================
