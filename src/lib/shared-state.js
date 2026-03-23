@@ -33,7 +33,7 @@
 /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
 // ─── Constants ───
-export const CPM_VERSION = '1.22.31';
+export const CPM_VERSION = '1.22.32';
 
 // ─── RisuAI Global Reference ───
 const risuWindow = typeof window !== 'undefined'

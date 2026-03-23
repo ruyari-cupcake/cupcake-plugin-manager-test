@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.31
-//@changes v1.22.31: 자동 업데이트 OFF 시 과부하 다운로드 차단 (checkMainPluginVersionQuiet, autoBootstrapBundledPlugins)
+//@version 1.22.32
+//@changes v1.22.32: 서브플러그인 자동 강제 설치(autoBootstrap) 제거 — 사용자 직접 설치만 허용
 //@update-url https://test-2-wheat-omega.vercel.app/api/main-plugin
 
 // ==========================================

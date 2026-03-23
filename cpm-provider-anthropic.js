@@ -2,7 +2,7 @@
 //@version 1.6.8
 //@description Anthropic Claude provider for Cupcake PM (Streaming, Key Rotation)
 //@icon 🟠
-//@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager-test2/main/cpm-provider-anthropic.js
+//@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-provider-anthropic.js
 
 (() => {
     const CPM = window.CupcakePM;

@@ -163,10 +163,9 @@ setupCupcakeAPI();
             _phaseDone('subplugin-registry');
         } catch (e) { _phaseFail('subplugin-registry', e); }
 
-        // ── Phase: Auto-Bootstrap Bundled Plugins ──
-        try {
-            await /** @type {any} */ (SubPluginManager).autoBootstrapBundledPlugins();
-        } catch (_) { /* non-blocking */ }
+        // ── Auto-Bootstrap REMOVED ──
+        // autoBootstrapBundledPlugins() was force-installing sub-plugins the user never chose.
+        // Sub-plugins must only be installed via explicit user action (settings UI).
 
         // ── Phase: Execute Sub-Plugins ──
         _phaseStart('subplugin-execute');
