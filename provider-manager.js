@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.22
-//@changes v1.22.22: Gemini thinking 필드 방어적 처리 + 서브플러그인 URL 빌드 검증 + 배포 문서 보강
+//@version 1.22.23
+//@changes v1.22.23: Copilot Gemini reasoning_text 필드 지원 — thinking 표시 수정
 //@update-url https://test-2-wheat-omega.vercel.app/api/main-plugin
 
 // ==========================================
@@ -195,7 +195,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.22.22';
+    const CPM_VERSION = '1.22.23';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -1772,6 +1772,7 @@ var CupcakeProviderManager = (function (exports) {
             if (!delta) return null;
             let out = '';
             if (delta.reasoning_content) out += delta.reasoning_content;
+            else if (delta.reasoning_text) out += delta.reasoning_text;
             else if (delta.reasoning) out += delta.reasoning;
             const isThought = !!(delta.thought || obj.choices?.[0]?.thought);
             if (isThought && delta.content) out += delta.content;
@@ -2684,7 +2685,8 @@ var CupcakeProviderManager = (function (exports) {
         if (!msg) return { success: false, content: '[OpenAI] Empty response (no message)' };
 
         let out = '';
-        const reasoningContent = data.choices?.[0]?.reasoning_content ?? msg.reasoning_content;
+        const reasoningContent = data.choices?.[0]?.reasoning_content ?? msg.reasoning_content
+            ?? data.choices?.[0]?.reasoning_text ?? msg.reasoning_text;
         if (reasoningContent) {
             out += '<Thoughts>\n' + String(reasoningContent) + '\n</Thoughts>\n';
         }
@@ -2736,11 +2738,20 @@ var CupcakeProviderManager = (function (exports) {
         let out = '';
         for (const item of data.output) {
             if (!item || typeof item !== 'object') continue;
-            if (item.type === 'reasoning' && Array.isArray(item.summary)) {
-                const reasoningText = item.summary
-                    .filter(/** @type {(s: any) => boolean} */ (s) => s && s.type === 'summary_text')
-                    .map(/** @type {(s: any) => string} */ (s) => s.text || '')
-                    .join('');
+            if (item.type === 'reasoning' && (Array.isArray(item.summary) || Array.isArray(item.content))) {
+                let reasoningText = '';
+                if (Array.isArray(item.summary)) {
+                    reasoningText += item.summary
+                        .filter(/** @type {(s: any) => boolean} */ (s) => s && s.type === 'summary_text')
+                        .map(/** @type {(s: any) => string} */ (s) => s.text || '')
+                        .join('');
+                }
+                if (Array.isArray(item.content)) {
+                    reasoningText += item.content
+                        .filter(/** @type {(s: any) => boolean} */ (s) => s && s.type === 'reasoning_text')
+                        .map(/** @type {(s: any) => string} */ (s) => s.text || '')
+                        .join('');
+                }
                 if (reasoningText) out += '<Thoughts>\n' + reasoningText + '\n</Thoughts>\n';
             }
             if (item.type === 'message' && Array.isArray(item.content)) {
@@ -2982,7 +2993,7 @@ var CupcakeProviderManager = (function (exports) {
                 let out = '';
                 // Check reasoning_content (o-series, OpenAI), reasoning (OpenRouter),
                 // and thought-flagged content (Gemini through Copilot proxy)
-                const reasoningDelta = delta.reasoning_content ?? delta.reasoning;
+                const reasoningDelta = delta.reasoning_content ?? delta.reasoning_text ?? delta.reasoning;
                 const isThoughtDelta = !!(delta.thought || obj.choices?.[0]?.thought);
                 if (reasoningDelta) {
                     if (!inReasoning) { inReasoning = true; out += '<Thoughts>\n'; }
@@ -3020,7 +3031,8 @@ var CupcakeProviderManager = (function (exports) {
 
     /**
      * Responses API SSE stream parser.
-     * Handles response.output_text.delta and response.reasoning_summary_text.delta.
+     * Handles response.output_text.delta, response.reasoning_summary_text.delta,
+     * and response.reasoning_text.delta.
      * @param {Response} response
      * @param {AbortSignal} [abortSignal]
      * @param {string} [_logRequestId]
@@ -3041,7 +3053,7 @@ var CupcakeProviderManager = (function (exports) {
                 if (obj.type === 'response.completed' && obj.response?.usage) {
                     _streamUsage = _normalizeTokenUsage(obj.response.usage, 'openai');
                 }
-                if (obj.type === 'response.reasoning_summary_text.delta') {
+                if (obj.type === 'response.reasoning_summary_text.delta' || obj.type === 'response.reasoning_text.delta') {
                     let out = '';
                     if (!inReasoning) { inReasoning = true; out += '<Thoughts>\n'; }
                     out += obj.delta || '';

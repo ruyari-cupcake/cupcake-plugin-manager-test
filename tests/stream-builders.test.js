@@ -85,6 +85,33 @@ describe('stream-builders regression coverage', () => {
         expect(text).toBe('<Thoughts>\nthinking step\n</Thoughts>\nactual reply');
     });
 
+    it('createOpenAISSEStream handles reasoning_text field (Copilot Gemini)', async () => {
+        const response = makeResponseFromChunks([
+            'data: {"choices":[{"delta":{"reasoning_text":"deep thought"}}]}\n\n',
+            'data: {"choices":[{"delta":{"content":"answer"}}]}\n\n',
+            'data: [DONE]\n\n',
+        ]);
+
+        const stream = createOpenAISSEStream(response, undefined, 'req-reasoning-text', { model: 'gemini-2.5-pro' });
+        const text = await readStream(stream);
+
+        expect(text).toBe('<Thoughts>\ndeep thought\n</Thoughts>\nanswer');
+    });
+
+    it('createResponsesAPISSEStream handles response.reasoning_text.delta', async () => {
+        const response = makeResponseFromChunks([
+            'data: {"type":"response.reasoning_text.delta","delta":"reasoning via text"}\n\n',
+            'data: {"type":"response.output_text.delta","delta":"output"}\n\n',
+            'data: {"type":"response.completed","response":{"usage":{"input_tokens":5,"output_tokens":10}}}\n\n',
+            'data: [DONE]\n\n',
+        ]);
+
+        const stream = createResponsesAPISSEStream(response, undefined, 'req-rt-delta');
+        const text = await readStream(stream);
+
+        expect(text).toBe('<Thoughts>\nreasoning via text\n</Thoughts>\noutput');
+    });
+
     it('createOpenAISSEStream passes through content normally when no thought flag', async () => {
         const response = makeResponseFromChunks([
             'data: {"choices":[{"delta":{"content":"normal content"}}]}\n\n',

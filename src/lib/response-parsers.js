@@ -20,7 +20,8 @@ export function parseOpenAINonStreamingResponse(data, _requestId) {
     if (!msg) return { success: false, content: '[OpenAI] Empty response (no message)' };
 
     let out = '';
-    const reasoningContent = data.choices?.[0]?.reasoning_content ?? msg.reasoning_content;
+    const reasoningContent = data.choices?.[0]?.reasoning_content ?? msg.reasoning_content
+        ?? data.choices?.[0]?.reasoning_text ?? msg.reasoning_text;
     if (reasoningContent) {
         out += '<Thoughts>\n' + String(reasoningContent) + '\n</Thoughts>\n';
     }
@@ -72,11 +73,20 @@ export function parseResponsesAPINonStreamingResponse(data, _requestId) {
     let out = '';
     for (const item of data.output) {
         if (!item || typeof item !== 'object') continue;
-        if (item.type === 'reasoning' && Array.isArray(item.summary)) {
-            const reasoningText = item.summary
-                .filter(/** @type {(s: any) => boolean} */ (s) => s && s.type === 'summary_text')
-                .map(/** @type {(s: any) => string} */ (s) => s.text || '')
-                .join('');
+        if (item.type === 'reasoning' && (Array.isArray(item.summary) || Array.isArray(item.content))) {
+            let reasoningText = '';
+            if (Array.isArray(item.summary)) {
+                reasoningText += item.summary
+                    .filter(/** @type {(s: any) => boolean} */ (s) => s && s.type === 'summary_text')
+                    .map(/** @type {(s: any) => string} */ (s) => s.text || '')
+                    .join('');
+            }
+            if (Array.isArray(item.content)) {
+                reasoningText += item.content
+                    .filter(/** @type {(s: any) => boolean} */ (s) => s && s.type === 'reasoning_text')
+                    .map(/** @type {(s: any) => string} */ (s) => s.text || '')
+                    .join('');
+            }
             if (reasoningText) out += '<Thoughts>\n' + reasoningText + '\n</Thoughts>\n';
         }
         if (item.type === 'message' && Array.isArray(item.content)) {

@@ -22,6 +22,7 @@ export function parseOpenAISSELine(line) {
         if (!delta) return null;
         let out = '';
         if (delta.reasoning_content) out += delta.reasoning_content;
+        else if (delta.reasoning_text) out += delta.reasoning_text;
         else if (delta.reasoning) out += delta.reasoning;
         const isThought = !!(delta.thought || obj.choices?.[0]?.thought);
         if (isThought && delta.content) out += delta.content;

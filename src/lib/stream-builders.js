@@ -124,7 +124,7 @@ export function createOpenAISSEStream(response, abortSignal, _logRequestId, _met
             let out = '';
             // Check reasoning_content (o-series, OpenAI), reasoning (OpenRouter),
             // and thought-flagged content (Gemini through Copilot proxy)
-            const reasoningDelta = delta.reasoning_content ?? delta.reasoning;
+            const reasoningDelta = delta.reasoning_content ?? delta.reasoning_text ?? delta.reasoning;
             const isThoughtDelta = !!(delta.thought || obj.choices?.[0]?.thought);
             if (reasoningDelta) {
                 if (!inReasoning) { inReasoning = true; out += '<Thoughts>\n'; }
@@ -162,7 +162,8 @@ export function createOpenAISSEStream(response, abortSignal, _logRequestId, _met
 
 /**
  * Responses API SSE stream parser.
- * Handles response.output_text.delta and response.reasoning_summary_text.delta.
+ * Handles response.output_text.delta, response.reasoning_summary_text.delta,
+ * and response.reasoning_text.delta.
  * @param {Response} response
  * @param {AbortSignal} [abortSignal]
  * @param {string} [_logRequestId]
@@ -183,7 +184,7 @@ export function createResponsesAPISSEStream(response, abortSignal, _logRequestId
             if (obj.type === 'response.completed' && obj.response?.usage) {
                 _streamUsage = _normalizeTokenUsage(obj.response.usage, 'openai');
             }
-            if (obj.type === 'response.reasoning_summary_text.delta') {
+            if (obj.type === 'response.reasoning_summary_text.delta' || obj.type === 'response.reasoning_text.delta') {
                 let out = '';
                 if (!inReasoning) { inReasoning = true; out += '<Thoughts>\n'; }
                 out += obj.delta || '';
