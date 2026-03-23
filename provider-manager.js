@@ -6245,7 +6245,6 @@ var CupcakeProviderManager = (function (exports) {
          */
         async _purgePluginData(pluginName) {
             const deleted = [];
-            pluginName.toLowerCase().replace(/[^a-z0-9]/g, '');
 
             // Known mapping: plugin name → storage keys (pluginStorage + safeLocalStorage)
             // Covers ALL CPM sub-plugins. Plugins with no storage keys have empty arrays.
