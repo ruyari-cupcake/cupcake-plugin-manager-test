@@ -357,10 +357,25 @@ describe('auto-update toggle (cpm_disable_autoupdate)', () => {
     });
 
     // ──────────────────────────────────────────────────
-    // autoBootstrapBundledPlugins — toggle tests
+    // autoBootstrapBundledPlugins — permanently disabled (no-op)
     // ──────────────────────────────────────────────────
-    describe('autoBootstrapBundledPlugins — toggle ON (disabled)', () => {
-        it('skips bundle fetch entirely when auto-update disabled', async () => {
+    describe('autoBootstrapBundledPlugins — permanently disabled', () => {
+        it('always returns empty array regardless of toggle state', async () => {
+            h._safeGetBoolArgMock.mockImplementation(async (key, def) => def);
+
+            updater = makeUpdater({
+                install: vi.fn(async () => {}),
+                BLOCKED_NAMES: ['Cupcake Provider Manager'],
+            });
+
+            const result = await updater.autoBootstrapBundledPlugins();
+
+            expect(result).toEqual([]);
+            expect(updater.install).not.toHaveBeenCalled();
+            expect(h.risu.risuFetch).not.toHaveBeenCalled();
+        });
+
+        it('does not fetch bundle when auto-update disabled', async () => {
             h._safeGetBoolArgMock.mockImplementation(async (key, def) => {
                 if (key === 'cpm_disable_autoupdate') return true;
                 return def;
@@ -375,27 +390,6 @@ describe('auto-update toggle (cpm_disable_autoupdate)', () => {
 
             expect(result).toEqual([]);
             expect(h.risu.risuFetch).not.toHaveBeenCalled();
-        });
-    });
-
-    describe('autoBootstrapBundledPlugins — toggle OFF (enabled)', () => {
-        it('fetches bundle normally when auto-update enabled', async () => {
-            h._safeGetBoolArgMock.mockImplementation(async (key, def) => def);
-
-            h.risu.risuFetch.mockResolvedValue({
-                data: JSON.stringify({ versions: {}, code: {} }),
-                status: 200,
-            });
-
-            updater = makeUpdater({
-                install: vi.fn(async () => {}),
-                BLOCKED_NAMES: ['Cupcake Provider Manager'],
-            });
-
-            const result = await updater.autoBootstrapBundledPlugins();
-
-            expect(result).toEqual([]);
-            expect(h.risu.risuFetch).toHaveBeenCalled();
         });
     });
 

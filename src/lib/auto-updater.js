@@ -1038,90 +1038,13 @@ export const autoUpdaterMethods = {
         }
     },
 
-    // ── Auto-Bootstrap: auto-install bundled sub-plugins not yet in registry ──
-
-    /**
-     * Fetch the update bundle and install any sub-plugins that are in the bundle
-     * but not yet in the user's installed plugins list.
-     * Called once during init, after loadRegistry() and before executeEnabled().
-     * @returns {Promise<string[]>} names of newly installed plugins
-     */
+    // ── Auto-Bootstrap: REMOVED (v1.22.32) ──
+    // autoBootstrapBundledPlugins() was force-installing sub-plugins the user never chose.
+    // Sub-plugins must only be installed via explicit user action (settings UI).
+    // The function body has been deleted to prevent accidental re-activation.
+    // Any external caller will get an empty array (no-op).
     async autoBootstrapBundledPlugins() {
-        const LOG = '[CPM Bootstrap]';
-        try {
-            // ── Early exit: auto-update OFF → skip bundle fetch & auto-install ──
-            // Skips 50KB+ bundle download + JSON parsing + SHA-256 computation.
-            // Existing sub-plugins in registry are unaffected (executeEnabled runs normally).
-            if (await safeGetBoolArg('cpm_disable_autoupdate', false)) {
-                console.log(`${LOG} Auto-update disabled. Skipping bundle fetch and auto-bootstrap.`);
-                return [];
-            }
-
-            const cacheBuster = this.UPDATE_BUNDLE_URL + '?_t=' + Date.now() + '&_r=' + Math.random().toString(36).substr(2, 8);
-            const result = await Risu.risuFetch(cacheBuster, { method: 'GET', plainFetchForce: true });
-
-            if (!result.data || (result.status && result.status >= 400)) {
-                console.warn(`${LOG} Bundle fetch failed (${result.status}), skipping auto-bootstrap.`);
-                return [];
-            }
-
-            const raw = (typeof result.data === 'string') ? JSON.parse(result.data) : result.data;
-            const bundleResult = validateSchema(raw, schemas.updateBundle);
-            if (!bundleResult.ok) {
-                console.warn(`${LOG} Bundle schema validation failed, skipping.`);
-                return [];
-            }
-
-            const bundle = bundleResult.data;
-            const manifest = bundle.versions || {};
-            const codeBundle = bundle.code || {};
-            const installed = [];
-
-            for (const [name, info] of Object.entries(manifest)) {
-                // Skip if it's the main plugin
-                if (this.BLOCKED_NAMES && this.BLOCKED_NAMES.some(
-                    (/** @type {string} */ n) => n.toLowerCase() === name.toLowerCase()
-                )) continue;
-
-                // Skip if already installed
-                const existing = this.plugins.find((/** @type {any} */ p) => p.name === name);
-                if (existing) continue;
-
-                // Must have code in bundle
-                const file = /** @type {any} */ (info).file;
-                const code = file ? codeBundle[file] : null;
-                if (!code) {
-                    console.warn(`${LOG} ${name}: code not found in bundle (file=${file}), skipping.`);
-                    continue;
-                }
-
-                // SHA-256 integrity check
-                const expectedHash = /** @type {any} */ (info).sha256;
-                if (expectedHash) {
-                    const actualHash = await _computeSHA256(code);
-                    if (actualHash && actualHash !== expectedHash) {
-                        console.error(`${LOG} ⚠️ REJECTED ${name}: integrity mismatch (expected ${expectedHash.substring(0, 12)}…, got ${actualHash.substring(0, 12)}…)`);
-                        continue;
-                    }
-                }
-
-                // Install
-                try {
-                    await this.install(code);
-                    console.log(`${LOG} ✓ Auto-installed: ${name} v${/** @type {any} */ (info).version}`);
-                    installed.push(name);
-                } catch (/** @type {any} */ e) {
-                    console.warn(`${LOG} Failed to auto-install ${name}: ${e.message}`);
-                }
-            }
-
-            if (installed.length > 0) {
-                console.log(`${LOG} Auto-bootstrap complete: ${installed.length} new plugin(s) installed.`);
-            }
-            return installed;
-        } catch (/** @type {any} */ e) {
-            console.warn(`${LOG} Auto-bootstrap failed: ${e.message}`);
-            return [];
-        }
+        console.warn('[CPM Bootstrap] autoBootstrapBundledPlugins is permanently disabled. Sub-plugins must be installed manually.');
+        return [];
     },
 };

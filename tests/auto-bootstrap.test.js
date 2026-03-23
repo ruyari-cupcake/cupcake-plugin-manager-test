@@ -1,7 +1,7 @@
 /**
- * @file auto-bootstrap.test.js — Tests for autoBootstrapBundledPlugins
- * Verifies that new sub-plugins in the update bundle are auto-installed
- * on first load when not yet in the user's registry.
+ * @file auto-bootstrap.test.js — Guard tests: autoBootstrapBundledPlugins is permanently disabled.
+ * Verifies that the function is a no-op and never installs sub-plugins automatically.
+ * Also verifies that checkVersionsQuiet and checkAllUpdates never install new plugins.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
@@ -15,14 +15,17 @@ const h = vi.hoisted(() => ({
             setItem: vi.fn(async () => {}),
             removeItem: vi.fn(async () => {}),
         },
+        getRootDocument: vi.fn().mockResolvedValue(null),
+        getDatabase: vi.fn().mockResolvedValue(null),
     },
-    cpmVersion: '1.22.26',
+    cpmVersion: '1.22.36',
+    safeGetBoolArg: vi.fn(async () => false),
 }));
 
 vi.mock('../src/lib/shared-state.js', () => ({
     Risu: h.risu,
     CPM_VERSION: h.cpmVersion,
-    safeGetBoolArg: vi.fn(async () => false),
+    safeGetBoolArg: h.safeGetBoolArg,
 }));
 vi.mock('../src/lib/endpoints.js', () => ({
     VERSIONS_URL: 'https://test.example.com/versions.json',
@@ -31,22 +34,14 @@ vi.mock('../src/lib/endpoints.js', () => ({
     CPM_ENV: 'test2',
 }));
 
-import { autoUpdaterMethods, _computeSHA256 } from '../src/lib/auto-updater.js';
+import { autoUpdaterMethods } from '../src/lib/auto-updater.js';
 
 // ── Helpers ──
-const MOCK_SUB_PLUGIN_CODE = `//@name CPM Component - Chat Limiter
-//@display-name 🧁 Cupcake Chat Limiter
-//@version 0.2.0
-//@description Test limiter
-//@icon 📋
-//@update-url https://raw.githubusercontent.com/test/test/main/cpm-chat-limiter.js
-(async()=>{console.log('limiter loaded');})();`;
-
 function makeBundle(extraVersions = {}, extraCode = {}) {
     return {
         versions: {
-            'Cupcake Provider Manager': { version: '1.22.26', file: 'provider-manager.js' },
-            'CPM Provider - OpenAI': { version: '1.5.9', file: 'cpm-provider-openai.js' },
+            'Cupcake Provider Manager': { version: '1.22.36', file: 'provider-manager.js', sha256: 'abc123' },
+            'CPM Provider - OpenAI': { version: '1.5.9', file: 'cpm-provider-openai.js', sha256: 'def456' },
             ...extraVersions,
         },
         code: {
@@ -57,75 +52,30 @@ function makeBundle(extraVersions = {}, extraCode = {}) {
     };
 }
 
-describe('autoBootstrapBundledPlugins', () => {
+// ════════════════════════════════════════════════════════════════
+// 1. autoBootstrapBundledPlugins is permanently disabled (no-op)
+// ════════════════════════════════════════════════════════════════
+
+describe('autoBootstrapBundledPlugins — permanently disabled guard', () => {
     /** @type {any} */
     let mgr;
 
-    beforeEach(async () => {
+    beforeEach(() => {
         vi.clearAllMocks();
-
         mgr = {
             ...autoUpdaterMethods,
             plugins: [],
-            BLOCKED_NAMES: ['Cupcake_Provider_Manager', 'Cupcake Provider Manager'],
-            MAX_INSTALL_BYTES: 300 * 1024,
-            extractMetadata: autoUpdaterMethods.extractMetadata || function (code) {
-                const meta = { name: 'Unnamed', version: '', description: '', icon: '📦', updateUrl: '' };
-                for (const line of code.split(/\r?\n/)) {
-                    const t = line.trim();
-                    if (!t.startsWith('//')) break;
-                    const nm = t.match(/\/\/\s*@name\s+(.+)/i);
-                    if (nm) meta.name = nm[1].trim();
-                    const vm = t.match(/\/\/\s*@version\s+(.+)/i);
-                    if (vm) meta.version = vm[1].trim();
-                    const um = t.match(/\/\/\s*@update-url\s+(.+)/i);
-                    if (um) meta.updateUrl = um[1].trim();
-                    const dm = t.match(/\/\/\s*@description\s+(.+)/i);
-                    if (dm) meta.description = dm[1].trim();
-                    const im = t.match(/\/\/\s*@icon\s+(.+)/i);
-                    if (im) meta.icon = im[1].trim();
-                }
-                return meta;
-            },
-            getCodeSizeBytes: function (code) {
-                return new TextEncoder().encode(code || '').length;
-            },
-            install: vi.fn(async function (code) {
-                const meta = this.extractMetadata(code);
-                const existing = this.plugins.find(p => p.name === meta.name);
-                if (existing) {
-                    existing.code = code;
-                    existing.version = meta.version;
-                    return meta.name;
-                }
-                this.plugins.push({ id: 'subplugin_' + Date.now(), code, enabled: true, ...meta });
-                return meta.name;
-            }),
+            install: vi.fn(),
             saveRegistry: vi.fn(async () => {}),
-            compareVersions: autoUpdaterMethods.compareVersions,
         };
     });
 
-    afterEach(() => {
-        vi.restoreAllMocks();
-    });
-
-    it('installs a new sub-plugin from the bundle', async () => {
+    it('always returns empty array (no-op)', async () => {
+        // Even with a valid bundle available, it must not install anything
         const bundle = makeBundle(
             { 'CPM Component - Chat Limiter': { version: '0.2.0', file: 'cpm-chat-limiter.js' } },
-            { 'cpm-chat-limiter.js': MOCK_SUB_PLUGIN_CODE }
+            { 'cpm-chat-limiter.js': '//@name CPM Component - Chat Limiter\n//@version 0.2.0\nconsole.log("limiter");' }
         );
-        h.risu.risuFetch.mockResolvedValue({ data: JSON.stringify(bundle), status: 200 });
-
-        const installed = await mgr.autoBootstrapBundledPlugins();
-
-        expect(installed).toContain('CPM Component - Chat Limiter');
-        expect(mgr.install).toHaveBeenCalled();
-    });
-
-    it('does NOT install already-installed plugins', async () => {
-        mgr.plugins = [{ name: 'CPM Provider - OpenAI', version: '1.5.9', enabled: true }];
-        const bundle = makeBundle();
         h.risu.risuFetch.mockResolvedValue({ data: JSON.stringify(bundle), status: 200 });
 
         const installed = await mgr.autoBootstrapBundledPlugins();
@@ -134,111 +84,176 @@ describe('autoBootstrapBundledPlugins', () => {
         expect(mgr.install).not.toHaveBeenCalled();
     });
 
-    it('does NOT install the main plugin (Cupcake Provider Manager)', async () => {
+    it('does not fetch any remote resources', async () => {
+        await mgr.autoBootstrapBundledPlugins();
+
+        expect(h.risu.risuFetch).not.toHaveBeenCalled();
+        expect(h.risu.nativeFetch).not.toHaveBeenCalled();
+    });
+
+    it('does not modify plugin registry', async () => {
+        mgr.plugins = [{ id: 'sp1', name: 'Existing Plugin', version: '1.0.0' }];
+        const before = [...mgr.plugins];
+
+        await mgr.autoBootstrapBundledPlugins();
+
+        expect(mgr.plugins).toEqual(before);
+        expect(mgr.saveRegistry).not.toHaveBeenCalled();
+    });
+});
+
+// ════════════════════════════════════════════════════════════════
+// 2. checkVersionsQuiet — only notifies, never installs new plugins
+// ════════════════════════════════════════════════════════════════
+
+describe('checkVersionsQuiet — never installs new sub-plugins', () => {
+    /** @type {any} */
+    let mgr;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        /** @type {any} */ (global).window = { _cpmVersionChecked: false };
+
+        mgr = {
+            ...autoUpdaterMethods,
+            plugins: [],
+            install: vi.fn(),
+            saveRegistry: vi.fn(async () => {}),
+            compareVersions(a, b) {
+                const pa = (a || '0').split('.').map(Number);
+                const pb = (b || '0').split('.').map(Number);
+                for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+                    const diff = (pb[i] || 0) - (pa[i] || 0);
+                    if (diff !== 0) return diff > 0 ? 1 : -1;
+                }
+                return 0;
+            },
+            showUpdateToast: vi.fn(async () => {}),
+            _showMainUpdateAvailableToast: vi.fn(async () => {}),
+            _showMainAutoUpdateResult: vi.fn(async () => {}),
+            _rememberPendingMainUpdate: vi.fn(async () => {}),
+            safeMainPluginUpdate: vi.fn(async () => ({ ok: true })),
+            _pendingUpdateNames: [],
+        };
+    });
+
+    afterEach(() => {
+        delete /** @type {any} */ (global).window;
+    });
+
+    it('does NOT call install() even when manifest has plugins not in registry', async () => {
+        // Manifest has plugins, but user hasn't installed them → must NOT auto-install
+        const manifest = {
+            'CPM Component - Chat Limiter': { version: '0.2.0', file: 'cpm-chat-limiter.js' },
+            'CPM Provider - OpenAI': { version: '1.5.9', file: 'cpm-provider-openai.js' },
+        };
+        h.risu.risuFetch.mockResolvedValue({ data: JSON.stringify(manifest), status: 200 });
+        mgr.plugins = []; // user has no plugins installed
+
+        await mgr.checkVersionsQuiet();
+
+        expect(mgr.install).not.toHaveBeenCalled();
+        // Should not add any plugins to registry
+        expect(mgr.plugins).toHaveLength(0);
+    });
+
+    it('only shows toast for updates to ALREADY installed plugins', async () => {
+        mgr.plugins = [
+            { id: 'sp1', name: 'CPM Provider - OpenAI', version: '1.5.0', updateUrl: 'https://test.com/openai.js' },
+        ];
+        const manifest = {
+            'CPM Provider - OpenAI': { version: '1.5.9', changes: 'bugfix' },
+            'CPM Component - Chat Limiter': { version: '0.2.0' }, // NOT installed — must be ignored
+        };
+        h.risu.risuFetch.mockResolvedValue({ data: JSON.stringify(manifest), status: 200 });
+
+        await mgr.checkVersionsQuiet();
+
+        // Only installed plugin update should appear in toast
+        if (mgr.showUpdateToast.mock.calls.length > 0) {
+            const updates = mgr.showUpdateToast.mock.calls[0][0];
+            const names = updates.map(u => u.name);
+            expect(names).toContain('CPM Provider - OpenAI');
+            expect(names).not.toContain('CPM Component - Chat Limiter');
+        }
+        // Must NEVER call install
+        expect(mgr.install).not.toHaveBeenCalled();
+    });
+});
+
+// ════════════════════════════════════════════════════════════════
+// 3. checkAllUpdates — only returns updates for installed plugins
+// ════════════════════════════════════════════════════════════════
+
+describe('checkAllUpdates — only installed plugins', () => {
+    /** @type {any} */
+    let mgr;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        mgr = {
+            ...autoUpdaterMethods,
+            plugins: [],
+            install: vi.fn(),
+            saveRegistry: vi.fn(async () => {}),
+            compareVersions(a, b) {
+                const pa = (a || '0').split('.').map(Number);
+                const pb = (b || '0').split('.').map(Number);
+                for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+                    const diff = (pb[i] || 0) - (pa[i] || 0);
+                    if (diff !== 0) return diff > 0 ? 1 : -1;
+                }
+                return 0;
+            },
+            extractMetadata: vi.fn(),
+        };
+    });
+
+    it('returns empty when user has no plugins installed', async () => {
+        const bundle = makeBundle(
+            { 'CPM Component - Chat Limiter': { version: '0.2.0', file: 'cpm-chat-limiter.js', sha256: 'abc' } },
+            { 'cpm-chat-limiter.js': 'console.log("limiter")' }
+        );
+        h.risu.risuFetch.mockResolvedValue({ data: JSON.stringify(bundle), status: 200 });
+        mgr.plugins = [];
+
+        const results = await mgr.checkAllUpdates();
+
+        expect(results).toEqual([]);
+        expect(mgr.install).not.toHaveBeenCalled();
+    });
+
+    it('only returns updates for plugins already in registry', async () => {
+        mgr.plugins = [
+            { id: 'sp1', name: 'CPM Provider - OpenAI', version: '1.5.0', updateUrl: 'https://test.com/openai.js' },
+        ];
+        // Bundle has OpenAI (newer) AND Chat Limiter (not installed).
+        // Override default code with null so SHA-256 path is skipped → result includes code:null.
+        const bundle = makeBundle(
+            {
+                'CPM Provider - OpenAI': { version: '1.6.0', file: 'cpm-provider-openai.js', sha256: 'abc123' },
+                'CPM Component - Chat Limiter': { version: '0.2.0', file: 'cpm-chat-limiter.js', sha256: 'def456' },
+            },
+            { 'cpm-provider-openai.js': null } // override default code → no SHA check
+        );
+        h.risu.risuFetch.mockResolvedValue({ data: JSON.stringify(bundle), status: 200 });
+
+        const results = await mgr.checkAllUpdates();
+
+        // Only OpenAI (installed, version < remote) should appear, NOT Chat Limiter
+        const names = results.map(r => r.plugin.name);
+        expect(names).toContain('CPM Provider - OpenAI');
+        expect(names).not.toContain('CPM Component - Chat Limiter');
+        expect(mgr.install).not.toHaveBeenCalled();
+    });
+
+    it('does NOT return plugins that are not in user registry at all', async () => {
+        mgr.plugins = []; // empty registry
         const bundle = makeBundle();
         h.risu.risuFetch.mockResolvedValue({ data: JSON.stringify(bundle), status: 200 });
 
-        const installed = await mgr.autoBootstrapBundledPlugins();
+        const results = await mgr.checkAllUpdates();
 
-        expect(installed).not.toContain('Cupcake Provider Manager');
-    });
-
-    it('skips plugins with missing code in bundle', async () => {
-        const bundle = makeBundle(
-            { 'Ghost Plugin': { version: '1.0.0', file: 'ghost.js' } },
-            // ghost.js NOT in code section
-        );
-        h.risu.risuFetch.mockResolvedValue({ data: JSON.stringify(bundle), status: 200 });
-
-        const installed = await mgr.autoBootstrapBundledPlugins();
-
-        expect(installed).not.toContain('Ghost Plugin');
-    });
-
-    it('rejects plugins with SHA-256 mismatch', async () => {
-        // Pre-install OpenAI so only Limiter is the "new" plugin
-        mgr.plugins = [{ name: 'CPM Provider - OpenAI', version: '1.5.9', enabled: true }];
-        const bundle = makeBundle(
-            { 'CPM Component - Chat Limiter': { version: '0.2.0', file: 'cpm-chat-limiter.js', sha256: 'deadbeef_wrong_hash' } },
-            { 'cpm-chat-limiter.js': MOCK_SUB_PLUGIN_CODE }
-        );
-        h.risu.risuFetch.mockResolvedValue({ data: JSON.stringify(bundle), status: 200 });
-
-        const installed = await mgr.autoBootstrapBundledPlugins();
-
-        expect(installed).toEqual([]);
-    });
-
-    it('installs plugins without sha256 (no integrity check required)', async () => {
-        const bundle = makeBundle(
-            { 'CPM Component - Chat Limiter': { version: '0.2.0', file: 'cpm-chat-limiter.js' /* no sha256 */ } },
-            { 'cpm-chat-limiter.js': MOCK_SUB_PLUGIN_CODE }
-        );
-        h.risu.risuFetch.mockResolvedValue({ data: JSON.stringify(bundle), status: 200 });
-
-        const installed = await mgr.autoBootstrapBundledPlugins();
-
-        expect(installed).toContain('CPM Component - Chat Limiter');
-    });
-
-    it('returns empty array when bundle fetch fails', async () => {
-        h.risu.risuFetch.mockResolvedValue({ data: null, status: 500 });
-
-        const installed = await mgr.autoBootstrapBundledPlugins();
-
-        expect(installed).toEqual([]);
-    });
-
-    it('returns empty array when bundle has invalid schema', async () => {
-        h.risu.risuFetch.mockResolvedValue({ data: JSON.stringify('not-an-object'), status: 200 });
-
-        const installed = await mgr.autoBootstrapBundledPlugins();
-
-        expect(installed).toEqual([]);
-    });
-
-    it('handles network error gracefully', async () => {
-        h.risu.risuFetch.mockRejectedValue(new Error('Network timeout'));
-
-        const installed = await mgr.autoBootstrapBundledPlugins();
-
-        expect(installed).toEqual([]);
-    });
-
-    it('installs multiple new plugins at once', async () => {
-        // Pre-install OpenAI so only Limiter and Navi are "new"
-        mgr.plugins = [{ name: 'CPM Provider - OpenAI', version: '1.5.9', enabled: true }];
-        const limiterCode = MOCK_SUB_PLUGIN_CODE;
-        const naviCode = `//@name CPM Component - Chat Navigation\n//@version 2.1.4\n(()=>{})();`;
-        const bundle = makeBundle(
-            {
-                'CPM Component - Chat Limiter': { version: '0.2.0', file: 'cpm-chat-limiter.js' },
-                'CPM Component - Chat Navigation': { version: '2.1.4', file: 'cpm-chat-navigation.js' },
-            },
-            {
-                'cpm-chat-limiter.js': limiterCode,
-                'cpm-chat-navigation.js': naviCode,
-            }
-        );
-        h.risu.risuFetch.mockResolvedValue({ data: JSON.stringify(bundle), status: 200 });
-
-        const installed = await mgr.autoBootstrapBundledPlugins();
-
-        expect(installed.length).toBe(2);
-        expect(installed).toContain('CPM Component - Chat Limiter');
-        expect(installed).toContain('CPM Component - Chat Navigation');
-    });
-
-    it('passes SHA-256 integrity check when hash matches', async () => {
-        const hash = await _computeSHA256(MOCK_SUB_PLUGIN_CODE);
-        const bundle = makeBundle(
-            { 'CPM Component - Chat Limiter': { version: '0.2.0', file: 'cpm-chat-limiter.js', sha256: hash } },
-            { 'cpm-chat-limiter.js': MOCK_SUB_PLUGIN_CODE }
-        );
-        h.risu.risuFetch.mockResolvedValue({ data: JSON.stringify(bundle), status: 200 });
-
-        const installed = await mgr.autoBootstrapBundledPlugins();
-
-        expect(installed).toContain('CPM Component - Chat Limiter');
+        expect(results).toEqual([]);
     });
 });
