@@ -30,7 +30,7 @@ const { execSync } = require('child_process');
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes('--dry-run');
 const SKIP_TEST = args.includes('--skip-test');
-const BUILD_ENV = process.env.CPM_ENV === 'production' ? 'production' : 'test';
+const BUILD_ENV = process.env.CPM_ENV || 'test2';
 
 const ROOT = path.resolve(__dirname, '..');
 const p = (...segs) => path.join(ROOT, ...segs);
@@ -64,17 +64,20 @@ const urlConfigPath = p('src', 'cpm-url.config.js');
 const urlConfigSrc = fs.readFileSync(urlConfigPath, 'utf-8');
 // Support both old static format:  CPM_BASE_URL = 'https://...'
 // and new dynamic format:           _URLS = { production: 'https://...', test: 'https://...' }
-/** @type {{ production?: string, test?: string }} */
+/** @type {{ production?: string, test?: string, test2?: string }} */
 const urlMap = {};
 const staticMatch = urlConfigSrc.match(/CPM_BASE_URL\s*=\s*['"]([^'"]+)['"]/);
 if (staticMatch) {
     urlMap.production = staticMatch[1];
     urlMap.test = staticMatch[1];
+    urlMap.test2 = staticMatch[1];
 } else {
     const productionMatch = urlConfigSrc.match(/production\s*:\s*['"]([^'"]+)['"]/);
     const testMatch = urlConfigSrc.match(/test\s*:\s*['"]([^'"]+)['"]/);
+    const test2Match = urlConfigSrc.match(/test2\s*:\s*['"]([^'"]+)['"]/);
     if (productionMatch) urlMap.production = productionMatch[1];
     if (testMatch) urlMap.test = testMatch[1];
+    if (test2Match) urlMap.test2 = test2Match[1];
 }
 const configBaseUrl = urlMap[BUILD_ENV];
 if (!configBaseUrl) fail(`Cannot parse ${BUILD_ENV} CPM_BASE_URL from src/cpm-url.config.js`);

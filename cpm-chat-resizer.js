@@ -2,7 +2,7 @@
 //@display-name Cupcake UI Resizer
 //@version 0.3.6
 //@author Cupcake
-//@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-chat-resizer.js
+//@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager-test2/main/cpm-chat-resizer.js
 
 /**
  * ======== CUPCAKE PM Sub-Plugin: Chat Input Resizer ========

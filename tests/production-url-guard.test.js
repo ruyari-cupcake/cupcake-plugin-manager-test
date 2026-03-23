@@ -126,23 +126,36 @@ describe('production URL guard (2026-03-15 사고 재발 방지)', () => {
         }
     });
 
-    it('sub-plugin @update-url must point to production repo, not test repo', () => {
+    it('sub-plugin @update-url must match build environment repo', () => {
         const rootDir = new URL('..', import.meta.url);
         const subPlugins = readdirSync(rootDir)
             .filter(f => f.startsWith('cpm-') && f.endsWith('.js'));
 
-        const testRepoPattern = /cupcake-plugin-manager-test2?\b/i;
+        const env = extractEnv(rootBundle);
+        // In production: must NOT point to test repos
+        // In test/test2: must point to the matching test repo
         const issues = [];
 
-        for (const file of subPlugins) {
-            const content = readFileSync(new URL(`../${file}`, import.meta.url), 'utf-8');
-            const url = extractUpdateUrl(content);
-            if (url && testRepoPattern.test(url)) {
-                issues.push(`${file}: @update-url이 테스트 레포를 가리킴 → ${url}`);
+        if (env === 'production') {
+            const testRepoPattern = /cupcake-plugin-manager-test2?\b/i;
+            for (const file of subPlugins) {
+                const content = readFileSync(new URL(`../${file}`, import.meta.url), 'utf-8');
+                const url = extractUpdateUrl(content);
+                if (url && testRepoPattern.test(url)) {
+                    issues.push(`${file}: production인데 @update-url이 테스트 레포를 가리킴 → ${url}`);
+                }
+            }
+        } else if (env === 'test2') {
+            for (const file of subPlugins) {
+                const content = readFileSync(new URL(`../${file}`, import.meta.url), 'utf-8');
+                const url = extractUpdateUrl(content);
+                if (url && /cupcake-plugin-manager\/main\//.test(url) && !/cupcake-plugin-manager-test2\/main\//.test(url)) {
+                    issues.push(`${file}: test2인데 @update-url이 origin 레포를 가리킴 → ${url}`);
+                }
             }
         }
 
-        expect(issues, `서브 플러그인 @update-url이 테스트 레포를 가리킴:\n${issues.join('\n')}`).toHaveLength(0);
+        expect(issues, `서브 플러그인 @update-url 환경 불일치:\n${issues.join('\n')}`).toHaveLength(0);
     });
 
     it('rollup URL map and cpm-url.config.js URL map must contain the same domains', () => {

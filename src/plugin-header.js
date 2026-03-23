@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.20
-//@changes v1.22.20: Copilot Gemini reasoning_effort 복원 (test2 검증) + test2 URL 수정
+//@version 1.22.21
+//@changes v1.22.21: 서브플러그인 update-url test2 격리 수정
 //@update-url https://test-2-wheat-omega.vercel.app/api/main-plugin
 
 // ==========================================
