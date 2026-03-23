@@ -1,6 +1,6 @@
 //@name CPM Component - Chat Input Resizer
 //@display-name Cupcake UI Resizer
-//@version 0.3.6
+//@version 0.3.7
 //@author Cupcake
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager-test2/main/cpm-chat-resizer.js
 
@@ -457,8 +457,9 @@
             }
         };
 
-        await initResizer();
+        risuai.onUnload(window._cpmResizerCleanup);
 
+        await initResizer();
 
         console.log('[CPM Resizer] Loaded and ready.');
 

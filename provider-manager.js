@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.28
-//@changes v1.22.28: 서브플러그인 UI name-based fallback — ID 불일치 시 이름으로 매칭
+//@version 1.22.29
+//@changes v1.22.29: 서브플러그인 cleanup 강화 — Navigation 이모지, onUnload, 리스너 정리
 //@update-url https://test-2-wheat-omega.vercel.app/api/main-plugin
 
 // ==========================================
@@ -195,7 +195,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.22.28';
+    const CPM_VERSION = '1.22.29';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'

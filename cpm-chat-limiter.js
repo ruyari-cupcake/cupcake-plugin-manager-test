@@ -1,6 +1,6 @@
 //@name CPM Component - Chat Limiter
 //@display-name 🧁 Cupcake Chat Limiter
-//@version 0.2.0
+//@version 0.2.1
 //@description 최신 N개 채팅만 표시하여 렉 제거 (실시간 슬라이더, 메시지 카운트, Navigation 연동)
 //@icon 📋
 //@author Cupcake
@@ -250,16 +250,16 @@
             }
             refreshStatus();
 
-            checkbox.addEventListener('change', async (ev) => {
+            // ── Event listener management (clean up old listeners on re-render) ──
+            const onCheckboxChange = async (ev) => {
                 enabled = ev.target.checked;
                 setVal('cpm_chat_limiter_enable', enabled);
                 await saveState();
                 await updateStyles();
                 if (enabled) await scrollToLatest();
                 refreshStatus();
-            });
+            };
 
-            // Sync slider ↔ number input
             async function applyCount(val) {
                 if (val > 0) {
                     keepCount = val;
@@ -270,19 +270,30 @@
                 }
             }
 
-            slider.addEventListener('input', (ev) => {
+            const onSliderInput = (ev) => {
                 const val = parseInt(ev.target.value, 10);
                 countInput.value = String(val);
                 applyCount(val);
-            });
+            };
 
-            countInput.addEventListener('change', (ev) => {
+            const onCountChange = (ev) => {
                 const val = parseInt(ev.target.value, 10);
                 if (val > 0) {
                     slider.value = String(Math.min(val, 100));
                     applyCount(val);
                 }
-            });
+            };
+
+            // Remove old listeners before attaching (guards against re-render accumulation)
+            if (window._cpmLimiterUICleanup) window._cpmLimiterUICleanup();
+            checkbox.addEventListener('change', onCheckboxChange);
+            slider.addEventListener('input', onSliderInput);
+            countInput.addEventListener('change', onCountChange);
+            window._cpmLimiterUICleanup = () => {
+                checkbox.removeEventListener('change', onCheckboxChange);
+                slider.removeEventListener('input', onSliderInput);
+                countInput.removeEventListener('change', onCountChange);
+            };
         }
     });
 

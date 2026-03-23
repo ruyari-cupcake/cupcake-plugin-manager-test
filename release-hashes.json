@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-03-23T10:00:39.144Z",
-  "version": "1.22.28",
+  "timestamp": "2026-03-23T10:58:41.786Z",
+  "version": "1.22.29",
   "files": {
     "cpm-provider-vertex.js": {
       "version": "1.6.7",
@@ -38,9 +38,9 @@
       "size": 27541
     },
     "cpm-chat-resizer.js": {
-      "version": "0.3.6",
-      "sha256": "10d1659c41cf40faa73a634d2bbabb39027221e793adb24e08487a17d7b56afb",
-      "size": 22200
+      "version": "0.3.7",
+      "sha256": "6a1d753349c7aaeff17fac54b3dff29aa29e64ed4cf8c1a28fd0fb1d31f2664b",
+      "size": 22252
     },
     "cpm-copilot-manager.js": {
       "version": "1.7.14",
@@ -53,20 +53,20 @@
       "size": 52600
     },
     "cpm-chat-navigation.js": {
-      "version": "2.1.4",
-      "sha256": "20852421e934abe200c5ea5e5fed5c2b68426fb28c366bdf2a662b2b8aa0aadb",
-      "size": 23085
+      "version": "2.1.5",
+      "sha256": "82f0396bcb12d00783176c01699dd59a13addf0c3d6d8ab661d6d9bc1d32f215",
+      "size": 23128
     },
     "cpm-chat-limiter.js": {
-      "version": "0.2.0",
-      "sha256": "b101d76b8e1852dcd00e9f26bad22aee880110504d19c1134faf537c43cd332e",
-      "size": 12582
+      "version": "0.2.1",
+      "sha256": "a6f66cb8d00584b0d4b13931b152949ce40cf38977760530c01017c20ecefef9",
+      "size": 13228
     },
     "provider-manager.js": {
-      "version": "1.22.28",
-      "sha256": "88a5fe2d988135ef28fbb64b5a333317e3208a9c1a467ad527fbfe76f6e69ffe",
-      "size": 624512
+      "version": "1.22.29",
+      "sha256": "22c20438cdec942a837e9d6b83711bada3ddc205dd0f27eba6b211de1b6cc3d1",
+      "size": 624516
     }
   },
-  "bundleHash": "dca913c90b24e43ce8139304239eb7bec298da377a4f85c4abb79361f5a346dc"
+  "bundleHash": "3b60bdbe0bf0316dfd6318132cb9d08180775ac375c6a9a1899747eb0e31ac53"
 }

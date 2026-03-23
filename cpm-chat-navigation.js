@@ -1,6 +1,6 @@
 //@name CPM Component - Chat Navigation
 //@display-name 🧁 Cupcake Navigation
-//@version 2.1.4
+//@version 2.1.5
 //@description 채팅 메시지 네비게이션 (4버튼 → 2버튼 → 키보드 → OFF 순환, Chat Limiter 연동)
 //@icon 🧭
 //@author Cupcake
@@ -70,7 +70,7 @@
     window.CupcakePM_SubPlugins = window.CupcakePM_SubPlugins.filter(p => p.id !== 'cpm-navigation');
     window.CupcakePM_SubPlugins.push({
         id: 'cpm-navigation',
-        name: '🧭 Chat Navigation',
+        name: 'Chat Navigation',
         description: '채팅 네비게이션 (4버튼 → 2버튼 → 키보드 → OFF 순환)',
         version: '2.1.2',
         icon: '🧭'
@@ -570,5 +570,7 @@
         currentModeIndex = -1;
     };
 
-    console.log(`${LOG_PREFIX} 초기화 완료 (v2.1.2 모드 순환)`);
+    risuai.onUnload(window._cpmNaviCleanup);
+
+    console.log(`${LOG_PREFIX} 초기화 완료 (v2.1.4 모드 순환)`);
 })();

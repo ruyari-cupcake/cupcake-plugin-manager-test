@@ -35,9 +35,9 @@
     "changes": "v1.5.3: 보조모델 슬롯별 effort/thinkingBudget 오버라이드 지원"
   },
   "CPM Component - Chat Input Resizer": {
-    "version": "0.3.6",
+    "version": "0.3.7",
     "file": "cpm-chat-resizer.js",
-    "changes": "v0.3.6: 전체 서브플러그인 버전 동기화 릴리즈"
+    "changes": "v0.3.7: risuai.onUnload 추가 — 페이지 종료 시 리소스 정리"
   },
   "CPM Component - Copilot Token Manager": {
     "version": "1.7.14",
@@ -50,18 +50,18 @@
     "changes": "v1.4.0: 번역캐시 import/export 개선, 일반 윈도우 추적 지원, 대규모 리팩토링"
   },
   "CPM Component - Chat Navigation": {
-    "version": "2.1.4",
+    "version": "2.1.5",
     "file": "cpm-chat-navigation.js",
-    "changes": "v2.1.4: Chat Limiter 연동 — visible count 클램핑으로 hidden 메시지 스크롤 방지"
+    "changes": "v2.1.5: UI 이름 이모지 제거 + risuai.onUnload 추가"
   },
   "CPM Component - Chat Limiter": {
-    "version": "0.2.0",
+    "version": "0.2.1",
     "file": "cpm-chat-limiter.js",
-    "changes": "v0.2.0: 실시간 슬라이더, 메시지 카운트 표시, MutationObserver, Navigation 연동 API, Auto-scroll"
+    "changes": "v0.2.1: 설정 UI 이벤트 리스너 정리 — 핫 리로드 시 중복 방지"
   },
   "Cupcake Provider Manager": {
-    "version": "1.22.28",
+    "version": "1.22.29",
     "file": "provider-manager.js",
-    "changes": "v1.22.28: 서브플러그인 UI name-based fallback + Auto-Bootstrap — ID 불일치 문제 해결"
+    "changes": "v1.22.29: 서브플러그인 cleanup 강화 — Navigation 이모지 수정, onUnload 추가, 리스너 정리"
   }
 }
