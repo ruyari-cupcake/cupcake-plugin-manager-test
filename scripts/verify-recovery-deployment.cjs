@@ -14,14 +14,14 @@
 
 const SERVERS = {
     test: 'https://cupcake-plugin-manager-test.vercel.app',
-    test2: 'https://test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app',
+    test2: 'https://test-2-wheat-omega.vercel.app',
     production: 'https://cupcake-plugin-manager.vercel.app',
 };
 
 const PRODUCTION_DOMAIN = 'cupcake-plugin-manager.vercel.app';
 const TEST_DOMAINS = [
     'cupcake-plugin-manager-test.vercel.app',
-    'test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app',
+    'test-2-wheat-omega.vercel.app',
 ];
 
 async function fetchJson(url) {

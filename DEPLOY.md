@@ -32,7 +32,7 @@
 
 | 리모트 | 레포 | Vercel 도메인 | 용도 |
 |--------|------|---------------|------|
-| `test2` | `ruyari-cupcake/cupcake-plugin-manager-test2` | `test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app` | **⭐ 기본 배포 (테스트) — 항상 여기로 push** |
+| `test2` | `ruyari-cupcake/cupcake-plugin-manager-test2` | `test-2-wheat-omega.vercel.app` | **⭐ 기본 배포 (테스트) — 항상 여기로 push** |
 | `test` | `ruyari-cupcake/cupcake-plugin-manager-test` | `cupcake-plugin-manager-test.vercel.app` | ⚠️ 레거시 (교차 오염 위험 — 사용 자제) |
 | `origin` | `ruyari-cupcake/cupcake-plugin-manager` | `cupcake-plugin-manager.vercel.app` | ⛔ 프로덕션 (사용자가 명시적으로 요청한 경우에만, test2와 함께 push) |
 

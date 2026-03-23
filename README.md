@@ -141,7 +141,7 @@ root의 `provider-manager.js`를 RisuAI → 설정 → 플러그인 → + 버튼
 
 | CPM_ENV | URL | 용도 |
 |---------|-----|------|
-| `test2` (기본값) | `test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app` | 개발 / 테스트 |
+| `test2` (기본값) | `test-2-wheat-omega.vercel.app` | 개발 / 테스트 |
 | `test` | `cupcake-plugin-manager-test.vercel.app` | 레거시 (사용 자제) |
 | `production` | `cupcake-plugin-manager.vercel.app` | 프로덕션 배포 |
 

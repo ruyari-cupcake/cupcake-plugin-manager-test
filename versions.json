@@ -55,8 +55,8 @@
     "changes": "v2.1.3: 전체 서브플러그인 버전 동기화 릴리즈"
   },
   "Cupcake Provider Manager": {
-    "version": "1.22.19",
+    "version": "1.22.20",
     "file": "provider-manager.js",
-    "changes": "v1.22.19: test2 교차오염 검증 배포"
+    "changes": "v1.22.20: Copilot Gemini reasoning_effort 복원 + test2 URL 수정"
   }
 }

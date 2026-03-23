@@ -1,9 +1,9 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.19
-//@changes v1.22.16: v1.22.12 안정 코드 기반 긴급 롤백 (Copilot 400 에러 해결)
-//@update-url https://test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app/api/main-plugin
+//@version 1.22.20
+//@changes v1.22.20: Copilot Gemini reasoning_effort 복원 (test2 검증) + test2 URL 수정
+//@update-url https://test-2-wheat-omega.vercel.app/api/main-plugin
 
 // ==========================================
 // ARGUMENT SCHEMAS (Saved Natively by RisuAI)

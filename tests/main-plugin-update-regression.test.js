@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { MAIN_UPDATE_URL } from '../src/lib/endpoints.js';
 
-const TEST_MAIN_UPDATE_URL = 'https://test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app/api/main-plugin';
+const TEST_MAIN_UPDATE_URL = 'https://test-2-wheat-omega.vercel.app/api/main-plugin';
 const EXPECTED_BUILD_ENV = MAIN_UPDATE_URL.includes('cupcake-plugin-manager.vercel.app/api/main-plugin')
     ? 'production'
     : MAIN_UPDATE_URL.includes('cupcake-plugin-manager-test.vercel.app/api/main-plugin')
@@ -120,8 +120,8 @@ describe('main plugin update regression guard', () => {
         expect(distTestUrl).toBe('https://cupcake-plugin-manager-test.vercel.app');
         expect(rootProductionUrl).toBe('https://cupcake-plugin-manager.vercel.app');
         expect(rootTestUrl).toBe('https://cupcake-plugin-manager-test.vercel.app');
-        expect(distTest2Url).toBe('https://test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app');
-        expect(rootTest2Url).toBe('https://test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app');
+        expect(distTest2Url).toBe('https://test-2-wheat-omega.vercel.app');
+        expect(rootTest2Url).toBe('https://test-2-wheat-omega.vercel.app');
     });
 
     it('registers the settings panel before risky init phases in the shipped bundle', () => {

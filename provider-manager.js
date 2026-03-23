@@ -1,9 +1,9 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.19
-//@changes v1.22.16: v1.22.12 안정 코드 기반 긴급 롤백 (Copilot 400 에러 해결)
-//@update-url https://test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app/api/main-plugin
+//@version 1.22.20
+//@changes v1.22.20: Copilot Gemini reasoning_effort 복원 (test2 검증) + test2 URL 수정
+//@update-url https://test-2-wheat-omega.vercel.app/api/main-plugin
 
 // ==========================================
 // ARGUMENT SCHEMAS (Saved Natively by RisuAI)
@@ -114,7 +114,7 @@ var CupcakeProviderManager = (function (exports) {
      * URL is determined by the `CPM_ENV` environment variable:
      *   - CPM_ENV=production  → https://cupcake-plugin-manager.vercel.app
      *   - CPM_ENV=test         → https://cupcake-plugin-manager-test.vercel.app
-     *   - CPM_ENV=test2 (or unset) → https://test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app
+     *   - CPM_ENV=test2 (or unset) → https://test-2-wheat-omega.vercel.app
      *
      * Build usage:
      *   CPM_ENV=production npm run build   (production)
@@ -125,7 +125,7 @@ var CupcakeProviderManager = (function (exports) {
     const _URLS = {
         production: 'https://cupcake-plugin-manager.vercel.app',
         test: 'https://cupcake-plugin-manager-test.vercel.app',
-        test2: 'https://test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app',
+        test2: 'https://test-2-wheat-omega.vercel.app',
     };
 
     const _env = 'test2';
@@ -195,7 +195,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.22.19';
+    const CPM_VERSION = '1.22.20';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -1356,19 +1356,32 @@ var CupcakeProviderManager = (function (exports) {
         return /gemini-2\.0-flash-lite-preview|gemini-2\.0-pro-exp/.test(String(modelId).toLowerCase());
     }
 
+    /**
+     * Detect any Gemini family model.
+     * Used by supportsOpenAIReasoningEffort to enable reasoning_effort
+     * on Copilot API proxy path (format='openai').
+     * ⚠️ 절대 needsCopilotResponsesAPI()에 사용하지 말 것 — 400 에러 재발!
+     * @param {string} modelName
+     * @returns {boolean}
+     */
+    function isGeminiFamily(modelName) {
+        if (!modelName) return false;
+        return /\bgemini/i.test(String(modelName));
+    }
+
     // ═══════════════════════════════════════════════════════
     //  OpenAI / Copilot higher-level helpers
     // ═══════════════════════════════════════════════════════
 
     /**
      * Check if a model supports OpenAI reasoning_effort parameter.
-     * Matches o3/o4 variants and GPT-5 family.
+     * Matches o3/o4 variants, GPT-5 family, and Gemini family.
      * @param {string} modelName
      * @returns {boolean}
      */
     function supportsOpenAIReasoningEffort(modelName) {
         if (!modelName) return false;
-        return isO3O4Family(modelName) || isGPT5Family(modelName);
+        return isO3O4Family(modelName) || isGPT5Family(modelName) || isGeminiFamily(modelName);
     }
 
     /**

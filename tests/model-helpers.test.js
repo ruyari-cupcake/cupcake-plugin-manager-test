@@ -5,6 +5,7 @@ import {
     needsDeveloperRole,
     isGemini3Model,
     isGeminiNoCivicModel,
+    isGeminiFamily,
     supportsOpenAIReasoningEffort,
     needsCopilotResponsesAPI,
     shouldStripOpenAISamplingParams,
@@ -146,6 +147,27 @@ describe('isGeminiNoCivicModel', () => {
     });
 });
 
+// ── isGeminiFamily ──
+describe('isGeminiFamily', () => {
+    it('returns false for null/empty', () => {
+        expect(isGeminiFamily(null)).toBe(false);
+        expect(isGeminiFamily('')).toBe(false);
+    });
+
+    it('detects all Gemini models', () => {
+        expect(isGeminiFamily('gemini-2.5-flash')).toBe(true);
+        expect(isGeminiFamily('gemini-3-pro')).toBe(true);
+        expect(isGeminiFamily('gemini-2.0-flash-lite-preview')).toBe(true);
+        expect(isGeminiFamily('Gemini-3-Flash')).toBe(true);
+    });
+
+    it('rejects non-Gemini models', () => {
+        expect(isGeminiFamily('gpt-5')).toBe(false);
+        expect(isGeminiFamily('o3-mini')).toBe(false);
+        expect(isGeminiFamily('claude-3-opus')).toBe(false);
+    });
+});
+
 describe('supportsOpenAIReasoningEffort', () => {
     it('returns false for null/empty', () => {
         expect(supportsOpenAIReasoningEffort(null)).toBe(false);
@@ -177,9 +199,12 @@ describe('supportsOpenAIReasoningEffort', () => {
         expect(supportsOpenAIReasoningEffort('openai/gpt-5')).toBe(true);
     });
 
-    it('rejects Gemini and other non-matching models', () => {
-        expect(supportsOpenAIReasoningEffort('gemini-2.5-flash')).toBe(false);
-        expect(supportsOpenAIReasoningEffort('gemini-3-pro')).toBe(false);
+    it('matches Gemini family', () => {
+        expect(supportsOpenAIReasoningEffort('gemini-2.5-flash')).toBe(true);
+        expect(supportsOpenAIReasoningEffort('gemini-3-pro')).toBe(true);
+    });
+
+    it('rejects non-matching models', () => {
         expect(supportsOpenAIReasoningEffort('gpt-4o')).toBe(false);
         expect(supportsOpenAIReasoningEffort('claude-3-opus')).toBe(false);
     });
@@ -205,6 +230,11 @@ describe('needsCopilotResponsesAPI', () => {
 
     it('handles slash prefix', () => {
         expect(needsCopilotResponsesAPI('openai/gpt-5.4')).toBe(true);
+    });
+
+    it('rejects Gemini models (⚠️ 400 에러 방어)', () => {
+        expect(needsCopilotResponsesAPI('gemini-2.5-flash')).toBe(false);
+        expect(needsCopilotResponsesAPI('gemini-3-pro')).toBe(false);
     });
 });
 

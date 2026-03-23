@@ -737,7 +737,7 @@ export const autoUpdaterMethods = {
 
         // Runtime guard: production 환경에서 test 서버 URL이 포함된 업데이트 차단
         if (_CPM_ENV === 'production' && parsedUpdateURL) {
-            const _TEST_URL_PATTERN = /cupcake-plugin-manager-test\.vercel\.app|test-2-[a-z0-9]+-[a-z0-9]+-[a-z0-9]+-projects\.vercel\.app/i;
+            const _TEST_URL_PATTERN = /cupcake-plugin-manager-test\.vercel\.app|test-2-wheat-omega\.vercel\.app/i;
             if (_TEST_URL_PATTERN.test(parsedUpdateURL)) {
                 console.warn(`${LOG} BLOCKED: 프로덕션 환경에서 테스트 서버 URL 업데이트 차단: ${parsedUpdateURL}`);
                 return { ok: false, error: `프로덕션 환경에서 테스트 서버 URL 업데이트 차단` };
@@ -1004,7 +1004,7 @@ export const autoUpdaterMethods = {
 
             // Runtime guard: production 환경에서 test URL이 포함된 서브 플러그인 업데이트 차단
             if (_CPM_ENV === 'production' && meta.updateUrl) {
-                const _TEST_URL_PATTERN = /cupcake-plugin-manager-test2?\b/i;
+                const _TEST_URL_PATTERN = /cupcake-plugin-manager-test2?\b|test-2-wheat-omega\.vercel\.app/i;
                 if (_TEST_URL_PATTERN.test(meta.updateUrl)) {
                     console.error(`[CPM Update] BLOCKED: 프로덕션에서 테스트 레포 URL 감지: ${meta.updateUrl}`);
                     return false;

@@ -14,7 +14,7 @@ import { readFileSync, existsSync, readdirSync } from 'node:fs';
 
 const PRODUCTION_DOMAIN = 'cupcake-plugin-manager.vercel.app';
 const TEST_DOMAIN = 'cupcake-plugin-manager-test.vercel.app';
-const TEST2_DOMAIN = 'test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app';
+const TEST2_DOMAIN = 'test-2-wheat-omega.vercel.app';
 const ALL_TEST_DOMAINS = [TEST_DOMAIN, TEST2_DOMAIN];
 
 const rootBundlePath = new URL('../provider-manager.js', import.meta.url);

@@ -22,7 +22,7 @@ const PRODUCTION_DOMAIN = 'cupcake-plugin-manager.vercel.app';
 const PRODUCTION_BASE = `https://${PRODUCTION_DOMAIN}`;
 const TEST_DOMAINS = [
     'cupcake-plugin-manager-test.vercel.app',
-    'test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app',
+    'test-2-wheat-omega.vercel.app',
 ];
 
 const baseUrl = (process.argv[2] || PRODUCTION_BASE).replace(/\/+$/, '');

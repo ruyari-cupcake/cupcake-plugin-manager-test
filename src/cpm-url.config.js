@@ -8,7 +8,7 @@
  * URL is determined by the `CPM_ENV` environment variable:
  *   - CPM_ENV=production  → https://cupcake-plugin-manager.vercel.app
  *   - CPM_ENV=test         → https://cupcake-plugin-manager-test.vercel.app
- *   - CPM_ENV=test2 (or unset) → https://test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app
+ *   - CPM_ENV=test2 (or unset) → https://test-2-wheat-omega.vercel.app
  *
  * Build usage:
  *   CPM_ENV=production npm run build   (production)
@@ -19,7 +19,7 @@
 const _URLS = {
     production: 'https://cupcake-plugin-manager.vercel.app',
     test: 'https://cupcake-plugin-manager-test.vercel.app',
-    test2: 'https://test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app',
+    test2: 'https://test-2-wheat-omega.vercel.app',
 };
 
 /**

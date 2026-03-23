@@ -29,7 +29,7 @@ const p = (...parts) => path.join(ROOT, ...parts);
 // ── Constants ──
 const PRODUCTION_DOMAIN = 'cupcake-plugin-manager.vercel.app';
 const TEST_DOMAIN = 'cupcake-plugin-manager-test.vercel.app';
-const TEST2_DOMAIN = 'test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app';
+const TEST2_DOMAIN = 'test-2-wheat-omega.vercel.app';
 const PRODUCTION_UPDATE_URL = `https://${PRODUCTION_DOMAIN}/api/main-plugin`;
 const TEST_UPDATE_URL = `https://${TEST_DOMAIN}/api/main-plugin`;
 const TEST2_UPDATE_URL = `https://${TEST2_DOMAIN}/api/main-plugin`;

@@ -23,7 +23,7 @@ const CPM_ENV = process.env.CPM_ENV || 'test2';
 const _URL_MAP = {
   production: 'https://cupcake-plugin-manager.vercel.app',
   test: 'https://cupcake-plugin-manager-test.vercel.app',
-  test2: 'https://test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app',
+  test2: 'https://test-2-wheat-omega.vercel.app',
 };
 const CPM_BASE_URL = _URL_MAP[CPM_ENV] || _URL_MAP.test2;
 console.log(`[rollup] CPM_ENV=${CPM_ENV} → ${CPM_BASE_URL}`);

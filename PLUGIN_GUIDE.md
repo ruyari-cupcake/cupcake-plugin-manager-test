@@ -1348,11 +1348,11 @@ When you update a sub-plugin, you must update **4 things**:
 The `provider-manager.js` main engine has its own `@update-url` pointing to the Vercel API endpoint. The source contains the test2 URL (default build target):
 
 ```
-//@update-url https://test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app/api/main-plugin
+//@update-url https://test-2-wheat-omega.vercel.app/api/main-plugin
 ```
 
 At build time, `rollup.config.mjs` substitutes the URL based on `CPM_ENV`:
-- **test2** (default): `test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app`
+- **test2** (default): `test-2-wheat-omega.vercel.app`
 - **test** (legacy — 사용 자제): `cupcake-plugin-manager-test.vercel.app`
 - **production**: `cupcake-plugin-manager.vercel.app`
 

@@ -27,7 +27,7 @@ describe('cpm-url.config.js — environment branches', () => {
         delete process.env.CPM_ENV;
         try {
             const mod = await import('../src/cpm-url.config.js');
-            expect(mod.CPM_BASE_URL).toBe('https://test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app');
+            expect(mod.CPM_BASE_URL).toBe('https://test-2-wheat-omega.vercel.app');
             expect(mod.CPM_ENV).toBe('test2');
         } finally {
             if (origEnv !== undefined) process.env.CPM_ENV = origEnv;
@@ -39,7 +39,7 @@ describe('cpm-url.config.js — environment branches', () => {
         process.env.CPM_ENV = 'staging';
         try {
             const mod = await import('../src/cpm-url.config.js');
-            expect(mod.CPM_BASE_URL).toBe('https://test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app');
+            expect(mod.CPM_BASE_URL).toBe('https://test-2-wheat-omega.vercel.app');
             expect(mod.CPM_ENV).toBe('test2');
         } finally {
             if (origEnv === undefined) delete process.env.CPM_ENV;
