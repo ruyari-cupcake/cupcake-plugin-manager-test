@@ -17,12 +17,15 @@ export function parseOpenAISSELine(line) {
     try {
         const obj = JSON.parse(jsonStr);
         // BUG-F4 FIX: Also extract reasoning_content/reasoning (o-series, DeepSeek Reasoner)
+        // + Gemini-through-Copilot: thought-flagged content
         const delta = obj.choices?.[0]?.delta;
         if (!delta) return null;
         let out = '';
         if (delta.reasoning_content) out += delta.reasoning_content;
         else if (delta.reasoning) out += delta.reasoning;
-        if (delta.content) out += delta.content;
+        const isThought = !!(delta.thought || obj.choices?.[0]?.thought);
+        if (isThought && delta.content) out += delta.content;
+        else if (delta.content) out += delta.content;
         return out || null;
     } catch { return null; }
 }

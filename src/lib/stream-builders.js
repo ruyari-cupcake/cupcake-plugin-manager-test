@@ -97,16 +97,19 @@ export function createSSEStream(response, lineParser, abortSignal, onComplete, _
 
 /**
  * OpenAI-compatible SSE stream with reasoning support.
- * Handles reasoning deltas from o-series, DeepSeek, OpenRouter.
+ * Handles reasoning deltas from o-series, DeepSeek, OpenRouter,
+ * and Gemini-through-Copilot (thought field).
  * @param {Response} response
  * @param {AbortSignal} [abortSignal]
  * @param {string} [_logRequestId]
+ * @param {{ model?: string }} [_meta] - Optional request metadata for diagnostics
  * @returns {ReadableStream<string>}
  */
-export function createOpenAISSEStream(response, abortSignal, _logRequestId) {
+export function createOpenAISSEStream(response, abortSignal, _logRequestId, _meta) {
     let inReasoning = false;
     /** @type {any} */
     let _streamUsage = null;
+    let _geminiThinkingLogged = false;
 
     /** @param {string} line */
     function parser(line) {
@@ -119,14 +122,28 @@ export function createOpenAISSEStream(response, abortSignal, _logRequestId) {
             const delta = obj.choices?.[0]?.delta;
             if (!delta) return null;
             let out = '';
+            // Check reasoning_content (o-series, OpenAI), reasoning (OpenRouter),
+            // and thought-flagged content (Gemini through Copilot proxy)
             const reasoningDelta = delta.reasoning_content ?? delta.reasoning;
+            const isThoughtDelta = !!(delta.thought || obj.choices?.[0]?.thought);
             if (reasoningDelta) {
                 if (!inReasoning) { inReasoning = true; out += '<Thoughts>\n'; }
                 out += String(reasoningDelta);
+            } else if (isThoughtDelta && delta.content) {
+                // Gemini-style: content with thought=true flag
+                if (!inReasoning) { inReasoning = true; out += '<Thoughts>\n'; }
+                out += delta.content;
             }
-            if (delta.content) {
+            if (delta.content && !isThoughtDelta) {
                 if (inReasoning) { inReasoning = false; out += '\n</Thoughts>\n'; }
                 out += delta.content;
+            }
+            // Diagnostic: log once if Gemini model returns no reasoning content at all
+            if (!_geminiThinkingLogged && _meta?.model && /gemini/i.test(_meta.model)) {
+                if (delta.content && !reasoningDelta && !isThoughtDelta) {
+                    _geminiThinkingLogged = true;
+                    console.log(`[Cupcake PM] ℹ️ Gemini (${_meta.model}) through Copilot: response has content but no reasoning_content/thought field. Copilot API may not expose Gemini thinking tokens in OpenAI format.`);
+                }
             }
             return out || null;
         } catch (_) { return null; }

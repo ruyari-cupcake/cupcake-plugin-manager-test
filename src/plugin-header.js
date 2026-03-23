@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.21
-//@changes v1.22.21: 서브플러그인 update-url test2 격리 수정
+//@version 1.22.22
+//@changes v1.22.22: Gemini thinking 필드 방어적 처리 + 서브플러그인 URL 빌드 검증 + 배포 문서 보강
 //@update-url https://test-2-wheat-omega.vercel.app/api/main-plugin
 
 // ==========================================

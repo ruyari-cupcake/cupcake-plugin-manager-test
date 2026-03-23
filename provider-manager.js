@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.21
-//@changes v1.22.21: 서브플러그인 update-url test2 격리 수정
+//@version 1.22.22
+//@changes v1.22.22: Gemini thinking 필드 방어적 처리 + 서브플러그인 URL 빌드 검증 + 배포 문서 보강
 //@update-url https://test-2-wheat-omega.vercel.app/api/main-plugin
 
 // ==========================================
@@ -195,7 +195,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.22.21';
+    const CPM_VERSION = '1.22.22';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -1767,12 +1767,15 @@ var CupcakeProviderManager = (function (exports) {
         try {
             const obj = JSON.parse(jsonStr);
             // BUG-F4 FIX: Also extract reasoning_content/reasoning (o-series, DeepSeek Reasoner)
+            // + Gemini-through-Copilot: thought-flagged content
             const delta = obj.choices?.[0]?.delta;
             if (!delta) return null;
             let out = '';
             if (delta.reasoning_content) out += delta.reasoning_content;
             else if (delta.reasoning) out += delta.reasoning;
-            if (delta.content) out += delta.content;
+            const isThought = !!(delta.thought || obj.choices?.[0]?.thought);
+            if (isThought && delta.content) out += delta.content;
+            else if (delta.content) out += delta.content;
             return out || null;
         } catch { return null; }
     }
@@ -2670,7 +2673,8 @@ var CupcakeProviderManager = (function (exports) {
 
     /**
      * Parse OpenAI Chat Completions non-streaming response.
-     * Handles reasoning_content (o-series), reasoning (OpenRouter), DeepSeek <think> blocks.
+     * Handles reasoning_content (o-series), reasoning (OpenRouter), DeepSeek <think> blocks,
+     * and Gemini-through-Copilot thought-flagged content.
      * @param {Record<string, any>} data - Parsed JSON response
      * @param {string} [_requestId] - Optional API View request ID
      * @returns {{ success: boolean, content: string }}
@@ -2687,6 +2691,13 @@ var CupcakeProviderManager = (function (exports) {
         const openRouterReasoning = msg.reasoning ?? data.choices?.[0]?.reasoning;
         if (openRouterReasoning && !reasoningContent) {
             out += '<Thoughts>\n' + String(openRouterReasoning) + '\n</Thoughts>\n';
+        }
+        // Gemini-through-Copilot: thought field at choice or message level
+        if (!reasoningContent && !openRouterReasoning) {
+            const thoughtContent = data.choices?.[0]?.thought_content ?? msg.thought_content;
+            if (thoughtContent) {
+                out += '<Thoughts>\n' + String(thoughtContent) + '\n</Thoughts>\n';
+            }
         }
 
         let content = normalizeOpenAIMessageContent(msg.content);
@@ -2944,16 +2955,19 @@ var CupcakeProviderManager = (function (exports) {
 
     /**
      * OpenAI-compatible SSE stream with reasoning support.
-     * Handles reasoning deltas from o-series, DeepSeek, OpenRouter.
+     * Handles reasoning deltas from o-series, DeepSeek, OpenRouter,
+     * and Gemini-through-Copilot (thought field).
      * @param {Response} response
      * @param {AbortSignal} [abortSignal]
      * @param {string} [_logRequestId]
+     * @param {{ model?: string }} [_meta] - Optional request metadata for diagnostics
      * @returns {ReadableStream<string>}
      */
-    function createOpenAISSEStream(response, abortSignal, _logRequestId) {
+    function createOpenAISSEStream(response, abortSignal, _logRequestId, _meta) {
         let inReasoning = false;
         /** @type {any} */
         let _streamUsage = null;
+        let _geminiThinkingLogged = false;
 
         /** @param {string} line */
         function parser(line) {
@@ -2966,14 +2980,28 @@ var CupcakeProviderManager = (function (exports) {
                 const delta = obj.choices?.[0]?.delta;
                 if (!delta) return null;
                 let out = '';
+                // Check reasoning_content (o-series, OpenAI), reasoning (OpenRouter),
+                // and thought-flagged content (Gemini through Copilot proxy)
                 const reasoningDelta = delta.reasoning_content ?? delta.reasoning;
+                const isThoughtDelta = !!(delta.thought || obj.choices?.[0]?.thought);
                 if (reasoningDelta) {
                     if (!inReasoning) { inReasoning = true; out += '<Thoughts>\n'; }
                     out += String(reasoningDelta);
+                } else if (isThoughtDelta && delta.content) {
+                    // Gemini-style: content with thought=true flag
+                    if (!inReasoning) { inReasoning = true; out += '<Thoughts>\n'; }
+                    out += delta.content;
                 }
-                if (delta.content) {
+                if (delta.content && !isThoughtDelta) {
                     if (inReasoning) { inReasoning = false; out += '\n</Thoughts>\n'; }
                     out += delta.content;
+                }
+                // Diagnostic: log once if Gemini model returns no reasoning content at all
+                if (!_geminiThinkingLogged && _meta?.model && /gemini/i.test(_meta.model)) {
+                    if (delta.content && !reasoningDelta && !isThoughtDelta) {
+                        _geminiThinkingLogged = true;
+                        console.log(`[Cupcake PM] ℹ️ Gemini (${_meta.model}) through Copilot: response has content but no reasoning_content/thought field. Copilot API may not expose Gemini thinking tokens in OpenAI format.`);
+                    }
                 }
                 return out || null;
             } catch (_) { return null; }
@@ -7212,7 +7240,7 @@ var CupcakeProviderManager = (function (exports) {
                 } else if (_isResponsesEndpoint) {
                     return { success: true, content: createResponsesAPISSEStream(res, abortSignal, _reqId) };
                 } else {
-                    return { success: true, content: createOpenAISSEStream(res, abortSignal, _reqId) };
+                    return { success: true, content: createOpenAISSEStream(res, abortSignal, _reqId, { model: config.model }) };
                 }
             }
 
@@ -7261,7 +7289,18 @@ var CupcakeProviderManager = (function (exports) {
                 return { success: true, content: _rawResponseText, _rawData: data, _status: res.status };
             }
 
-            return _parseNonStreamingData(data);
+            const _parsed = _parseNonStreamingData(data);
+            // Diagnostic: Gemini through Copilot non-streaming — check for missing thinking
+            if (_isCopilotDomain && /gemini/i.test(String(config.model || ''))
+                && body.reasoning_effort && _parsed.success && !_parsed.content.includes('<Thoughts>')) {
+                const _rawKeys = Object.keys(data.choices?.[0] || {}).join(', ');
+                const _msgKeys = Object.keys(data.choices?.[0]?.message || {}).join(', ');
+                console.log(`[Cupcake PM] ℹ️ Gemini (${config.model}) Copilot non-stream: reasoning_effort=${body.reasoning_effort} sent, but no thinking content in response.`,
+                    `\n  choice keys: [${_rawKeys}]`,
+                    `\n  message keys: [${_msgKeys}]`,
+                    `\n  Copilot API may not expose Gemini thinking in OpenAI format.`);
+            }
+            return _parsed;
         };
 
         // ── Key Rotation dispatch ──

@@ -72,6 +72,31 @@ describe('stream-builders regression coverage', () => {
         );
     });
 
+    it('createOpenAISSEStream handles Gemini thought-flagged delta content', async () => {
+        const response = makeResponseFromChunks([
+            'data: {"choices":[{"delta":{"content":"thinking step","thought":true},"thought":true}]}\n\n',
+            'data: {"choices":[{"delta":{"content":"actual reply"}}]}\n\n',
+            'data: [DONE]\n\n',
+        ]);
+
+        const stream = createOpenAISSEStream(response, undefined, 'req-gemini-thought', { model: 'gemini-2.5-pro' });
+        const text = await readStream(stream);
+
+        expect(text).toBe('<Thoughts>\nthinking step\n</Thoughts>\nactual reply');
+    });
+
+    it('createOpenAISSEStream passes through content normally when no thought flag', async () => {
+        const response = makeResponseFromChunks([
+            'data: {"choices":[{"delta":{"content":"normal content"}}]}\n\n',
+            'data: [DONE]\n\n',
+        ]);
+
+        const stream = createOpenAISSEStream(response, undefined, 'req-no-thought', { model: 'gemini-2.5-flash' });
+        const text = await readStream(stream);
+
+        expect(text).toBe('normal content');
+    });
+
     it('createResponsesAPISSEStream closes reasoning blocks and persists completed usage', async () => {
         const response = makeResponseFromChunks([
             'data: {"type":"response.reasoning_summary_text.delta","delta":"thinking..."}\n\n',

@@ -93,6 +93,31 @@ if (headerUpdateUrl !== expectedUpdateUrl) {
 }
 log('url', `✓ CPM_ENV=${BUILD_ENV} → CPM_BASE_URL = ${configBaseUrl} (source: src/cpm-url.config.js)`);
 
+// Sub-plugin @update-url environment validation
+const ENV_REPO_MAP = {
+    production: 'cupcake-plugin-manager/main/',
+    test: 'cupcake-plugin-manager-test/main/',
+    test2: 'cupcake-plugin-manager-test2/main/',
+};
+const expectedRepoPath = ENV_REPO_MAP[BUILD_ENV];
+if (expectedRepoPath) {
+    const subPlugins = fs.readdirSync(ROOT).filter(f => f.startsWith('cpm-') && f.endsWith('.js'));
+    const subIssues = [];
+    for (const file of subPlugins) {
+        const content = fs.readFileSync(p(file), 'utf-8');
+        const urlMatch = content.match(/^\/\/@update-url\s+(\S+)/m);
+        if (urlMatch && !urlMatch[1].includes(expectedRepoPath)) {
+            subIssues.push(`  ${file}: ${urlMatch[1]} (expected: ...${expectedRepoPath})`);
+        }
+    }
+    if (subIssues.length > 0) {
+        fail(`서브플러그인 @update-url이 빌드 환경(${BUILD_ENV})과 불일치:\n${subIssues.join('\n')}\n\n서브플러그인 URL을 ${expectedRepoPath} 로 변경한 후 다시 빌드하세요.`);
+    }
+    log('url', `✓ 서브플러그인 ${subPlugins.length}개 @update-url → ${BUILD_ENV} 환경 레포 일치 확인`);
+} else {
+    log('url', `⚠️  Unknown BUILD_ENV '${BUILD_ENV}' — skipping sub-plugin URL validation`);
+}
+
 // ════════════════════════════════════════════════════════════════
 // Step 1: Build Tailwind CSS + Rollup bundle
 // ════════════════════════════════════════════════════════════════

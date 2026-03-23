@@ -9,7 +9,8 @@ import { ThoughtSignatureCache } from './format-gemini.js';
 
 /**
  * Parse OpenAI Chat Completions non-streaming response.
- * Handles reasoning_content (o-series), reasoning (OpenRouter), DeepSeek <think> blocks.
+ * Handles reasoning_content (o-series), reasoning (OpenRouter), DeepSeek <think> blocks,
+ * and Gemini-through-Copilot thought-flagged content.
  * @param {Record<string, any>} data - Parsed JSON response
  * @param {string} [_requestId] - Optional API View request ID
  * @returns {{ success: boolean, content: string }}
@@ -26,6 +27,13 @@ export function parseOpenAINonStreamingResponse(data, _requestId) {
     const openRouterReasoning = msg.reasoning ?? data.choices?.[0]?.reasoning;
     if (openRouterReasoning && !reasoningContent) {
         out += '<Thoughts>\n' + String(openRouterReasoning) + '\n</Thoughts>\n';
+    }
+    // Gemini-through-Copilot: thought field at choice or message level
+    if (!reasoningContent && !openRouterReasoning) {
+        const thoughtContent = data.choices?.[0]?.thought_content ?? msg.thought_content;
+        if (thoughtContent) {
+            out += '<Thoughts>\n' + String(thoughtContent) + '\n</Thoughts>\n';
+        }
     }
 
     let content = normalizeOpenAIMessageContent(msg.content);

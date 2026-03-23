@@ -178,6 +178,47 @@ git push test2 main
 
 ---
 
+## 서브플러그인 @update-url 관리
+
+> ### ⚠️ 환경별 서브플러그인 URL 규칙
+>
+> 서브플러그인(`cpm-*.js`)의 `@update-url`은 **배포 대상 환경의 GitHub 레포**를 가리켜야 한다.
+> 메인 플러그인 URL은 빌드 시 rollup이 자동 치환하지만, **서브플러그인 URL은 수동 관리**이므로 환경 전환 시 반드시 확인한다.
+
+| 환경 | @update-url GitHub 레포 |
+|------|------------------------|
+| `test2` | `ruyari-cupcake/cupcake-plugin-manager-test2/main/` |
+| `test` | `ruyari-cupcake/cupcake-plugin-manager-test/main/` |
+| `production` | `ruyari-cupcake/cupcake-plugin-manager/main/` |
+
+### 자동 검증
+
+- **빌드 시**: `release.cjs` Step 0에서 서브플러그인 `@update-url`이 빌드 환경과 일치하는지 검증
+- **테스트**: `production-url-guard.test.js`의 `sub-plugin @update-url must match build environment repo` 테스트
+- **pre-push**: `verify-production-url.cjs`가 origin push 시 서브플러그인이 프로덕션 레포를 가리키는지 확인
+
+### 환경 전환 시 변경 방법
+
+```bash
+# test2 → production 전환 시 (origin push 전)
+# PowerShell 예시:
+Get-ChildItem cpm-*.js | ForEach-Object {
+    (Get-Content $_.FullName) -replace 'cupcake-plugin-manager-test2/', 'cupcake-plugin-manager/' |
+    Set-Content $_.FullName
+}
+
+# production → test2 복원
+Get-ChildItem cpm-*.js | ForEach-Object {
+    (Get-Content $_.FullName) -replace 'cupcake-plugin-manager/main/', 'cupcake-plugin-manager-test2/main/' |
+    Set-Content $_.FullName
+}
+```
+
+> **주의:** `cupcake-plugin-manager/main/` → `cupcake-plugin-manager-test2/main/` 치환 시
+> `cupcake-plugin-manager-test2/main/`가 이미 있는 줄까지 치환되지 않도록 정규식 패턴에 주의한다.
+
+---
+
 ## 주의사항
 
 ### 🚨 절대 규칙: origin에 테스트 URL 금지

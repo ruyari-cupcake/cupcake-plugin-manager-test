@@ -795,7 +795,7 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
             } else if (_isResponsesEndpoint) {
                 return { success: true, content: createResponsesAPISSEStream(res, abortSignal, _reqId) };
             } else {
-                return { success: true, content: createOpenAISSEStream(res, abortSignal, _reqId) };
+                return { success: true, content: createOpenAISSEStream(res, abortSignal, _reqId, { model: config.model }) };
             }
         }
 
@@ -844,7 +844,18 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
             return { success: true, content: _rawResponseText, _rawData: data, _status: res.status };
         }
 
-        return _parseNonStreamingData(data);
+        const _parsed = _parseNonStreamingData(data);
+        // Diagnostic: Gemini through Copilot non-streaming — check for missing thinking
+        if (_isCopilotDomain && /gemini/i.test(String(config.model || ''))
+            && body.reasoning_effort && _parsed.success && !_parsed.content.includes('<Thoughts>')) {
+            const _rawKeys = Object.keys(data.choices?.[0] || {}).join(', ');
+            const _msgKeys = Object.keys(data.choices?.[0]?.message || {}).join(', ');
+            console.log(`[Cupcake PM] ℹ️ Gemini (${config.model}) Copilot non-stream: reasoning_effort=${body.reasoning_effort} sent, but no thinking content in response.`,
+                `\n  choice keys: [${_rawKeys}]`,
+                `\n  message keys: [${_msgKeys}]`,
+                `\n  Copilot API may not expose Gemini thinking in OpenAI format.`);
+        }
+        return _parsed;
     };
 
     // ── Key Rotation dispatch ──

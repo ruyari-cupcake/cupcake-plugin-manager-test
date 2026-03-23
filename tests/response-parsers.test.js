@@ -93,6 +93,32 @@ describe('parseOpenAINonStreamingResponse', () => {
         expect(result.success).toBe(false);
         expect(result.content).toContain('[OpenAI] Empty response');
     });
+
+    it('handles Gemini-through-Copilot thought_content field', () => {
+        const data = {
+            choices: [{ thought_content: 'Gemini thinking...', message: { content: 'reply text' } }],
+        };
+
+        const result = parseOpenAINonStreamingResponse(data);
+        expect(result.content).toContain('<Thoughts>');
+        expect(result.content).toContain('Gemini thinking...');
+        expect(result.content).toContain('</Thoughts>');
+        expect(result.content).toContain('reply text');
+    });
+
+    it('does not duplicate thought_content when reasoning_content already present', () => {
+        const data = {
+            choices: [{
+                reasoning_content: 'standard reasoning',
+                thought_content: 'should be ignored',
+                message: { content: 'answer' },
+            }],
+        };
+
+        const result = parseOpenAINonStreamingResponse(data);
+        expect(result.content).toContain('standard reasoning');
+        expect(result.content).not.toContain('should be ignored');
+    });
 });
 
 describe('parseResponsesAPINonStreamingResponse', () => {
