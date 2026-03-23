@@ -139,7 +139,7 @@ describe('copilot_cache_control — non-standard OpenAI caching', () => {
 
 describe('Proxy resolveTargetUrl — Copilot detection in X-Target-URL mode', () => {
     // Simulate the proxy's resolveTargetUrl logic
-    function resolveTargetUrl(headers, pathname) {
+    function resolveTargetUrl(headers, _pathname) {
         const xTargetUrl = headers['X-Target-URL'];
         if (xTargetUrl) {
             const copilotAuth = headers['X-Copilot-Auth'];

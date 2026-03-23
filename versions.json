@@ -54,9 +54,14 @@
     "file": "cpm-chat-navigation.js",
     "changes": "v2.1.3: 전체 서브플러그인 버전 동기화 릴리즈"
   },
+  "CPM Component - Chat Limiter": {
+    "version": "0.1.0",
+    "file": "cpm-chat-limiter.js",
+    "changes": "v0.1.0: 초기 릴리즈 — CSS nth-child로 최신 N개 메시지만 표시하여 렉 제거"
+  },
   "Cupcake Provider Manager": {
-    "version": "1.22.24",
+    "version": "1.22.25",
     "file": "provider-manager.js",
-    "changes": "v1.22.24: 테스트 커버리지 대폭 강화 (reasoning_text, switch-env, top_p retry 등 16+ 추가)"
+    "changes": "v1.22.25: Chat Limiter 서브플러그인 추가, tool-loop 커버리지 개선, ESLint 경고 정리"
   }
 }

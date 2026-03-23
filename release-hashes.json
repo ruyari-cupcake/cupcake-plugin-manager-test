@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-03-23T07:19:00.027Z",
-  "version": "1.22.24",
+  "timestamp": "2026-03-23T08:38:12.080Z",
+  "version": "1.22.25",
   "files": {
     "cpm-provider-vertex.js": {
       "version": "1.6.7",
@@ -57,11 +57,16 @@
       "sha256": "5c369f32e702862b159411968772abd5b15d470308be058be5c55f57885820c2",
       "size": 22787
     },
+    "cpm-chat-limiter.js": {
+      "version": "0.1.0",
+      "sha256": "6322cdf38d0262517f791497cae83fb1ee95530d759415d3af4655cb69485bf9",
+      "size": 6810
+    },
     "provider-manager.js": {
-      "version": "1.22.24",
-      "sha256": "da973939ddd22f3f203ef45506781d05efb163f6c541d39035f0ea63cec5ce4a",
-      "size": 619468
+      "version": "1.22.25",
+      "sha256": "9dc9080755fdb1071b3a9794d9bf88c20e94e09c0e525e7230f4325044d01de7",
+      "size": 619496
     }
   },
-  "bundleHash": "b33333d169e049b2081f34371d281e9f22c0e6c5b485ae0781ef02c0bc5a7235"
+  "bundleHash": "bc844a83bef9c872442b42d48ade120206194a9b810f9148cb5b36f3f1dbc7c7"
 }

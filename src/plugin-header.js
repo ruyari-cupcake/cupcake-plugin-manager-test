@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.24
-//@changes v1.22.24: 테스트 커버리지 대폭 강화 (reasoning_text, switch-env, top_p retry 등 16+ 추가)
+//@version 1.22.25
+//@changes v1.22.25: Chat Limiter 서브플러그인 추가, tool-loop 커버리지 개선, ESLint 경고 정리
 //@update-url https://test-2-wheat-omega.vercel.app/api/main-plugin
 
 // ==========================================

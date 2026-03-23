@@ -412,3 +412,214 @@ describe('tool-loop max-depth and MAX_CALLS', () => {
         expect(result.success).toBe(false);
     });
 });
+
+// ════════════════════════════════════════════
+// tool-loop — uncovered branch coverage
+// ════════════════════════════════════════════
+describe('tool-loop branch coverage — deep paths', () => {
+    let runToolLoop;
+    let getToolMaxDepth;
+    let getToolTimeout;
+
+    beforeEach(async () => {
+        const configMod = await import('../src/lib/tool-use/tool-config.js');
+        getToolMaxDepth = configMod.getToolMaxDepth;
+        getToolTimeout = configMod.getToolTimeout;
+        const mod = await import('../src/lib/tool-use/tool-loop.js');
+        runToolLoop = mod.runToolLoop;
+    });
+
+    // Helper to make a response with N tool calls
+    function makeToolResponse(n) {
+        const calls = Array.from({ length: n }, (_, i) => ({
+            id: `call_${i}`, function: { name: 'calculate', arguments: `{"expression":"${i}+1"}` }
+        }));
+        return {
+            choices: [{ message: { role: 'assistant', content: null, tool_calls: calls } }]
+        };
+    }
+
+    it('adds error results for unprocessed tool calls when MAX_CALLS (10) hit mid-round', async () => {
+        vi.mocked(getToolMaxDepth).mockResolvedValue(5);
+        vi.mocked(getToolTimeout).mockResolvedValue(10000);
+
+        // 12 tool calls in first response → only 10 processed, 2 get error
+        const capturedMessages = [];
+        const fetchFn = vi.fn().mockImplementation(async (_cfg, msgs) => {
+            capturedMessages.push(...msgs);
+            return {
+                success: true, content: 'Done after limit',
+                _rawData: { choices: [{ message: { role: 'assistant', content: 'Finished all tasks' } }] }
+            };
+        });
+
+        const result = await runToolLoop({
+            initialResult: { success: true, content: '', _rawData: makeToolResponse(12) },
+            messages: [{ role: 'user', content: 'calc' }],
+            config: { format: 'openai' },
+            temp: 1, maxTokens: 100, args: {},
+            fetchFn,
+        });
+        expect(result.success).toBe(true);
+        expect(result.content).toBe('Finished all tasks');
+        // Verify error results were added for call_10, call_11
+        const toolResults = capturedMessages.filter(m => m.role === 'tool');
+        const errorResults = toolResults.filter(m => m.content && m.content.includes('Tool call limit reached'));
+        expect(errorResults.length).toBe(2);
+    });
+
+    it('force-text recovery: finalResult._rawData has textContent (no tool_calls)', async () => {
+        vi.mocked(getToolMaxDepth).mockResolvedValue(1); // maxDepth = 1
+
+        let callCount = 0;
+        const fetchFn = vi.fn().mockImplementation(async () => {
+            callCount++;
+            if (callCount === 1) {
+                // Loop round 1: still returns tool_calls → depth exceeded
+                return { success: true, content: '', _rawData: makeToolResponse(1) };
+            }
+            // Recovery call: returns _rawData with text only (no tool_calls)
+            return {
+                success: true, content: 'fallback',
+                _rawData: { choices: [{ message: { role: 'assistant', content: 'Recovered text content' } }] }
+            };
+        });
+
+        const result = await runToolLoop({
+            initialResult: { success: true, content: '', _rawData: makeToolResponse(1) },
+            messages: [{ role: 'user', content: 'test' }],
+            config: { format: 'openai' },
+            temp: 1, maxTokens: 100, args: {},
+            fetchFn,
+        });
+        expect(result.success).toBe(true);
+        expect(result.content).toBe('Recovered text content');
+        expect(result._status).toBe(200);
+    });
+
+    it('force-text recovery: finalResult still has tool_calls → retry succeeds with text', async () => {
+        vi.mocked(getToolMaxDepth).mockResolvedValue(1);
+
+        let callCount = 0;
+        const fetchFn = vi.fn().mockImplementation(async () => {
+            callCount++;
+            if (callCount <= 2) {
+                // Loop + first recovery: always returns tool_calls
+                return { success: true, content: '', _rawData: makeToolResponse(1) };
+            }
+            // Retry: returns _rawData with text only
+            return {
+                success: true, content: 'retry worked',
+                _rawData: { choices: [{ message: { role: 'assistant', content: 'After retry' } }] }
+            };
+        });
+
+        const result = await runToolLoop({
+            initialResult: { success: true, content: '', _rawData: makeToolResponse(1) },
+            messages: [{ role: 'user', content: 'test' }],
+            config: { format: 'openai' },
+            temp: 1, maxTokens: 100, args: {},
+            fetchFn,
+        });
+        expect(result.success).toBe(true);
+        expect(result.content).toBe('After retry');
+    });
+
+    it('force-text recovery: retry also returns tool_calls → returns retryResult.content', async () => {
+        vi.mocked(getToolMaxDepth).mockResolvedValue(1);
+
+        let callCount = 0;
+        const fetchFn = vi.fn().mockImplementation(async () => {
+            callCount++;
+            if (callCount <= 3) {
+                // All calls return tool_calls (loop + recovery + retry)
+                return { success: true, content: 'still trying', _rawData: makeToolResponse(1), _status: 200 };
+            }
+            return { success: true, content: 'never reached' };
+        });
+
+        const result = await runToolLoop({
+            initialResult: { success: true, content: '', _rawData: makeToolResponse(1) },
+            messages: [{ role: 'user', content: 'test' }],
+            config: { format: 'openai' },
+            temp: 1, maxTokens: 100, args: {},
+            fetchFn,
+        });
+        // Falls through to retryResult.success / retryResult.content
+        expect(result.success).toBe(true);
+        expect(result.content).toBe('still trying');
+    });
+
+    it('force-text recovery: finalResult has no _rawData → returns directly', async () => {
+        vi.mocked(getToolMaxDepth).mockResolvedValue(1);
+
+        let callCount = 0;
+        const fetchFn = vi.fn().mockImplementation(async () => {
+            callCount++;
+            if (callCount === 1) {
+                return { success: true, content: '', _rawData: makeToolResponse(1) };
+            }
+            // Recovery call returns with no _rawData → direct return
+            return { success: true, content: 'Direct response', _status: 200 };
+        });
+
+        const result = await runToolLoop({
+            initialResult: { success: true, content: '', _rawData: makeToolResponse(1) },
+            messages: [{ role: 'user', content: 'test' }],
+            config: { format: 'openai' },
+            temp: 1, maxTokens: 100, args: {},
+            fetchFn,
+        });
+        expect(result.success).toBe(true);
+        expect(result.content).toBe('Direct response');
+    });
+
+    it('abort signal fires mid-iteration through tool calls', async () => {
+        vi.mocked(getToolMaxDepth).mockResolvedValue(5);
+
+        const ac = new AbortController();
+        let toolCallCount = 0;
+        // We need to abort during tool execution — use a real tool that triggers abort
+        const fetchFn = vi.fn().mockResolvedValue({
+            success: true, content: 'text',
+            _rawData: { choices: [{ message: { role: 'assistant', content: 'Done' } }] }
+        });
+
+        // 3 tool calls, abort after first starts
+        const threeToolResponse = makeToolResponse(3);
+
+        // Abort immediately — will be checked before first tool call iteration
+        ac.abort();
+
+        const result = await runToolLoop({
+            initialResult: { success: true, content: '', _rawData: threeToolResponse },
+            messages: [{ role: 'user', content: 'test' }],
+            config: { format: 'openai' },
+            temp: 1, maxTokens: 100, args: {},
+            abortSignal: ac.signal,
+            fetchFn,
+        });
+        // Aborted — should return early; fetchFn should not be called
+        expect(fetchFn).not.toHaveBeenCalled();
+    });
+
+    it('_executeWithTimeout: timeout of 0 bypasses race', async () => {
+        vi.mocked(getToolMaxDepth).mockResolvedValue(5);
+        vi.mocked(getToolTimeout).mockResolvedValue(0); // 0 → bypass timeout
+
+        const fetchFn = vi.fn().mockResolvedValue({
+            success: true, content: 'text',
+            _rawData: { choices: [{ message: { role: 'assistant', content: 'No timeout' } }] }
+        });
+
+        const result = await runToolLoop({
+            initialResult: { success: true, content: '', _rawData: makeToolResponse(1) },
+            messages: [{ role: 'user', content: 'test' }],
+            config: { format: 'openai' },
+            temp: 1, maxTokens: 100, args: {},
+            fetchFn,
+        });
+        expect(result.success).toBe(true);
+        expect(result.content).toBe('No timeout');
+    });
+});

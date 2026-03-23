@@ -135,7 +135,7 @@ describe('stream-builders regression coverage', () => {
 
         // Stream that yields thinking data, waits for abort, then yields more
         const encoder = new TextEncoder();
-        let resolveSecondPull;
+        let _resolveSecondPull;
         let pullCount = 0;
         const slowBody = new ReadableStream({
             async pull(ctrl) {
@@ -149,7 +149,7 @@ describe('stream-builders regression coverage', () => {
                     return;
                 }
                 // Wait long enough for abort to fire
-                await new Promise(r => { resolveSecondPull = r; setTimeout(r, 200); });
+                await new Promise(r => { _resolveSecondPull = r; setTimeout(r, 200); });
                 ctrl.close();
             },
         });
