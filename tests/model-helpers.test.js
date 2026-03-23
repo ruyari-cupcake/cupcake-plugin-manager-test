@@ -5,7 +5,6 @@ import {
     needsDeveloperRole,
     isGemini3Model,
     isGeminiNoCivicModel,
-    isGeminiFamily,
     supportsOpenAIReasoningEffort,
     needsCopilotResponsesAPI,
     shouldStripOpenAISamplingParams,
@@ -147,35 +146,6 @@ describe('isGeminiNoCivicModel', () => {
     });
 });
 
-// ── isGeminiFamily ──
-describe('isGeminiFamily', () => {
-    it('returns false for null/empty', () => {
-        expect(isGeminiFamily(null)).toBe(false);
-        expect(isGeminiFamily('')).toBe(false);
-    });
-
-    it('matches all Gemini variants', () => {
-        expect(isGeminiFamily('gemini-2.5-flash')).toBe(true);
-        expect(isGeminiFamily('gemini-2.5-pro')).toBe(true);
-        expect(isGeminiFamily('gemini-2.5-flash-preview')).toBe(true);
-        expect(isGeminiFamily('gemini-3-pro')).toBe(true);
-        expect(isGeminiFamily('gemini-3-flash')).toBe(true);
-        expect(isGeminiFamily('gemini-pro')).toBe(true);
-        expect(isGeminiFamily('gemini-2.0-flash-lite-preview')).toBe(true);
-    });
-
-    it('is case-insensitive', () => {
-        expect(isGeminiFamily('Gemini-2.5-Flash')).toBe(true);
-        expect(isGeminiFamily('GEMINI-3-PRO')).toBe(true);
-    });
-
-    it('rejects non-Gemini models', () => {
-        expect(isGeminiFamily('gpt-4o')).toBe(false);
-        expect(isGeminiFamily('claude-3-opus')).toBe(false);
-        expect(isGeminiFamily('o3-mini')).toBe(false);
-    });
-});
-
 describe('supportsOpenAIReasoningEffort', () => {
     it('returns false for null/empty', () => {
         expect(supportsOpenAIReasoningEffort(null)).toBe(false);
@@ -207,15 +177,9 @@ describe('supportsOpenAIReasoningEffort', () => {
         expect(supportsOpenAIReasoningEffort('openai/gpt-5')).toBe(true);
     });
 
-    it('matches Gemini models (Copilot API reasoning_effort support)', () => {
-        expect(supportsOpenAIReasoningEffort('gemini-2.5-flash')).toBe(true);
-        expect(supportsOpenAIReasoningEffort('gemini-2.5-pro')).toBe(true);
-        expect(supportsOpenAIReasoningEffort('gemini-2.5-flash-preview')).toBe(true);
-        expect(supportsOpenAIReasoningEffort('gemini-3-pro')).toBe(true);
-        expect(supportsOpenAIReasoningEffort('gemini-pro')).toBe(true);
-    });
-
-    it('rejects non-matching models', () => {
+    it('rejects Gemini and other non-matching models', () => {
+        expect(supportsOpenAIReasoningEffort('gemini-2.5-flash')).toBe(false);
+        expect(supportsOpenAIReasoningEffort('gemini-3-pro')).toBe(false);
         expect(supportsOpenAIReasoningEffort('gpt-4o')).toBe(false);
         expect(supportsOpenAIReasoningEffort('claude-3-opus')).toBe(false);
     });

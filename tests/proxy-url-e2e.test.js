@@ -588,7 +588,7 @@ describe('Copilot Gemini reasoning_effort injection', () => {
         };
     }
 
-    it('Gemini model with reasoning="medium" injects reasoning_effort into body', async () => {
+    it('Gemini model with reasoning="medium" does NOT inject reasoning_effort (v1.22.11 base)', async () => {
         h.state.CUSTOM_MODELS_CACHE = [makeCopilotGeminiModel({ reasoning: 'medium' })];
 
         h.mockSmartFetch.mockResolvedValueOnce(
@@ -602,10 +602,10 @@ describe('Copilot Gemini reasoning_effort injection', () => {
 
         expect(result.success).toBe(true);
 
-        // Verify reasoning_effort is in the request body
+        // Gemini should NOT get reasoning_effort in v1.22.11 base
         const fetchedOptions = h.mockSmartFetch.mock.calls[0][1];
         const body = JSON.parse(fetchedOptions.body);
-        expect(body.reasoning_effort).toBe('medium');
+        expect(body).not.toHaveProperty('reasoning_effort');
     });
 
     it('Gemini model with reasoning="none" does NOT inject reasoning_effort', async () => {
@@ -625,7 +625,7 @@ describe('Copilot Gemini reasoning_effort injection', () => {
         expect(body).not.toHaveProperty('reasoning_effort');
     });
 
-    it('slot _cpmSlotThinkingConfig overrides model reasoning for Gemini', async () => {
+    it('slot _cpmSlotThinkingConfig does NOT inject reasoning_effort for Gemini (v1.22.11 base)', async () => {
         h.state.CUSTOM_MODELS_CACHE = [makeCopilotGeminiModel({ reasoning: 'low' })];
 
         h.mockSmartFetch.mockResolvedValueOnce(
@@ -641,10 +641,11 @@ describe('Copilot Gemini reasoning_effort injection', () => {
         expect(result.success).toBe(true);
         const fetchedOptions = h.mockSmartFetch.mock.calls[0][1];
         const body = JSON.parse(fetchedOptions.body);
-        expect(body.reasoning_effort).toBe('high');
+        // Gemini should NOT get reasoning_effort in v1.22.11 base
+        expect(body).not.toHaveProperty('reasoning_effort');
     });
 
-    it('Gemini 3 model also supports reasoning_effort', async () => {
+    it('Gemini 3 model does NOT get reasoning_effort (v1.22.11 base)', async () => {
         h.state.CUSTOM_MODELS_CACHE = [makeCopilotGeminiModel({
             model: 'gemini-3-pro',
             name: '[Copilot] gemini-3-pro',
@@ -662,7 +663,8 @@ describe('Copilot Gemini reasoning_effort injection', () => {
 
         const fetchedOptions = h.mockSmartFetch.mock.calls[0][1];
         const body = JSON.parse(fetchedOptions.body);
-        expect(body.reasoning_effort).toBe('high');
+        // Gemini should NOT get reasoning_effort in v1.22.11 base
+        expect(body).not.toHaveProperty('reasoning_effort');
     });
 
     it('non-Gemini non-o3 model does NOT get reasoning_effort even with reasoning set', async () => {
