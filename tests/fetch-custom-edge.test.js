@@ -897,3 +897,81 @@ describe('fetchCustom — o3/o4 sampling param stripping in custom models', () =
         expect(body.temperature).toBe(0.7);
     });
 });
+
+describe('fetchCustom — temperature+top_p conflict auto-retry', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        mockGetArg.mockResolvedValue('');
+        mockGetBoolArg.mockResolvedValue(false);
+    });
+
+    it('retries without top_p when API rejects both temperature and top_p', async () => {
+        // First call: 400 with temperature+top_p error
+        mockFetch.mockResolvedValueOnce(new Response(
+            'Error: temperature and top_p cannot both be specified',
+            { status: 400, headers: { 'content-type': 'text/plain' } },
+        ));
+        // Second call (retry): success
+        mockFetch.mockResolvedValueOnce(
+            makeOkJsonResponse({ choices: [{ message: { content: 'retry-ok' } }] }),
+        );
+
+        const result = await fetchCustom(
+            {
+                url: 'https://api.openai.com/v1/chat/completions',
+                key: 'sk-test',
+                model: 'gpt-4o',
+                format: 'openai',
+            },
+            BASIC_MESSAGES, 0.7, 1024, { top_p: 0.9 },
+        );
+
+        expect(result.success).toBe(true);
+        expect(result.content).toBe('retry-ok');
+        // Should have been called twice
+        expect(mockFetch).toHaveBeenCalledTimes(2);
+        // Second call should NOT have top_p
+        const retryBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+        expect(retryBody.top_p).toBeUndefined();
+    });
+
+    it('does not retry when 400 error does not match temperature+top_p pattern', async () => {
+        mockFetch.mockResolvedValueOnce(new Response(
+            'Error: invalid model specified',
+            { status: 400, headers: { 'content-type': 'text/plain' } },
+        ));
+
+        const result = await fetchCustom(
+            {
+                url: 'https://api.openai.com/v1/chat/completions',
+                key: 'sk-test',
+                model: 'gpt-4o',
+                format: 'openai',
+            },
+            BASIC_MESSAGES, 0.7, 1024, { top_p: 0.9 },
+        );
+
+        expect(result.success).toBe(false);
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not retry when top_p is not in the request body', async () => {
+        mockFetch.mockResolvedValueOnce(new Response(
+            'Error: temperature and top_p cannot both be specified',
+            { status: 400, headers: { 'content-type': 'text/plain' } },
+        ));
+
+        const result = await fetchCustom(
+            {
+                url: 'https://api.openai.com/v1/chat/completions',
+                key: 'sk-test',
+                model: 'gpt-4o',
+                format: 'openai',
+            },
+            BASIC_MESSAGES, 0.7, 1024, {},
+        );
+
+        expect(result.success).toBe(false);
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+});

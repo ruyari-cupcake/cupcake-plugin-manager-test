@@ -34,6 +34,36 @@ describe('parseOpenAISSELine', () => {
     it('handles empty choices array', () => {
         expect(parseOpenAISSELine('data: {"choices":[]}')).toBeNull();
     });
+
+    it('extracts reasoning_content field', () => {
+        const line = 'data: {"choices":[{"delta":{"reasoning_content":"think step"}}]}';
+        expect(parseOpenAISSELine(line)).toBe('think step');
+    });
+
+    it('extracts reasoning_text field when no reasoning_content', () => {
+        const line = 'data: {"choices":[{"delta":{"reasoning_text":"copilot gemini think"}}]}';
+        expect(parseOpenAISSELine(line)).toBe('copilot gemini think');
+    });
+
+    it('extracts reasoning field as last fallback', () => {
+        const line = 'data: {"choices":[{"delta":{"reasoning":"basic reasoning"}}]}';
+        expect(parseOpenAISSELine(line)).toBe('basic reasoning');
+    });
+
+    it('prefers reasoning_content over reasoning_text', () => {
+        const line = 'data: {"choices":[{"delta":{"reasoning_content":"primary","reasoning_text":"secondary"}}]}';
+        expect(parseOpenAISSELine(line)).toBe('primary');
+    });
+
+    it('extracts thought-flagged delta.content', () => {
+        const line = 'data: {"choices":[{"delta":{"content":"thinking stuff","thought":true},"thought":true}]}';
+        expect(parseOpenAISSELine(line)).toBe('thinking stuff');
+    });
+
+    it('extracts thought via choices[0].thought flag', () => {
+        const line = 'data: {"choices":[{"delta":{"content":"inner thought"},"thought":true}]}';
+        expect(parseOpenAISSELine(line)).toBe('inner thought');
+    });
 });
 
 describe('normalizeOpenAIMessageContent', () => {

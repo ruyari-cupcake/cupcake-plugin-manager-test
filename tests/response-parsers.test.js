@@ -158,6 +158,36 @@ describe('parseResponsesAPINonStreamingResponse', () => {
         expect(result.content).toContain('Result');
     });
 
+    it('extracts reasoning_text content blocks', () => {
+        const data = {
+            output: [
+                { type: 'reasoning', content: [{ type: 'reasoning_text', text: 'deep reason' }] },
+                { type: 'message', content: [{ type: 'output_text', text: 'final' }] },
+            ],
+        };
+        const result = parseResponsesAPINonStreamingResponse(data);
+        expect(result.content).toContain('<Thoughts>');
+        expect(result.content).toContain('deep reason');
+        expect(result.content).toContain('final');
+    });
+
+    it('combines summary_text and reasoning_text', () => {
+        const data = {
+            output: [
+                {
+                    type: 'reasoning',
+                    summary: [{ type: 'summary_text', text: 'summary ' }],
+                    content: [{ type: 'reasoning_text', text: 'detailed' }],
+                },
+                { type: 'message', content: [{ type: 'output_text', text: 'done' }] },
+            ],
+        };
+        const result = parseResponsesAPINonStreamingResponse(data);
+        expect(result.content).toContain('summary ');
+        expect(result.content).toContain('detailed');
+        expect(result.content).toContain('done');
+    });
+
     it('falls back to Chat Completions format', () => {
         const data = { choices: [{ message: { content: 'fallback' } }] };
         const result = parseResponsesAPINonStreamingResponse(data);

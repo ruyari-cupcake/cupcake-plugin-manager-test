@@ -20,6 +20,7 @@ vi.mock('../src/lib/format-gemini.js', () => ({
 import {
     createOpenAISSEStream,
     createResponsesAPISSEStream,
+    createAnthropicSSEStream,
 } from '../src/lib/stream-builders.js';
 
 function makeResponseFromChunks(chunks) {
@@ -110,6 +111,70 @@ describe('stream-builders regression coverage', () => {
         const text = await readStream(stream);
 
         expect(text).toBe('<Thoughts>\nreasoning via text\n</Thoughts>\noutput');
+    });
+
+    it('createAnthropicSSEStream handles thinking + text blocks', async () => {
+        const response = makeResponseFromChunks([
+            'event: content_block_delta\ndata: {"delta":{"type":"thinking_delta","thinking":"deep thought"}}\n\n',
+            'event: content_block_delta\ndata: {"delta":{"type":"text_delta","text":"answer"}}\n\n',
+            'event: message_delta\ndata: {"usage":{"output_tokens":15}}\n\n',
+            'event: message_start\ndata: {"message":{"usage":{"input_tokens":10}}}\n\n',
+        ]);
+
+        const stream = createAnthropicSSEStream(response, undefined, 'req-anthropic');
+        const text = await readStream(stream);
+
+        expect(text).toContain('<Thoughts>');
+        expect(text).toContain('deep thought');
+        expect(text).toContain('</Thoughts>');
+        expect(text).toContain('answer');
+    });
+
+    it('createAnthropicSSEStream closes thinking block on abort', async () => {
+        const ac = new AbortController();
+
+        // Stream that yields thinking data, waits for abort, then yields more
+        const encoder = new TextEncoder();
+        let resolveSecondPull;
+        let pullCount = 0;
+        const slowBody = new ReadableStream({
+            async pull(ctrl) {
+                pullCount++;
+                if (pullCount === 1) {
+                    ctrl.enqueue(encoder.encode(
+                        'event: content_block_delta\ndata: {"delta":{"type":"thinking_delta","thinking":"in progress"}}\n\n',
+                    ));
+                    // Schedule abort after chunk is delivered
+                    setTimeout(() => ac.abort(), 5);
+                    return;
+                }
+                // Wait long enough for abort to fire
+                await new Promise(r => { resolveSecondPull = r; setTimeout(r, 200); });
+                ctrl.close();
+            },
+        });
+
+        const response = new Response(slowBody);
+        const stream = createAnthropicSSEStream(response, ac.signal, 'req-abort-think');
+        const text = await readStream(stream);
+
+        expect(text).toContain('<Thoughts>');
+        expect(text).toContain('in progress');
+        expect(text).toContain('</Thoughts>');
+    });
+
+    it('createAnthropicSSEStream hides thinking when showThinking=false', async () => {
+        const response = makeResponseFromChunks([
+            'event: content_block_delta\ndata: {"delta":{"type":"thinking_delta","thinking":"hidden"}}\n\n',
+            'event: content_block_delta\ndata: {"delta":{"type":"text_delta","text":"visible answer"}}\n\n',
+        ]);
+
+        const stream = createAnthropicSSEStream(response, undefined, 'req-no-think', { showThinking: false });
+        const text = await readStream(stream);
+
+        expect(text).not.toContain('hidden');
+        expect(text).not.toContain('<Thoughts>');
+        expect(text).toContain('visible answer');
     });
 
     it('createOpenAISSEStream passes through content normally when no thought flag', async () => {
