@@ -324,6 +324,53 @@ describe('buildPluginsTabRenderer', () => {
         expect(() => buildPluginsTabRenderer(vi.fn())()).not.toThrow();
         expect(onRender).not.toHaveBeenCalled();
     });
+
+    it('matches dynamic UI by name when IDs differ (name-based fallback)', () => {
+        // SubPluginManager uses auto-generated id, CupcakePM_SubPlugins uses fixed id
+        mockSubPluginManager.plugins = [{
+            id: 'subplugin_12345_abc', name: 'CPM Component - Chat Limiter', enabled: true,
+        }];
+        const onRender = vi.fn();
+        window.CupcakePM_SubPlugins = [{ id: 'cpm-chat-limiter', name: 'Chat Limiter', uiHtml: '<div>Limiter UI</div>', onRender }];
+        document.body.innerHTML = '<div id="cpm-plugins-list"></div><button id="cpm-check-updates-btn"></button><div id="cpm-update-status" class="hidden"></div>';
+
+        buildPluginsTabRenderer(vi.fn())();
+
+        const container = document.getElementById('plugin-ui-subplugin_12345_abc');
+        expect(container.innerHTML).toContain('Limiter UI');
+        expect(onRender).toHaveBeenCalled();
+    });
+
+    it('matches dynamic UI by partial name (includes match)', () => {
+        // @name is "CPM Component - Chat Input Resizer", CupcakePM_SubPlugins name is "Chat Input Resizer"
+        mockSubPluginManager.plugins = [{
+            id: 'subplugin_67890', name: 'CPM Component - Chat Input Resizer', enabled: true,
+        }];
+        const onRender = vi.fn();
+        window.CupcakePM_SubPlugins = [{ id: 'cpm-resizer', name: 'Chat Input Resizer', uiHtml: '<div>Resizer</div>', onRender }];
+        document.body.innerHTML = '<div id="cpm-plugins-list"></div><button id="cpm-check-updates-btn"></button><div id="cpm-update-status" class="hidden"></div>';
+
+        buildPluginsTabRenderer(vi.fn())();
+
+        const container = document.getElementById('plugin-ui-subplugin_67890');
+        expect(container.innerHTML).toContain('Resizer');
+        expect(onRender).toHaveBeenCalled();
+    });
+
+    it('direct ID match takes priority over name-based fallback', () => {
+        mockSubPluginManager.plugins = [
+            { id: 'direct-id', name: 'Some Plugin', enabled: true },
+        ];
+        const onRender = vi.fn();
+        window.CupcakePM_SubPlugins = [{ id: 'direct-id', name: 'Some Plugin', uiHtml: '<div>Direct</div>', onRender }];
+        document.body.innerHTML = '<div id="cpm-plugins-list"></div><button id="cpm-check-updates-btn"></button><div id="cpm-update-status" class="hidden"></div>';
+
+        buildPluginsTabRenderer(vi.fn())();
+
+        const container = document.getElementById('plugin-ui-direct-id');
+        expect(container.innerHTML).toContain('Direct');
+        expect(onRender).toHaveBeenCalled();
+    });
 });
 
 describe('initUpdateCheckButton', () => {

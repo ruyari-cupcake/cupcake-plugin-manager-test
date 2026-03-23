@@ -212,7 +212,21 @@ export function buildPluginsTabRenderer(/** @type {any} */ setVal) {
         const cupcakeWindow = window;
         cupcakeWindow.CupcakePM_SubPlugins = cupcakeWindow.CupcakePM_SubPlugins || [];
         for (const p of cupcakeWindow.CupcakePM_SubPlugins) {
-            const uiContainer = document.getElementById(`plugin-ui-${p.id}`);
+            // Try direct id match first
+            let uiContainer = document.getElementById(`plugin-ui-${p.id}`);
+            // Fallback: match by name (SubPluginManager uses @name header, CupcakePM_SubPlugins uses display name)
+            if (!uiContainer && p.name) {
+                const pNameLower = p.name.toLowerCase();
+                const match = SubPluginManager.plugins.find(
+                    (/** @type {any} */ sp) => {
+                        const spNameLower = (sp.name || '').toLowerCase();
+                        return spNameLower === pNameLower
+                            || spNameLower.includes(pNameLower)
+                            || pNameLower.includes(spNameLower);
+                    }
+                );
+                if (match) uiContainer = document.getElementById(`plugin-ui-${match.id}`);
+            }
             if (uiContainer) {
                 try {
                     if (p.uiHtml) uiContainer.innerHTML = p.uiHtml;

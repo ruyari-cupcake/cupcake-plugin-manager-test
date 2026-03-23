@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.27
-//@changes v1.22.27: 서브플러그인 Auto-Bootstrap — 번들 내 미설치 플러그인 자동 설치
+//@version 1.22.28
+//@changes v1.22.28: 서브플러그인 UI name-based fallback — ID 불일치 시 이름으로 매칭
 //@update-url https://test-2-wheat-omega.vercel.app/api/main-plugin
 
 // ==========================================
@@ -195,7 +195,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.22.27';
+    const CPM_VERSION = '1.22.28';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -9624,7 +9624,21 @@ var CupcakeProviderManager = (function (exports) {
             const cupcakeWindow = window;
             cupcakeWindow.CupcakePM_SubPlugins = cupcakeWindow.CupcakePM_SubPlugins || [];
             for (const p of cupcakeWindow.CupcakePM_SubPlugins) {
-                const uiContainer = document.getElementById(`plugin-ui-${p.id}`);
+                // Try direct id match first
+                let uiContainer = document.getElementById(`plugin-ui-${p.id}`);
+                // Fallback: match by name (SubPluginManager uses @name header, CupcakePM_SubPlugins uses display name)
+                if (!uiContainer && p.name) {
+                    const pNameLower = p.name.toLowerCase();
+                    const match = SubPluginManager.plugins.find(
+                        (/** @type {any} */ sp) => {
+                            const spNameLower = (sp.name || '').toLowerCase();
+                            return spNameLower === pNameLower
+                                || spNameLower.includes(pNameLower)
+                                || pNameLower.includes(spNameLower);
+                        }
+                    );
+                    if (match) uiContainer = document.getElementById(`plugin-ui-${match.id}`);
+                }
                 if (uiContainer) {
                     try {
                         if (p.uiHtml) uiContainer.innerHTML = p.uiHtml;

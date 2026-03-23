@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-03-23T09:26:20.455Z",
-  "version": "1.22.27",
+  "timestamp": "2026-03-23T10:00:39.144Z",
+  "version": "1.22.28",
   "files": {
     "cpm-provider-vertex.js": {
       "version": "1.6.7",
@@ -63,10 +63,10 @@
       "size": 12582
     },
     "provider-manager.js": {
-      "version": "1.22.27",
-      "sha256": "5faf7d661eddfb2e810d2b5bc04563a27b1cb06fa21e3213e7540f10b0de554a",
-      "size": 623679
+      "version": "1.22.28",
+      "sha256": "88a5fe2d988135ef28fbb64b5a333317e3208a9c1a467ad527fbfe76f6e69ffe",
+      "size": 624512
     }
   },
-  "bundleHash": "ed9c11bdea5adafd3a6397720b0633b9176483a51002ae9b88d8a9b2f042cf6e"
+  "bundleHash": "dca913c90b24e43ce8139304239eb7bec298da377a4f85c4abb79361f5a346dc"
 }
