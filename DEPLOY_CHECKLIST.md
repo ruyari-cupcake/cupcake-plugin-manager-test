@@ -166,6 +166,8 @@ origin push를 감지하면 추가로 `scripts/verify-production-url.cjs`를 실
 >
 > 메인 플러그인의 URL은 rollup 빌드가 자동 치환하지만, 서브플러그인 URL은 수동 관리이다.
 > 환경을 바꾸고 서브플러그인 URL을 안 바꾸면 **빌드 및 테스트에서 실패한다.**
+>
+> **자동 전환**: `node scripts/switch-env.cjs <production|test2|test>` 또는 `npm run env:switch -- <환경>`
 
 | 환경 | 서브플러그인 @update-url GitHub 레포 경로 |
 |------|------------------------------------------|

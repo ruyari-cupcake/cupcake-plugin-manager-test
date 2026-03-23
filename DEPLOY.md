@@ -197,25 +197,24 @@ git push test2 main
 - **테스트**: `production-url-guard.test.js`의 `sub-plugin @update-url must match build environment repo` 테스트
 - **pre-push**: `verify-production-url.cjs`가 origin push 시 서브플러그인이 프로덕션 레포를 가리키는지 확인
 
-### 환경 전환 시 변경 방법
+### 환경 전환 방법 (자동 스크립트)
 
 ```bash
-# test2 → production 전환 시 (origin push 전)
-# PowerShell 예시:
-Get-ChildItem cpm-*.js | ForEach-Object {
-    (Get-Content $_.FullName) -replace 'cupcake-plugin-manager-test2/', 'cupcake-plugin-manager/' |
-    Set-Content $_.FullName
-}
+# 현재 환경 상태 확인
+npm run env:check
+
+# test2 → production 전환
+node scripts/switch-env.cjs production
 
 # production → test2 복원
-Get-ChildItem cpm-*.js | ForEach-Object {
-    (Get-Content $_.FullName) -replace 'cupcake-plugin-manager/main/', 'cupcake-plugin-manager-test2/main/' |
-    Set-Content $_.FullName
-}
+node scripts/switch-env.cjs test2
+
+# 전환 후 빌드까지 한 번에
+node scripts/switch-env.cjs production && CPM_ENV=production node scripts/release.cjs --skip-test
 ```
 
-> **주의:** `cupcake-plugin-manager/main/` → `cupcake-plugin-manager-test2/main/` 치환 시
-> `cupcake-plugin-manager-test2/main/`가 이미 있는 줄까지 치환되지 않도록 정규식 패턴에 주의한다.
+`switch-env.cjs`는 서브플러그인 12개의 `@update-url`을 일괄 변경한다.
+메인 플러그인 헤더(`plugin-header.js`)는 rollup 빌드 시 `CPM_ENV`에 맞게 자동 주입된다.
 
 ---
 

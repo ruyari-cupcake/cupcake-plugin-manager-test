@@ -19,6 +19,8 @@
     "build": "npm run build:css && rollup -c rollup.config.mjs",
     "build:production": "node scripts/build-production.cjs",
     "verify:production-url": "node scripts/verify-production-url.cjs --force",
+    "env:switch": "node scripts/switch-env.cjs",
+    "env:check": "node scripts/switch-env.cjs --check",
     "wait:input": "node scripts/wait-for-input.cjs"
   },
   "devDependencies": {

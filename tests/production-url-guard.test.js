@@ -39,7 +39,6 @@ function extractEnv(source) {
 
 // Determine expected environment from the built bundle
 const builtEnv = extractEnv(rootBundle) || 'test2';
-const isTestEnv = builtEnv === 'test' || builtEnv === 'test2';
 
 function containsAnyTestDomain(url) {
     return ALL_TEST_DOMAINS.some(d => url.includes(d));
