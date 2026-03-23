@@ -204,7 +204,7 @@ describe('auto-update toggle (cpm_disable_autoupdate)', () => {
     // checkMainPluginVersionQuiet — toggle ON
     // ──────────────────────────────────────────────────
     describe('checkMainPluginVersionQuiet — toggle ON', () => {
-        it('shows notification instead of installing via JS fallback', async () => {
+        it('skips heavy JS fallback entirely when auto-update disabled', async () => {
             h._safeGetBoolArgMock.mockImplementation(async (key, def) => {
                 if (key === 'cpm_disable_autoupdate') return true;
                 return def;
@@ -222,7 +222,9 @@ describe('auto-update toggle (cpm_disable_autoupdate)', () => {
 
             await updater.checkMainPluginVersionQuiet();
 
-            expect(updater._showMainUpdateAvailableToast).toHaveBeenCalledWith('1.20.0', '1.21.0', 'js fallback change');
+            // Early exit — no fetch, no toast, no install
+            expect(h.risu.nativeFetch).not.toHaveBeenCalled();
+            expect(updater._showMainUpdateAvailableToast).not.toHaveBeenCalled();
             expect(updater._validateAndInstallMainPlugin).not.toHaveBeenCalled();
             expect(updater.safeMainPluginUpdate).not.toHaveBeenCalled();
         });
@@ -351,6 +353,118 @@ describe('auto-update toggle (cpm_disable_autoupdate)', () => {
 
             expect(updater._showMainUpdateAvailableToast).not.toHaveBeenCalled();
             expect(updater.safeMainPluginUpdate).not.toHaveBeenCalled();
+        });
+    });
+
+    // ──────────────────────────────────────────────────
+    // autoBootstrapBundledPlugins — toggle tests
+    // ──────────────────────────────────────────────────
+    describe('autoBootstrapBundledPlugins — toggle ON (disabled)', () => {
+        it('skips bundle fetch entirely when auto-update disabled', async () => {
+            h._safeGetBoolArgMock.mockImplementation(async (key, def) => {
+                if (key === 'cpm_disable_autoupdate') return true;
+                return def;
+            });
+
+            updater = makeUpdater({
+                install: vi.fn(async () => {}),
+                BLOCKED_NAMES: ['Cupcake Provider Manager'],
+            });
+
+            const result = await updater.autoBootstrapBundledPlugins();
+
+            expect(result).toEqual([]);
+            expect(h.risu.risuFetch).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('autoBootstrapBundledPlugins — toggle OFF (enabled)', () => {
+        it('fetches bundle normally when auto-update enabled', async () => {
+            h._safeGetBoolArgMock.mockImplementation(async (key, def) => def);
+
+            h.risu.risuFetch.mockResolvedValue({
+                data: JSON.stringify({ versions: {}, code: {} }),
+                status: 200,
+            });
+
+            updater = makeUpdater({
+                install: vi.fn(async () => {}),
+                BLOCKED_NAMES: ['Cupcake Provider Manager'],
+            });
+
+            const result = await updater.autoBootstrapBundledPlugins();
+
+            expect(result).toEqual([]);
+            expect(h.risu.risuFetch).toHaveBeenCalled();
+        });
+    });
+
+    // ──────────────────────────────────────────────────
+    // checkVersionsQuiet — OFF still fetches + shows toast
+    // ──────────────────────────────────────────────────
+    describe('checkVersionsQuiet — OFF still shows toast (plan AU-01/AU-02)', () => {
+        it('AU-01: versions.json fetch runs even when auto-update disabled', async () => {
+            h._safeGetBoolArgMock.mockImplementation(async (key, def) => {
+                if (key === 'cpm_disable_autoupdate') return true;
+                return def;
+            });
+
+            const manifest = makeManifest('1.20.0', {
+                'vertex': { version: '1.7.0', changes: 'fix' },
+            });
+            mockManifestFetch(manifest);
+
+            updater = makeUpdater({
+                plugins: [{ name: 'vertex', icon: '🔷', version: '1.6.0', updateUrl: 'https://example.com/vertex.js' }],
+            });
+
+            const promise = updater.checkVersionsQuiet();
+            await vi.advanceTimersByTimeAsync(5000);
+            await promise;
+
+            // versions.json WAS fetched (risuFetch called)
+            expect(h.risu.risuFetch).toHaveBeenCalled();
+            // Sub-plugin toast WAS shown
+            expect(updater.showUpdateToast).toHaveBeenCalled();
+        });
+
+        it('AU-02: main update toast shown, but safeMainPluginUpdate NOT called when disabled', async () => {
+            h._safeGetBoolArgMock.mockImplementation(async (key, def) => {
+                if (key === 'cpm_disable_autoupdate') return true;
+                return def;
+            });
+
+            mockManifestFetch(makeManifest('1.21.0'));
+            updater = makeUpdater();
+
+            const promise = updater.checkVersionsQuiet();
+            await vi.advanceTimersByTimeAsync(5000);
+            await promise;
+
+            // Toast shown
+            expect(updater._showMainUpdateAvailableToast).toHaveBeenCalledWith('1.20.0', '1.21.0', 'test changes');
+            // Auto-install NOT triggered
+            expect(updater.safeMainPluginUpdate).not.toHaveBeenCalled();
+            expect(updater._rememberPendingMainUpdate).not.toHaveBeenCalled();
+        });
+    });
+
+    // ──────────────────────────────────────────────────
+    // checkMainPluginVersionQuiet — OFF skips nativeFetch
+    // ──────────────────────────────────────────────────
+    describe('checkMainPluginVersionQuiet — OFF skips nativeFetch (plan AU-03)', () => {
+        it('AU-03: nativeFetch not called when auto-update disabled', async () => {
+            h._safeGetBoolArgMock.mockImplementation(async (key, def) => {
+                if (key === 'cpm_disable_autoupdate') return true;
+                return def;
+            });
+
+            updater = makeUpdater();
+
+            await updater.checkMainPluginVersionQuiet();
+
+            expect(h.risu.nativeFetch).not.toHaveBeenCalled();
+            expect(h.risu.risuFetch).not.toHaveBeenCalled();
         });
     });
 });

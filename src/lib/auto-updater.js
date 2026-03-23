@@ -403,6 +403,14 @@ export const autoUpdaterMethods = {
             if (/** @type {any} */ (window)._cpmMainVersionChecked) return;
             /** @type {any} */ (window)._cpmMainVersionChecked = true;
 
+            // ── Early exit: auto-update OFF → skip heavy JS download ──
+            // Manifest path (checkVersionsQuiet) handles lightweight toast notifications.
+            // This fallback downloads the full 50-70KB JS file, which is excessive for OFF users.
+            if (await safeGetBoolArg('cpm_disable_autoupdate', false)) {
+                console.log('[CPM MainAutoCheck] Auto-update disabled. Skipping heavy JS fallback download.');
+                return;
+            }
+
             try {
                 const lastCheck = await Risu.pluginStorage.getItem(this._MAIN_VERSION_CHECK_STORAGE_KEY);
                 if (lastCheck) {
@@ -1041,6 +1049,14 @@ export const autoUpdaterMethods = {
     async autoBootstrapBundledPlugins() {
         const LOG = '[CPM Bootstrap]';
         try {
+            // ── Early exit: auto-update OFF → skip bundle fetch & auto-install ──
+            // Skips 50KB+ bundle download + JSON parsing + SHA-256 computation.
+            // Existing sub-plugins in registry are unaffected (executeEnabled runs normally).
+            if (await safeGetBoolArg('cpm_disable_autoupdate', false)) {
+                console.log(`${LOG} Auto-update disabled. Skipping bundle fetch and auto-bootstrap.`);
+                return [];
+            }
+
             const cacheBuster = this.UPDATE_BUNDLE_URL + '?_t=' + Date.now() + '&_r=' + Math.random().toString(36).substr(2, 8);
             const result = await Risu.risuFetch(cacheBuster, { method: 'GET', plainFetchForce: true });
 
