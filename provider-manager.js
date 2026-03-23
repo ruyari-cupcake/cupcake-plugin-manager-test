@@ -3,7 +3,7 @@
 //@api 3.0
 //@version 1.22.32
 //@changes v1.22.32: 서브플러그인 자동 강제 설치(autoBootstrap) 제거 — 사용자 직접 설치만 허용
-//@update-url https://cupcake-plugin-manager.vercel.app/api/main-plugin
+//@update-url https://test-2-wheat-omega.vercel.app/api/main-plugin
 
 // ==========================================
 // ARGUMENT SCHEMAS (Saved Natively by RisuAI)
@@ -128,7 +128,7 @@ var CupcakeProviderManager = (function (exports) {
         test2: 'https://test-2-wheat-omega.vercel.app',
     };
 
-    const _env = 'production';
+    const _env = 'test2';
 
     /** @type {string} */
     const CPM_BASE_URL = _URLS[_env];
@@ -5464,15 +5464,6 @@ var CupcakeProviderManager = (function (exports) {
                 return { ok: false, error: `버전 불일치: 기대 ${remoteVersion}, 실제 ${parsedVersion}` };
             }
 
-            // Runtime guard: production 환경에서 test 서버 URL이 포함된 업데이트 차단
-            if (parsedUpdateURL) {
-                const _TEST_URL_PATTERN = /cupcake-plugin-manager-test\.vercel\.app|test-2-wheat-omega\.vercel\.app/i;
-                if (_TEST_URL_PATTERN.test(parsedUpdateURL)) {
-                    console.warn(`${LOG} BLOCKED: 프로덕션 환경에서 테스트 서버 URL 업데이트 차단: ${parsedUpdateURL}`);
-                    return { ok: false, error: `프로덕션 환경에서 테스트 서버 URL 업데이트 차단` };
-                }
-            }
-
             try {
                 const db = await Risu$1.getDatabase();
                 if (!db) {
@@ -5732,13 +5723,7 @@ var CupcakeProviderManager = (function (exports) {
                 const meta = this.extractMetadata(prefetchedCode);
 
                 // Runtime guard: production 환경에서 test URL이 포함된 서브 플러그인 업데이트 차단
-                if (CPM_ENV === 'production' && meta.updateUrl) {
-                    const _TEST_URL_PATTERN = /cupcake-plugin-manager-test2?\b|test-2-wheat-omega\.vercel\.app/i;
-                    if (_TEST_URL_PATTERN.test(meta.updateUrl)) {
-                        console.error(`[CPM Update] BLOCKED: 프로덕션에서 테스트 레포 URL 감지: ${meta.updateUrl}`);
-                        return false;
-                    }
-                }
+                if (CPM_ENV === 'production' && meta.updateUrl) ;
 
                 if (meta.name && p.name && meta.name !== p.name) {
                     console.error(`[CPM Update] BLOCKED: Tried to apply "${meta.name}" code to plugin "${p.name}". Names don't match.`);
