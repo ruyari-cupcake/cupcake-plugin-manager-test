@@ -1,7 +1,7 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.16
+//@version 1.22.18
 //@changes v1.22.16: v1.22.12 안정 코드 기반 긴급 롤백 (Copilot 400 에러 해결)
 //@update-url https://test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app/api/main-plugin
 

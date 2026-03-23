@@ -125,7 +125,7 @@ export async function fetchByProviderId(modelDef, args, abortSignal, _reqId) {
             const _so = args._cpmSlotThinkingConfig || {};
 
             const _fetchConfig = {
-                url: cDef.url, key: cDef.key, model: cDef.model, proxyUrl: cDef.proxyUrl || '', proxyDirect: !!cDef.proxyDirect, proxyKey: cDef.proxyKey || '',
+                url: cDef.url, key: cDef.key, model: cDef.model, proxyUrl: cDef.proxyUrl || '', proxyDirect: !!cDef.proxyDirect,
                 format: cDef.format || 'openai',
                 authType: cDef.authType || 'api_key',
                 sysfirst: !!cDef.sysfirst, altrole: !!cDef.altrole,

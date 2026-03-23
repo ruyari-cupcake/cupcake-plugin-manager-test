@@ -1,9 +1,9 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.16
+//@version 1.22.18
 //@changes v1.22.16: v1.22.12 안정 코드 기반 긴급 롤백 (Copilot 400 에러 해결)
-//@update-url https://test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app/api/main-plugin
+//@update-url https://cupcake-plugin-manager.vercel.app/api/main-plugin
 
 // ==========================================
 // ARGUMENT SCHEMAS (Saved Natively by RisuAI)
@@ -128,7 +128,7 @@ var CupcakeProviderManager = (function (exports) {
         test2: 'https://test-2-gzzwcegiw-preyari94-9916s-projects.vercel.app',
     };
 
-    const _env = 'test2';
+    const _env = 'production';
 
     /** @type {string} */
     const CPM_BASE_URL = _URLS[_env];
@@ -195,7 +195,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.22.16';
+    const CPM_VERSION = '1.22.18';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -1356,31 +1356,19 @@ var CupcakeProviderManager = (function (exports) {
         return /gemini-2\.0-flash-lite-preview|gemini-2\.0-pro-exp/.test(String(modelId).toLowerCase());
     }
 
-    /**
-     * Detect any Gemini model (2.x, 3.x, etc.).
-     * Matches: gemini-2.5-flash, gemini-3-pro, gemini-2.5-flash-preview, etc.
-     * @param {string} modelName
-     * @returns {boolean}
-     */
-    function isGeminiFamily(modelName) {
-        if (!modelName) return false;
-        return /gemini/i.test(String(modelName));
-    }
-
     // ═══════════════════════════════════════════════════════
     //  OpenAI / Copilot higher-level helpers
     // ═══════════════════════════════════════════════════════
 
     /**
      * Check if a model supports OpenAI reasoning_effort parameter.
-     * Matches o3/o4 variants, GPT-5 family, and Gemini models (via Copilot API).
-     * Gemini models on Copilot use reasoning_effort for thinking control.
+     * Matches o3/o4 variants and GPT-5 family.
      * @param {string} modelName
      * @returns {boolean}
      */
     function supportsOpenAIReasoningEffort(modelName) {
         if (!modelName) return false;
-        return isO3O4Family(modelName) || isGPT5Family(modelName) || isGeminiFamily(modelName);
+        return isO3O4Family(modelName) || isGPT5Family(modelName);
     }
 
     /**
@@ -5415,6 +5403,15 @@ var CupcakeProviderManager = (function (exports) {
                 return { ok: false, error: `버전 불일치: 기대 ${remoteVersion}, 실제 ${parsedVersion}` };
             }
 
+            // Runtime guard: production 환경에서 test 서버 URL이 포함된 업데이트 차단
+            if (parsedUpdateURL) {
+                const _TEST_URL_PATTERN = /cupcake-plugin-manager-test\.vercel\.app|test-2-[a-z0-9]+-[a-z0-9]+-[a-z0-9]+-projects\.vercel\.app/i;
+                if (_TEST_URL_PATTERN.test(parsedUpdateURL)) {
+                    console.warn(`${LOG} BLOCKED: 프로덕션 환경에서 테스트 서버 URL 업데이트 차단: ${parsedUpdateURL}`);
+                    return { ok: false, error: `프로덕션 환경에서 테스트 서버 URL 업데이트 차단` };
+                }
+            }
+
             try {
                 const db = await Risu$1.getDatabase();
                 if (!db) {
@@ -5674,7 +5671,13 @@ var CupcakeProviderManager = (function (exports) {
                 const meta = this.extractMetadata(prefetchedCode);
 
                 // Runtime guard: production 환경에서 test URL이 포함된 서브 플러그인 업데이트 차단
-                if (CPM_ENV === 'production' && meta.updateUrl) ;
+                if (CPM_ENV === 'production' && meta.updateUrl) {
+                    const _TEST_URL_PATTERN = /cupcake-plugin-manager-test2?\b/i;
+                    if (_TEST_URL_PATTERN.test(meta.updateUrl)) {
+                        console.error(`[CPM Update] BLOCKED: 프로덕션에서 테스트 레포 URL 감지: ${meta.updateUrl}`);
+                        return false;
+                    }
+                }
 
                 if (meta.name && p.name && meta.name !== p.name) {
                     console.error(`[CPM Update] BLOCKED: Tried to apply "${meta.name}" code to plugin "${p.name}". Names don't match.`);
@@ -6824,7 +6827,7 @@ var CupcakeProviderManager = (function (exports) {
         }
         const _isProxied = !!_proxyUrl;
         const _proxyDirect = !!config.proxyDirect;
-        const _proxyKey = (config.proxyKey || '').trim();
+        const _proxyKey = (config.proxyKey || '').trim().replace(/[\r\n]/g, '');
         // 범용 프록시 지원: Rewrite 전 원래 대상 URL 저장 (X-Target-URL 헤더로 전달)
         const _originalTargetUrl = effectiveUrl || '';
         if (_proxyUrl && effectiveUrl) {
@@ -6843,7 +6846,10 @@ var CupcakeProviderManager = (function (exports) {
                         _proxyPath = _proxyPath.substring(4);
                         console.log(`[Cupcake PM] Proxy Rewrite: stripped /api prefix → ${_proxyPath}`);
                     }
-                    effectiveUrl = _proxyBase.origin + _proxyBase.pathname.replace(/\/+$/, '') + _proxyPath + _origUrl.search;
+                    effectiveUrl = _proxyBase.origin + _proxyBase.pathname.replace(/\/+$/, '') + _proxyPath
+                        + (_proxyBase.search && _origUrl.search
+                            ? _proxyBase.search + '&' + _origUrl.search.substring(1)
+                            : _proxyBase.search || _origUrl.search);
                     console.log(`[Cupcake PM] CORS Proxy (Rewrite mode) active → ${effectiveUrl}`);
                 } catch (_e) {
                     console.error(`[Cupcake PM] ❌ Invalid proxyUrl "${_proxyUrl}" — proxy NOT applied. URL 형식을 확인하세요 (예: https://my-server.kr/proxy).`, _e);
@@ -8380,7 +8386,7 @@ var CupcakeProviderManager = (function (exports) {
                 const _so = args._cpmSlotThinkingConfig || {};
 
                 const _fetchConfig = {
-                    url: cDef.url, key: cDef.key, model: cDef.model, proxyUrl: cDef.proxyUrl || '', proxyDirect: !!cDef.proxyDirect, proxyKey: cDef.proxyKey || '',
+                    url: cDef.url, key: cDef.key, model: cDef.model, proxyUrl: cDef.proxyUrl || '', proxyDirect: !!cDef.proxyDirect,
                     format: cDef.format || 'openai',
                     authType: cDef.authType || 'api_key',
                     sysfirst: !!cDef.sysfirst, altrole: !!cDef.altrole,
