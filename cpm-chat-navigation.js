@@ -4,7 +4,7 @@
 //@description 채팅 메시지 네비게이션 (4버튼 → 2버튼 → 키보드 → OFF 순환, Chat Limiter 연동)
 //@icon 🧭
 //@author Cupcake
-//@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager-test2/main/cpm-chat-navigation.js
+//@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-chat-navigation.js
 
 /**
  * ======== CUPCAKE PM Sub-Plugin: Chat Navigation v2.1.2 ========

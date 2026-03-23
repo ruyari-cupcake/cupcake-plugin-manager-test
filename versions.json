@@ -60,8 +60,8 @@
     "changes": "v0.2.1: 설정 UI 이벤트 리스너 정리 — 핫 리로드 시 중복 방지"
   },
   "Cupcake Provider Manager": {
-    "version": "1.22.30",
+    "version": "1.22.31",
     "file": "provider-manager.js",
-    "changes": "v1.22.30: 서브플러그인 UI name-based fallback, Auto-Bootstrap, cleanup 강화 (onUnload, 리스너 정리)"
+    "changes": "v1.22.31: 자동 업데이트 OFF 시 과부하 다운로드 차단 (checkMainPluginVersionQuiet, autoBootstrapBundledPlugins)"
   }
 }

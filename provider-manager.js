@@ -1,9 +1,9 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.30
-//@changes v1.22.30: 서브플러그인 UI 매칭 수정, Auto-Bootstrap, cleanup 강화, Chat Limiter v0.2.1
-//@update-url https://test-2-wheat-omega.vercel.app/api/main-plugin
+//@version 1.22.31
+//@changes v1.22.31: 자동 업데이트 OFF 시 과부하 다운로드 차단 (checkMainPluginVersionQuiet, autoBootstrapBundledPlugins)
+//@update-url https://cupcake-plugin-manager.vercel.app/api/main-plugin
 
 // ==========================================
 // ARGUMENT SCHEMAS (Saved Natively by RisuAI)
@@ -128,7 +128,7 @@ var CupcakeProviderManager = (function (exports) {
         test2: 'https://test-2-wheat-omega.vercel.app',
     };
 
-    const _env = 'test2';
+    const _env = 'production';
 
     /** @type {string} */
     const CPM_BASE_URL = _URLS[_env];
@@ -195,7 +195,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.22.30';
+    const CPM_VERSION = '1.22.31';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -5464,6 +5464,15 @@ var CupcakeProviderManager = (function (exports) {
                 return { ok: false, error: `버전 불일치: 기대 ${remoteVersion}, 실제 ${parsedVersion}` };
             }
 
+            // Runtime guard: production 환경에서 test 서버 URL이 포함된 업데이트 차단
+            if (parsedUpdateURL) {
+                const _TEST_URL_PATTERN = /cupcake-plugin-manager-test\.vercel\.app|test-2-wheat-omega\.vercel\.app/i;
+                if (_TEST_URL_PATTERN.test(parsedUpdateURL)) {
+                    console.warn(`${LOG} BLOCKED: 프로덕션 환경에서 테스트 서버 URL 업데이트 차단: ${parsedUpdateURL}`);
+                    return { ok: false, error: `프로덕션 환경에서 테스트 서버 URL 업데이트 차단` };
+                }
+            }
+
             try {
                 const db = await Risu$1.getDatabase();
                 if (!db) {
@@ -5723,7 +5732,13 @@ var CupcakeProviderManager = (function (exports) {
                 const meta = this.extractMetadata(prefetchedCode);
 
                 // Runtime guard: production 환경에서 test URL이 포함된 서브 플러그인 업데이트 차단
-                if (CPM_ENV === 'production' && meta.updateUrl) ;
+                if (CPM_ENV === 'production' && meta.updateUrl) {
+                    const _TEST_URL_PATTERN = /cupcake-plugin-manager-test2?\b|test-2-wheat-omega\.vercel\.app/i;
+                    if (_TEST_URL_PATTERN.test(meta.updateUrl)) {
+                        console.error(`[CPM Update] BLOCKED: 프로덕션에서 테스트 레포 URL 감지: ${meta.updateUrl}`);
+                        return false;
+                    }
+                }
 
                 if (meta.name && p.name && meta.name !== p.name) {
                     console.error(`[CPM Update] BLOCKED: Tried to apply "${meta.name}" code to plugin "${p.name}". Names don't match.`);

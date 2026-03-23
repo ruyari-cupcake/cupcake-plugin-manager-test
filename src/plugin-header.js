@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.30
-//@changes v1.22.30: 서브플러그인 UI 매칭 수정, Auto-Bootstrap, cleanup 강화, Chat Limiter v0.2.1
+//@version 1.22.31
+//@changes v1.22.31: 자동 업데이트 OFF 시 과부하 다운로드 차단 (checkMainPluginVersionQuiet, autoBootstrapBundledPlugins)
 //@update-url https://test-2-wheat-omega.vercel.app/api/main-plugin
 
 // ==========================================

@@ -1,72 +1,72 @@
 {
-  "timestamp": "2026-03-23T13:05:16.472Z",
-  "version": "1.22.30",
+  "timestamp": "2026-03-23T13:55:59.146Z",
+  "version": "1.22.31",
   "files": {
     "cpm-provider-vertex.js": {
       "version": "1.6.7",
-      "sha256": "fbb856a29fe82530a2d6a536e66e72577e1a0e35f3fa98bc342f71b2150a835b",
-      "size": 41119
+      "sha256": "b4b5c03c61289360d0cc948f6b690c510097d51e650ed4226eb14e921361adff",
+      "size": 41113
     },
     "cpm-provider-gemini.js": {
       "version": "1.6.6",
-      "sha256": "7aad80d32c23f0846b7805982d032178d906b428e0890a429f567696d320f932",
-      "size": 15453
+      "sha256": "10de33ad6def6b153e20c8f0a263df3afa0558b56fd2b49b091bbab47caf5b92",
+      "size": 15447
     },
     "cpm-provider-anthropic.js": {
       "version": "1.6.8",
-      "sha256": "05820fe66255c4cf033fd48c0c4033c011b9f2079eb04acfbf128be7f12b485d",
-      "size": 17359
+      "sha256": "7dd0e16e405560414f35ed46c1e0d30c26217de888531f5c8b7d46ff97afd8dc",
+      "size": 17353
     },
     "cpm-provider-openai.js": {
       "version": "1.5.9",
-      "sha256": "d8116e3125dc0eff5953e82897046d6ee7eb74e16a00185669850a1cfdc7210e",
-      "size": 23691
+      "sha256": "6f3e92ef1b291163e27ca3005d05189ed3911e0ed4647af4554110361360813e",
+      "size": 23685
     },
     "cpm-provider-deepseek.js": {
       "version": "1.4.5",
-      "sha256": "457b7f2dd08e6c02d9ff40215b41ec64021d73570ff9d482cdd99d6125ba196d",
-      "size": 10180
+      "sha256": "760841d248509ab7a9bc23a01ff97e783ae4a60a858aa8a4b6a84be96dcae015",
+      "size": 10174
     },
     "cpm-provider-openrouter.js": {
       "version": "1.3.6",
-      "sha256": "5da333ca986ce7165870945d657d6a3bc8ef7aa581411cde644741bae86d418c",
-      "size": 11147
+      "sha256": "a64843cc9a19d8eff6939f43f27155c9c4f5d3cac918532b82c37ae0c4601d99",
+      "size": 11141
     },
     "cpm-provider-aws.js": {
       "version": "1.5.3",
-      "sha256": "48479dd80d59bb6bf52b3799bd9753301c886e1219fd51a3a1a5d936034d1d52",
-      "size": 27541
+      "sha256": "fbb24636ffd0c21e902f719aebf81563ec97d5f5170e0286176a2dc5055fcb61",
+      "size": 27535
     },
     "cpm-chat-resizer.js": {
       "version": "0.3.7",
-      "sha256": "6a1d753349c7aaeff17fac54b3dff29aa29e64ed4cf8c1a28fd0fb1d31f2664b",
-      "size": 22252
+      "sha256": "7112188667c6223d7daf239784e9a80e6ea41948e94b455df613ce90e19e172a",
+      "size": 22246
     },
     "cpm-copilot-manager.js": {
       "version": "1.7.14",
-      "sha256": "bd0a94c635c4befeadbd0df04616fc1a54e0db17c5c7efd270404de3c328ca9a",
-      "size": 74475
+      "sha256": "56a8007f599cf8649846875c5b955ab23965c823575cd2372643515237e13907",
+      "size": 74469
     },
     "cpm-translation-cache.js": {
       "version": "1.4.0",
-      "sha256": "7c02d88331bc5a4d3337fd1b41749055ebaae3b6c98edaf47b6e1d6cd05e9dde",
-      "size": 52600
+      "sha256": "8e4d36cab4cb1b526f54a88fa928c354d7d03e6994d395f5876a6595e990b3e4",
+      "size": 52594
     },
     "cpm-chat-navigation.js": {
       "version": "2.1.5",
-      "sha256": "82f0396bcb12d00783176c01699dd59a13addf0c3d6d8ab661d6d9bc1d32f215",
-      "size": 23128
+      "sha256": "4046454ae37427a2dcfa3fa271ccba316523963e5d64b90fb1fa7c71994854ea",
+      "size": 23122
     },
     "cpm-chat-limiter.js": {
       "version": "0.2.1",
-      "sha256": "a6f66cb8d00584b0d4b13931b152949ce40cf38977760530c01017c20ecefef9",
-      "size": 13228
+      "sha256": "6e341e7006644ea836d7867862eb2082fa96fc1e5db41baecd1196b5eecb990a",
+      "size": 13222
     },
     "provider-manager.js": {
-      "version": "1.22.30",
-      "sha256": "aaa6870dd3127efdfff3f74737eb04e631919d50c3a2fc726f945d856d3a13a1",
-      "size": 625549
+      "version": "1.22.31",
+      "sha256": "e52b324d7464283fd3bdf670a7c65425cbc414f5154f5ec32e798d7f7c899b1e",
+      "size": 626444
     }
   },
-  "bundleHash": "71088c07eb8b3da96f57bf9429b9af0d8416e9a562dc2e019406a1ae000aee2f"
+  "bundleHash": "b4abcce185d4088d7fc9d53f44e24785a665d1e2de4e008c55a8981dec745dff"
 }
