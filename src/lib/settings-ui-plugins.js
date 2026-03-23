@@ -32,6 +32,77 @@ function asContainer(el) {
     return /** @type {HTMLElement} */ (el);
 }
 
+/**
+ * Show a delete modal with 2 options: registry-only or full data deletion.
+ * @param {string} pluginName
+ * @param {string} pluginId
+ * @param {() => void} renderPluginsTab
+ */
+function _showDeleteModal(pluginName, pluginId, renderPluginsTab) {
+    // Remove any existing modal
+    const existing = document.getElementById('cpm-delete-modal');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'cpm-delete-modal';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:99999;';
+    overlay.innerHTML = `
+        <div style="background:#1f2937;border:1px solid #374151;border-radius:12px;padding:24px;max-width:420px;width:90%;box-shadow:0 25px 50px rgba(0,0,0,0.5);">
+            <h3 style="color:#f87171;font-size:16px;font-weight:700;margin:0 0 8px;">🗑️ 서브 플러그인 삭제</h3>
+            <p style="color:#d1d5db;font-size:13px;margin:0 0 16px;">
+                <strong style="color:#fff;">${escHtml(pluginName)}</strong> 플러그인을 삭제합니다.<br>
+                삭제 방식을 선택하세요.
+            </p>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+                <button id="cpm-del-registry-only" style="background:#4b5563;color:#fff;border:none;padding:10px 16px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;text-align:left;transition:background 0.15s;">
+                    🗑️ 플러그인만 삭제
+                    <span style="display:block;color:#9ca3af;font-size:11px;font-weight:400;margin-top:2px;">레지스트리에서만 제거합니다. 저장된 데이터(캐시, 설정 등)는 남아있습니다.</span>
+                </button>
+                <button id="cpm-del-with-data" style="background:#991b1b;color:#fff;border:none;padding:10px 16px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;text-align:left;transition:background 0.15s;">
+                    💀 데이터 포함 전부 삭제
+                    <span style="display:block;color:#fca5a5;font-size:11px;font-weight:400;margin-top:2px;">플러그인 + 해당 플러그인이 저장한 모든 데이터를 삭제합니다. 되돌릴 수 없습니다.</span>
+                </button>
+                <button id="cpm-del-cancel" style="background:transparent;color:#9ca3af;border:1px solid #374151;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:13px;transition:background 0.15s;">
+                    취소
+                </button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    // Close on overlay background click
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) overlay.remove();
+    });
+
+    /** @type {HTMLButtonElement} */ (document.getElementById('cpm-del-cancel')).addEventListener('click', () => overlay.remove());
+
+    /** @type {HTMLButtonElement} */ (document.getElementById('cpm-del-registry-only')).addEventListener('click', async () => {
+        overlay.remove();
+        SubPluginManager.unloadPlugin(pluginId);
+        await SubPluginManager.remove(pluginId);
+        renderPluginsTab();
+    });
+
+    /** @type {HTMLButtonElement} */ (document.getElementById('cpm-del-with-data')).addEventListener('click', async () => {
+        const confirmed = confirm(
+            `⚠️ "${pluginName}"의 모든 저장 데이터도 함께 삭제됩니다.\n\n` +
+            `이 작업은 되돌릴 수 없습니다. 계속하시겠습니까?`
+        );
+        if (!confirmed) return;
+        overlay.remove();
+        SubPluginManager.unloadPlugin(pluginId);
+        const result = await SubPluginManager.removeWithData(pluginId);
+        const keyCount = result.removedKeys.length;
+        if (keyCount > 0) {
+            alert(`✅ "${pluginName}" 삭제 완료!\n\n삭제된 데이터 키: ${keyCount}개\n${result.removedKeys.join('\n')}`);
+        } else {
+            alert(`✅ "${pluginName}" 삭제 완료!\n\n(해당 플러그인의 저장 데이터가 발견되지 않았습니다.)`);
+        }
+        renderPluginsTab();
+    });
+}
+
 // ── Helper: Sub-Plugins tab renderer ──
 export function buildPluginsTabRenderer(/** @type {any} */ setVal) {
     const renderPluginsTab = () => {
@@ -76,6 +147,22 @@ export function buildPluginsTabRenderer(/** @type {any} */ setVal) {
             }
             html += '</div><style>.cpm-plugin-toggle:checked ~ .custom-toggle-bg{background-color:#3b82f6;} .cpm-plugin-toggle:checked ~ .dot{transform:translateX(100%);}</style>';
         }
+
+        // ── Residual (Orphaned) Data Cleanup Section ──
+        html += `
+            <div class="mt-8 pt-6 border-t border-gray-700">
+                <div class="bg-yellow-900/20 border border-yellow-700/50 rounded-lg p-5">
+                    <h4 class="text-lg font-bold text-yellow-400 mb-2">🧹 잔류 데이터 정리</h4>
+                    <p class="text-xs text-gray-400 mb-3">
+                        삭제된 서브 플러그인이 남긴 데이터를 찾아 정리합니다. 현재 설치되지 않은 플러그인의 데이터만 표시됩니다.
+                    </p>
+                    <button id="cpm-scan-orphans-btn" class="bg-yellow-700 hover:bg-yellow-600 text-white font-bold py-2 px-5 rounded transition-colors text-sm">
+                        🔍 잔류 데이터 검색
+                    </button>
+                    <div id="cpm-orphan-results" class="mt-3 hidden"></div>
+                </div>
+            </div>
+        `;
 
         // ── Purge All CPM Data Section ──
         html += `
@@ -150,16 +237,71 @@ export function buildPluginsTabRenderer(/** @type {any} */ setVal) {
         listContainer.querySelectorAll('.cpm-plugin-delete').forEach(btn => {
             btn.addEventListener('click', async (e) => {
                 const id = asButton(e.target).getAttribute('data-id') || '';
-                if (confirm('정말로 이 플러그인을 삭제하시겠습니까?')) {
-                    SubPluginManager.unloadPlugin(/** @type {string} */ (id));
-                    await SubPluginManager.remove(/** @type {string} */ (id));
-                    renderPluginsTab();
-                }
+                const plugin = SubPluginManager.plugins.find(p => p.id === id);
+                const pluginName = plugin ? plugin.name : id;
+                _showDeleteModal(pluginName, id, renderPluginsTab);
             });
         });
 
         // Update check button
         initUpdateCheckButton(renderPluginsTab);
+
+        // ── Orphan Data Scan handler ──
+        const scanOrphansBtn = document.getElementById('cpm-scan-orphans-btn');
+        if (scanOrphansBtn) {
+            scanOrphansBtn.addEventListener('click', async () => {
+                const resultsDiv = document.getElementById('cpm-orphan-results');
+                if (!resultsDiv) return;
+                const scanButton = asButton(scanOrphansBtn);
+                scanButton.disabled = true;
+                scanButton.textContent = '⏳ 검색 중...';
+                resultsDiv.classList.remove('hidden');
+                resultsDiv.innerHTML = '<p class="text-gray-400 text-sm">잔류 데이터를 스캔하고 있습니다...</p>';
+
+                try {
+                    const orphans = await SubPluginManager.findOrphanedPluginData();
+                    if (orphans.length === 0) {
+                        resultsDiv.innerHTML = '<p class="text-green-400 text-sm font-semibold bg-green-900/30 rounded p-3">✅ 잔류 데이터가 없습니다. 깨끗한 상태입니다.</p>';
+                    } else {
+                        let rhtml = '<div class="space-y-2">';
+                        rhtml += `<p class="text-yellow-300 text-sm font-semibold">${orphans.length}개 플러그인의 잔류 데이터가 발견되었습니다.</p>`;
+                        for (const o of orphans) {
+                            rhtml += `
+                                <div class="flex items-center justify-between bg-gray-800 rounded p-3">
+                                    <div>
+                                        <span class="text-white font-semibold text-sm">${escHtml(o.pluginName)}</span>
+                                        <span class="text-gray-500 text-xs ml-2">(${o.keys.length}개 키)</span>
+                                    </div>
+                                    <button class="cpm-purge-orphan bg-red-700 hover:bg-red-600 text-white text-xs font-bold px-3 py-1 rounded" data-name="${escHtml(o.pluginName)}">
+                                        🗑️ 삭제
+                                    </button>
+                                </div>
+                            `;
+                        }
+                        rhtml += '</div>';
+                        resultsDiv.innerHTML = rhtml;
+
+                        // Bind individual orphan purge buttons
+                        resultsDiv.querySelectorAll('.cpm-purge-orphan').forEach(btn => {
+                            btn.addEventListener('click', async (ev) => {
+                                const purgeOrphanBtn = asButton(ev.target);
+                                const name = purgeOrphanBtn.getAttribute('data-name') || '';
+                                if (!confirm(`"${name}"의 잔류 데이터를 삭제하시겠습니까?`)) return;
+                                purgeOrphanBtn.disabled = true;
+                                purgeOrphanBtn.textContent = '⏳ 삭제 중...';
+                                const count = await SubPluginManager.purgeOrphanedPluginData(name);
+                                purgeOrphanBtn.textContent = `✅ ${count}개 삭제됨`;
+                            });
+                        });
+                    }
+                } catch (err) {
+                    console.error('[CPM Orphan Scan]', err);
+                    resultsDiv.innerHTML = '<p class="text-red-400 text-sm font-semibold bg-red-900/30 rounded p-3">❌ 스캔 중 오류가 발생했습니다.</p>';
+                }
+                scanButton.disabled = false;
+                scanButton.textContent = '🔍 잔류 데이터 검색';
+            });
+        }
 
         // ── Purge All CPM Data handler (double confirmation) ──
         const purgeBtn = document.getElementById('cpm-purge-all-btn');

@@ -289,17 +289,18 @@ describe('buildPluginsTabRenderer — plugin list rendering', () => {
         const render = buildPluginsTabRenderer(setVal);
         render();
 
-        // Mock confirm to return true
-        vi.spyOn(window, 'confirm').mockReturnValue(true);
-
         const deleteBtn = document.querySelector('.cpm-plugin-delete');
         if (deleteBtn) {
             deleteBtn.click();
             await new Promise(r => setTimeout(r, 50));
+            // Modal should appear — click "registry only" button
+            const registryOnlyBtn = document.getElementById('cpm-del-registry-only');
+            if (registryOnlyBtn) {
+                registryOnlyBtn.click();
+                await new Promise(r => setTimeout(r, 50));
+            }
             expect(h.mockSubPluginManager.remove).toHaveBeenCalled();
         }
-
-        vi.restoreAllMocks();
     });
 });
 

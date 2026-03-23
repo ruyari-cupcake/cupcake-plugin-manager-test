@@ -225,7 +225,7 @@ describe('buildPluginsTabRenderer', () => {
         expect(mockSubPluginManager.hotReload).toHaveBeenCalledWith('sp1');
     });
 
-    it('delete handler unloads and removes plugin after confirmation', async () => {
+    it('delete handler unloads and removes plugin after confirmation (registry only)', async () => {
         mockSubPluginManager.plugins = [{ id: 'sp1', name: 'Alpha', enabled: true }];
         document.body.innerHTML = '<div id="cpm-plugins-list"></div>';
         buildPluginsTabRenderer(vi.fn())();
@@ -233,20 +233,53 @@ describe('buildPluginsTabRenderer', () => {
         document.querySelector('.cpm-plugin-delete').click();
         await Promise.resolve();
 
-        expect(globalThis.confirm).toHaveBeenCalled();
+        // Modal should appear — click "registry only" button
+        const registryOnlyBtn = document.getElementById('cpm-del-registry-only');
+        expect(registryOnlyBtn).toBeTruthy();
+        registryOnlyBtn.click();
+        await Promise.resolve();
+
         expect(mockSubPluginManager.unloadPlugin).toHaveBeenCalledWith('sp1');
         expect(mockSubPluginManager.remove).toHaveBeenCalledWith('sp1');
     });
 
-    it('delete handler aborts when confirmation is declined', async () => {
+    it('delete handler with data option calls removeWithData', async () => {
         mockSubPluginManager.plugins = [{ id: 'sp1', name: 'Alpha', enabled: true }];
-        globalThis.confirm = vi.fn(() => false);
+        mockSubPluginManager.removeWithData = vi.fn(async () => ({ removedKeys: ['pluginStorage:test_key'] }));
+        globalThis.confirm = vi.fn(() => true);
         document.body.innerHTML = '<div id="cpm-plugins-list"></div>';
         buildPluginsTabRenderer(vi.fn())();
 
         document.querySelector('.cpm-plugin-delete').click();
         await Promise.resolve();
 
+        const withDataBtn = document.getElementById('cpm-del-with-data');
+        expect(withDataBtn).toBeTruthy();
+        withDataBtn.click();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(globalThis.confirm).toHaveBeenCalled();
+        expect(mockSubPluginManager.unloadPlugin).toHaveBeenCalledWith('sp1');
+        expect(mockSubPluginManager.removeWithData).toHaveBeenCalledWith('sp1');
+    });
+
+    it('delete handler aborts when cancel is clicked', async () => {
+        mockSubPluginManager.plugins = [{ id: 'sp1', name: 'Alpha', enabled: true }];
+        document.body.innerHTML = '<div id="cpm-plugins-list"></div>';
+        buildPluginsTabRenderer(vi.fn())();
+
+        document.querySelector('.cpm-plugin-delete').click();
+        await Promise.resolve();
+
+        // Modal should appear — click cancel
+        const cancelBtn = document.getElementById('cpm-del-cancel');
+        expect(cancelBtn).toBeTruthy();
+        cancelBtn.click();
+        await Promise.resolve();
+
+        // Modal should be removed
+        expect(document.getElementById('cpm-delete-modal')).toBeNull();
         expect(mockSubPluginManager.unloadPlugin).not.toHaveBeenCalled();
         expect(mockSubPluginManager.remove).not.toHaveBeenCalled();
     });
