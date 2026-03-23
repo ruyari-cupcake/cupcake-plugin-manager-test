@@ -1,7 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.34
+//@version 1.22.35
+//@changes v1.22.35: normalizedName 대시 제거 버그 수정, 데이터 관리 테스트 31건 추가
 //@changes v1.22.34: 잔류데이터 키매핑 완전화, 서브플러그인 데이터 백업/복원 기능 추가
 //@update-url https://test-2-wheat-omega.vercel.app/api/main-plugin
 
@@ -195,7 +196,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.22.34';
+    const CPM_VERSION = '1.22.35';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -6250,12 +6251,12 @@ var CupcakeProviderManager = (function (exports) {
             // Covers ALL CPM sub-plugins. Plugins with no storage keys have empty arrays.
             const KNOWN_KEYS = this._getKnownKeysMap();
 
-            // Normalize plugin name for lookup
-            const normalizedName = pluginName.toLowerCase().replace(/\s+/g, '').replace(/_/g, '');
+            // Normalize plugin name for lookup (strip spaces, underscores, and dashes)
+            const normalizedName = pluginName.toLowerCase().replace(/[\s_-]+/g, '');
 
             // Check known keys
             for (const [pattern, keys] of Object.entries(KNOWN_KEYS)) {
-                const patternNorm = pattern.toLowerCase().replace(/\s+/g, '').replace(/_/g, '').replace(/-/g, '');
+                const patternNorm = pattern.toLowerCase().replace(/[\s_-]+/g, '');
                 if (normalizedName.includes(patternNorm) || patternNorm.includes(normalizedName)) {
                     // Delete pluginStorage keys
                     if (keys.pluginStorage) {
@@ -6448,12 +6449,12 @@ var CupcakeProviderManager = (function (exports) {
 
             // Collect from pluginStorage (known keys + prefix scan)
             const shortNames = _buildPluginShortNames(pluginName);
-            const normalizedName = pluginName.toLowerCase().replace(/\s+/g, '').replace(/_/g, '');
+            const normalizedName = pluginName.toLowerCase().replace(/[\s_-]+/g, '');
 
             // Known key lookup
             const KNOWN_KEYS = this._getKnownKeysMap();
             for (const [pattern, keys] of Object.entries(KNOWN_KEYS)) {
-                const patternNorm = pattern.toLowerCase().replace(/\s+/g, '').replace(/_/g, '').replace(/-/g, '');
+                const patternNorm = pattern.toLowerCase().replace(/[\s_-]+/g, '');
                 if (!(normalizedName.includes(patternNorm) || patternNorm.includes(normalizedName))) continue;
                 if (keys.pluginStorage) {
                     for (const key of keys.pluginStorage) {

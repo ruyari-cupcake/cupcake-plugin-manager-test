@@ -38,6 +38,7 @@ const USER_AGENT = `GitHubCopilotChat/${CHAT_VERSION}`;
 const TOKEN_USER_AGENT = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Code/${CODE_VERSION} Chrome/${CHROME_VERSION} Electron/${ELECTRON_VERSION} Safari/537.36`;
 // Token exchange API version (CPM copilot-headers.js GITHUB_TOKEN_API_VERSION과 동일)
 const GITHUB_TOKEN_API_VERSION = "2024-12-15";
+const __VERSION = "2.1.0-diag";
 
 const COPILOT_PATHS = new Set([
   "/chat/completions",
@@ -160,6 +161,7 @@ export default {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
 
+    try {
     const url = new URL(request.url);
 
     // ── Health check ──
@@ -168,6 +170,7 @@ export default {
         JSON.stringify({
           status: "ok",
           type: "universal-cors-proxy",
+          version: __VERSION,
           modes: [
             "X-Target-URL header (recommended — CPM auto-sends)",
             "URL-in-URL: /https://api.example.com/v1/chat/completions",
@@ -212,6 +215,12 @@ export default {
         "또는 URL-in-URL 형식: /https://api.target.com/v1/chat/completions",
       400
     );
+    } catch (_ue) {
+      return new Response(
+        JSON.stringify({ error: 'Worker unhandled error', name: _ue.name, detail: _ue.message }),
+        { status: 500, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } }
+      );
+    }
   },
 };
 
@@ -310,27 +319,28 @@ async function handleCopilotProxy(request, url, copilotAuth, overridePath) {
     return jsonError(e.message, 401);
   }
 
+  let _step = 'read-body';
+  try {
   const rawBody = await request.text();
+
+  _step = 'detect-stream';
   const clientWantsStream =
     rawBody.includes('"stream":true') || rawBody.includes('"stream": true');
 
+  _step = 'build-request';
   const sessionId = crypto.randomUUID() + Date.now().toString();
   const targetPath = normalizeCopilotPath(overridePath || url.pathname);
   const copilotUrl = `${COPILOT_API_BASE}${targetPath}`;
 
-  // ── 비스트리밍 요청도 Copilot에는 stream:true 강제 주입 ──
-  // CF Workers는 subrequest 응답 헤더 도착까지 ~30s 제한.
-  // 비스트리밍이면 Copilot이 전체 생성 후에야 첫 바이트를 보내므로
-  // 대형 모델(Claude Opus 등)에서 524 발생. 스트리밍이면 첫 이벤트가 빠르게 도착.
+  // ── CF Workers 524 방지: 비스트리밍도 stream:true 강제 ──
+  // JSON.parse/stringify 대신 문자열 치환으로 CPU 절약 (80KB+ body)
   let bodyForCopilot = rawBody;
   const forceStream = !clientWantsStream;
   if (forceStream) {
-    try {
-      const parsed = JSON.parse(rawBody);
-      parsed.stream = true;
-      bodyForCopilot = JSON.stringify(parsed);
-    } catch {
-      // JSON 파싱 실패 시 원본 그대로 전송
+    if (rawBody.includes('"stream"')) {
+      bodyForCopilot = rawBody.replace(/"stream"\s*:\s*(?:false|null)\b/, '"stream":true');
+    } else {
+      bodyForCopilot = '{"stream":true,' + rawBody.slice(1);
     }
   }
 
@@ -357,13 +367,14 @@ async function handleCopilotProxy(request, url, copilotAuth, overridePath) {
       request.headers.get("anthropic-version") || "2023-06-01";
   }
 
-  try {
+  _step = 'fetch-copilot';
     const response = await fetch(copilotUrl, {
       method: "POST",
       headers: copilotHeaders,
       body: bodyForCopilot,
     });
 
+    _step = 'handle-response';
     // ── 에러 응답은 그대로 반환 ──
     if (!response.ok) {
       const responseHeaders = new Headers(response.headers);
@@ -390,7 +401,8 @@ async function handleCopilotProxy(request, url, copilotAuth, overridePath) {
       });
     }
 
-    // ── 클라이언트가 비스트리밍 → SSE 읽어서 JSON 재조립 ──
+    // ── 비스트리밍: SSE → JSON 재조립 ──
+    _step = 'sse-reassemble';
     const contentType = (response.headers.get("content-type") || "").toLowerCase();
 
     // Copilot이 stream:true를 무시하고 JSON을 돌려줄 수도 있음
@@ -405,18 +417,36 @@ async function handleCopilotProxy(request, url, copilotAuth, overridePath) {
       });
     }
 
-    // SSE 재조립: 포맷별 분기 (Anthropic /v1/messages vs OpenAI /chat/completions)
+    // TransformStream으로 즉시 Response 반환 — SSE 조립은 비동기
+    // 클라이언트 연결을 먼저 확보하여 타임아웃 방지
     const isAnthropic = targetPath === "/v1/messages";
-    const assembled = isAnthropic
-      ? await reassembleAnthropicSSE(response)
-      : await reassembleOpenAISSE(response);
+    const { readable, writable } = new TransformStream();
+    const _enc = new TextEncoder();
 
-    return new Response(JSON.stringify(assembled), {
+    (async () => {
+      const writer = writable.getWriter();
+      try {
+        const assembled = isAnthropic
+          ? await reassembleAnthropicSSE(response)
+          : await reassembleOpenAISSE(response);
+        await writer.write(_enc.encode(JSON.stringify(assembled)));
+      } catch (e) {
+        await writer.write(_enc.encode(JSON.stringify({
+          error: `SSE reassembly failed: ${e.message}`
+        }))).catch(() => {});
+      }
+      await writer.close().catch(() => {});
+    })();
+
+    return new Response(readable, {
       status: 200,
       headers: { "Content-Type": "application/json", ...CORS_HEADERS },
     });
   } catch (err) {
-    return jsonError(`Copilot proxy fetch failed: ${err.message}`, 502);
+    return jsonError(
+      `Copilot proxy error [${_step}]: ${err.name || 'Error'}: ${err.message}`,
+      502
+    );
   }
 }
 
@@ -424,6 +454,7 @@ async function handleCopilotProxy(request, url, copilotAuth, overridePath) {
 // Anthropic SSE → 비스트리밍 JSON 재조립
 // ══════════════════════════════════════════════════════════
 async function reassembleAnthropicSSE(response) {
+  if (!response.body) return { error: 'Response body is null', status: response.status };
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -497,6 +528,7 @@ async function reassembleAnthropicSSE(response) {
 // OpenAI SSE → 비스트리밍 JSON 재조립
 // ══════════════════════════════════════════════════════════
 async function reassembleOpenAISSE(response) {
+  if (!response.body) return { error: 'Response body is null', status: response.status };
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";

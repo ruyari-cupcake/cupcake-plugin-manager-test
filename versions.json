@@ -60,8 +60,8 @@
     "changes": "v0.2.1: 설정 UI 이벤트 리스너 정리 — 핫 리로드 시 중복 방지"
   },
   "Cupcake Provider Manager": {
-    "version": "1.22.34",
+    "version": "1.22.35",
     "file": "provider-manager.js",
-    "changes": "v1.22.34: 잔류데이터 키매핑 완전화, 서브플러그인 데이터 백업/복원 기능 추가"
+    "changes": "v1.22.35: normalizedName 대시 제거 버그 수정, 데이터 관리 테스트 31건 추가"
   }
 }

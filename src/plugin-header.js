@@ -1,7 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.34
+//@version 1.22.35
+//@changes v1.22.35: normalizedName 대시 제거 버그 수정, 데이터 관리 테스트 31건 추가
 //@changes v1.22.34: 잔류데이터 키매핑 완전화, 서브플러그인 데이터 백업/복원 기능 추가
 //@update-url https://test-2-wheat-omega.vercel.app/api/main-plugin
 

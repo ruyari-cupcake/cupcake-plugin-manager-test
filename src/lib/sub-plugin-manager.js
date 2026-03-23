@@ -229,12 +229,12 @@ export const SubPluginManager = {
         // Covers ALL CPM sub-plugins. Plugins with no storage keys have empty arrays.
         const KNOWN_KEYS = this._getKnownKeysMap();
 
-        // Normalize plugin name for lookup
-        const normalizedName = pluginName.toLowerCase().replace(/\s+/g, '').replace(/_/g, '');
+        // Normalize plugin name for lookup (strip spaces, underscores, and dashes)
+        const normalizedName = pluginName.toLowerCase().replace(/[\s_-]+/g, '');
 
         // Check known keys
         for (const [pattern, keys] of Object.entries(KNOWN_KEYS)) {
-            const patternNorm = pattern.toLowerCase().replace(/\s+/g, '').replace(/_/g, '').replace(/-/g, '');
+            const patternNorm = pattern.toLowerCase().replace(/[\s_-]+/g, '');
             if (normalizedName.includes(patternNorm) || patternNorm.includes(normalizedName)) {
                 // Delete pluginStorage keys
                 if (keys.pluginStorage) {
@@ -427,12 +427,12 @@ export const SubPluginManager = {
 
         // Collect from pluginStorage (known keys + prefix scan)
         const shortNames = _buildPluginShortNames(pluginName);
-        const normalizedName = pluginName.toLowerCase().replace(/\s+/g, '').replace(/_/g, '');
+        const normalizedName = pluginName.toLowerCase().replace(/[\s_-]+/g, '');
 
         // Known key lookup
         const KNOWN_KEYS = this._getKnownKeysMap();
         for (const [pattern, keys] of Object.entries(KNOWN_KEYS)) {
-            const patternNorm = pattern.toLowerCase().replace(/\s+/g, '').replace(/_/g, '').replace(/-/g, '');
+            const patternNorm = pattern.toLowerCase().replace(/[\s_-]+/g, '');
             if (!(normalizedName.includes(patternNorm) || patternNorm.includes(normalizedName))) continue;
             if (keys.pluginStorage) {
                 for (const key of keys.pluginStorage) {
