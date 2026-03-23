@@ -31,7 +31,13 @@ const COPILOT_TOKEN_URL = "https://api.github.com/copilot_internal/v2/token";
 const COPILOT_API_BASE = "https://api.githubcopilot.com";
 const CHAT_VERSION = "0.40.2026031401";
 const CODE_VERSION = "1.111.0";
+const CHROME_VERSION = "142.0.7444.265";
+const ELECTRON_VERSION = "39.3.0";
 const USER_AGENT = `GitHubCopilotChat/${CHAT_VERSION}`;
+// Token exchange 용 브라우저 UA (CPM과 동일 — 최신 모델 접근 권한 확보에 필수)
+const TOKEN_USER_AGENT = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Code/${CODE_VERSION} Chrome/${CHROME_VERSION} Electron/${ELECTRON_VERSION} Safari/537.36`;
+// Token exchange API version (CPM copilot-headers.js GITHUB_TOKEN_API_VERSION과 동일)
+const GITHUB_TOKEN_API_VERSION = "2024-12-15";
 
 const COPILOT_PATHS = new Set([
   "/chat/completions",
@@ -77,7 +83,10 @@ async function refreshTidToken(apiKey) {
     headers: {
       Accept: "application/json",
       Authorization: `Bearer ${apiKey}`,
-      "User-Agent": USER_AGENT,
+      "User-Agent": TOKEN_USER_AGENT,
+      "Editor-Version": `vscode/${CODE_VERSION}`,
+      "Editor-Plugin-Version": `copilot-chat/${CHAT_VERSION}`,
+      "X-GitHub-Api-Version": GITHUB_TOKEN_API_VERSION,
     },
   });
 
@@ -272,6 +281,9 @@ async function handleGenericProxy(request, targetUrl, mode) {
 // ══════════════════════════════════════════════════════════
 // Copilot 호환 프록시 핸들러
 // ══════════════════════════════════════════════════════════
+// 비스트리밍 요청도 Copilot에는 stream:true로 보내서 CF 524 타임아웃 방지.
+// 클라이언트가 비스트리밍이면 SSE를 읽어 JSON으로 재조립해서 반환.
+// ══════════════════════════════════════════════════════════
 async function handleCopilotProxy(request, url, copilotAuth, overridePath) {
   if (request.method !== "POST") {
     return jsonError("Method Not Allowed", 405);
@@ -299,20 +311,36 @@ async function handleCopilotProxy(request, url, copilotAuth, overridePath) {
   }
 
   const rawBody = await request.text();
-  const isStream =
+  const clientWantsStream =
     rawBody.includes('"stream":true') || rawBody.includes('"stream": true');
 
   const sessionId = crypto.randomUUID() + Date.now().toString();
   const targetPath = normalizeCopilotPath(overridePath || url.pathname);
   const copilotUrl = `${COPILOT_API_BASE}${targetPath}`;
 
+  // ── 비스트리밍 요청도 Copilot에는 stream:true 강제 주입 ──
+  // CF Workers는 subrequest 응답 헤더 도착까지 ~30s 제한.
+  // 비스트리밍이면 Copilot이 전체 생성 후에야 첫 바이트를 보내므로
+  // 대형 모델(Claude Opus 등)에서 524 발생. 스트리밍이면 첫 이벤트가 빠르게 도착.
+  let bodyForCopilot = rawBody;
+  const forceStream = !clientWantsStream;
+  if (forceStream) {
+    try {
+      const parsed = JSON.parse(rawBody);
+      parsed.stream = true;
+      bodyForCopilot = JSON.stringify(parsed);
+    } catch {
+      // JSON 파싱 실패 시 원본 그대로 전송
+    }
+  }
+
   const copilotHeaders = {
     Authorization: `Bearer ${tidToken}`,
-    Accept: isStream ? 'text/event-stream' : 'application/json',
+    Accept: 'text/event-stream',
     "Content-Type": "application/json",
     "Copilot-Integration-Id": "vscode-chat",
-    "Editor-plugin-version": `copilot-chat/${CHAT_VERSION}`,
-    "Editor-version": `vscode/${CODE_VERSION}`,
+    "Editor-Plugin-Version": `copilot-chat/${CHAT_VERSION}`,
+    "Editor-Version": `vscode/${CODE_VERSION}`,
     "User-Agent": USER_AGENT,
     "Vscode-Machineid": generateHexId(64),
     "Vscode-Sessionid": sessionId,
@@ -333,20 +361,210 @@ async function handleCopilotProxy(request, url, copilotAuth, overridePath) {
     const response = await fetch(copilotUrl, {
       method: "POST",
       headers: copilotHeaders,
-      body: rawBody,
+      body: bodyForCopilot,
     });
 
-    const responseHeaders = new Headers(response.headers);
-    for (const [k, v] of Object.entries(CORS_HEADERS)) {
-      responseHeaders.set(k, v);
+    // ── 에러 응답은 그대로 반환 ──
+    if (!response.ok) {
+      const responseHeaders = new Headers(response.headers);
+      for (const [k, v] of Object.entries(CORS_HEADERS)) {
+        responseHeaders.set(k, v);
+      }
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: responseHeaders,
+      });
     }
 
-    return new Response(response.body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers: responseHeaders,
+    // ── 클라이언트가 스트리밍 원함 → 그대로 파이프 ──
+    if (clientWantsStream) {
+      const responseHeaders = new Headers(response.headers);
+      for (const [k, v] of Object.entries(CORS_HEADERS)) {
+        responseHeaders.set(k, v);
+      }
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: responseHeaders,
+      });
+    }
+
+    // ── 클라이언트가 비스트리밍 → SSE 읽어서 JSON 재조립 ──
+    const contentType = (response.headers.get("content-type") || "").toLowerCase();
+
+    // Copilot이 stream:true를 무시하고 JSON을 돌려줄 수도 있음
+    if (contentType.includes("application/json")) {
+      const responseHeaders = new Headers(response.headers);
+      for (const [k, v] of Object.entries(CORS_HEADERS)) {
+        responseHeaders.set(k, v);
+      }
+      return new Response(response.body, {
+        status: response.status,
+        headers: responseHeaders,
+      });
+    }
+
+    // SSE 재조립: 포맷별 분기 (Anthropic /v1/messages vs OpenAI /chat/completions)
+    const isAnthropic = targetPath === "/v1/messages";
+    const assembled = isAnthropic
+      ? await reassembleAnthropicSSE(response)
+      : await reassembleOpenAISSE(response);
+
+    return new Response(JSON.stringify(assembled), {
+      status: 200,
+      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
     });
   } catch (err) {
     return jsonError(`Copilot proxy fetch failed: ${err.message}`, 502);
   }
+}
+
+// ══════════════════════════════════════════════════════════
+// Anthropic SSE → 비스트리밍 JSON 재조립
+// ══════════════════════════════════════════════════════════
+async function reassembleAnthropicSSE(response) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let message = null;
+  const contentBlocks = [];
+  const blockTexts = {};
+  let stopReason = null;
+  let outputUsage = {};
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const data = line.slice(6).trim();
+      if (data === "[DONE]" || !data) continue;
+      try {
+        const ev = JSON.parse(data);
+        switch (ev.type) {
+          case "message_start":
+            message = ev.message;
+            break;
+          case "content_block_start":
+            contentBlocks[ev.index] = ev.content_block;
+            blockTexts[ev.index] = "";
+            break;
+          case "content_block_delta":
+            if (ev.delta?.type === "text_delta") {
+              blockTexts[ev.index] = (blockTexts[ev.index] || "") + (ev.delta.text || "");
+            } else if (ev.delta?.type === "thinking_delta") {
+              blockTexts[ev.index] = (blockTexts[ev.index] || "") + (ev.delta.thinking || "");
+            } else if (ev.delta?.type === "signature_delta") {
+              // signature는 content_block에 직접 설정
+              if (contentBlocks[ev.index]) contentBlocks[ev.index].signature = ev.delta.signature;
+            }
+            break;
+          case "message_delta":
+            if (ev.delta?.stop_reason) stopReason = ev.delta.stop_reason;
+            if (ev.usage) outputUsage = ev.usage;
+            break;
+        }
+      } catch { /* ignore malformed JSON */ }
+    }
+  }
+
+  if (!message) return { error: "No message_start event received from Copilot" };
+
+  // content 재조립
+  message.content = contentBlocks.map((block, i) => {
+    const text = blockTexts[i] || "";
+    if (block.type === "thinking") return { ...block, thinking: text };
+    if (block.type === "text") return { ...block, text };
+    return block;
+  });
+  if (stopReason) message.stop_reason = stopReason;
+  if (outputUsage && Object.keys(outputUsage).length > 0) {
+    message.usage = { ...(message.usage || {}), ...outputUsage };
+  }
+  // stream 필드 제거 (클라이언트는 비스트리밍 기대)
+  delete message.stream;
+
+  return message;
+}
+
+// ══════════════════════════════════════════════════════════
+// OpenAI SSE → 비스트리밍 JSON 재조립
+// ══════════════════════════════════════════════════════════
+async function reassembleOpenAISSE(response) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result = null;
+  const choiceContents = {}; // index → accumulated content
+  const choiceReasoningContents = {}; // index → accumulated reasoning
+  let finishReason = null;
+  let usage = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const data = line.slice(6).trim();
+      if (data === "[DONE]" || !data) continue;
+      try {
+        const ev = JSON.parse(data);
+        if (!result) {
+          result = {
+            id: ev.id || "",
+            object: "chat.completion",
+            created: ev.created || Math.floor(Date.now() / 1000),
+            model: ev.model || "",
+            choices: [],
+          };
+        }
+        if (ev.usage) usage = ev.usage;
+        if (ev.choices) {
+          for (const choice of ev.choices) {
+            const idx = choice.index || 0;
+            if (choice.delta?.content) {
+              choiceContents[idx] = (choiceContents[idx] || "") + choice.delta.content;
+            }
+            if (choice.delta?.reasoning_content) {
+              choiceReasoningContents[idx] = (choiceReasoningContents[idx] || "") + choice.delta.reasoning_content;
+            }
+            if (choice.finish_reason) finishReason = choice.finish_reason;
+          }
+        }
+      } catch { /* ignore */ }
+    }
+  }
+
+  if (!result) return { error: "No SSE events received from Copilot" };
+
+  // choices 재조립
+  const indices = new Set([
+    ...Object.keys(choiceContents).map(Number),
+    ...Object.keys(choiceReasoningContents).map(Number),
+  ]);
+  if (indices.size === 0) indices.add(0);
+
+  result.choices = [...indices].sort().map((idx) => ({
+    index: idx,
+    message: {
+      role: "assistant",
+      content: choiceContents[idx] || "",
+      ...(choiceReasoningContents[idx] ? { reasoning_content: choiceReasoningContents[idx] } : {}),
+    },
+    finish_reason: finishReason || "stop",
+  }));
+  if (usage) result.usage = usage;
+
+  return result;
 }

@@ -139,6 +139,10 @@ export function buildPluginsTabRenderer(/** @type {any} */ setVal) {
                                     <div class="dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition transform"></div>
                                 </div></label>
                                 <button class="cpm-plugin-delete text-red-500 hover:text-red-400 text-xs font-bold px-2 py-1 bg-gray-700 rounded" data-id="${p.id}">🗑️ 삭제</button>
+                                <div class="flex space-x-1">
+                                    <button class="cpm-plugin-backup text-blue-400 hover:text-blue-300 text-xs font-bold px-2 py-1 bg-gray-700 rounded" data-id="${p.id}" title="데이터 백업">📦</button>
+                                    <button class="cpm-plugin-restore text-green-400 hover:text-green-300 text-xs font-bold px-2 py-1 bg-gray-700 rounded" data-id="${p.id}" title="데이터 복원">📥</button>
+                                </div>
                             </div>
                         </div>
                         <div class="border-t border-gray-700 pt-3 mt-3 plugin-ui-container" id="plugin-ui-${p.id}"></div>
@@ -240,6 +244,76 @@ export function buildPluginsTabRenderer(/** @type {any} */ setVal) {
                 const plugin = SubPluginManager.plugins.find(p => p.id === id);
                 const pluginName = plugin ? plugin.name : id;
                 _showDeleteModal(pluginName, id, renderPluginsTab);
+            });
+        });
+
+        // Backup handlers
+        listContainer.querySelectorAll('.cpm-plugin-backup').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                const backupBtn = asButton(e.target);
+                const id = backupBtn.getAttribute('data-id') || '';
+                backupBtn.disabled = true;
+                backupBtn.textContent = '⏳';
+                try {
+                    const backup = await SubPluginManager.backupPluginData(id);
+                    if (!backup) { alert('⚠️ 플러그인을 찾을 수 없습니다.'); return; }
+                    const json = JSON.stringify(backup, null, 2);
+                    const blob = new Blob([json], { type: 'application/json' });
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    const safeName = backup.pluginName.replace(/[^a-zA-Z0-9가-힣_-]/g, '_');
+                    a.download = `cpm-backup-${safeName}-${new Date().toISOString().slice(0, 10)}.json`;
+                    a.click();
+                    URL.revokeObjectURL(a.href);
+                    const keyCount = backup.storageData.length;
+                    alert(`✅ "${backup.pluginName}" 백업 완료!\n\n백업된 데이터 키: ${keyCount}개`);
+                } catch (err) {
+                    alert('❌ 백업 실패: ' + (/** @type {Error} */ (err).message || err));
+                }
+                backupBtn.disabled = false;
+                backupBtn.textContent = '📦';
+            });
+        });
+
+        // Restore handlers
+        listContainer.querySelectorAll('.cpm-plugin-restore').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const restoreBtn = asButton(e.target);
+                const id = restoreBtn.getAttribute('data-id') || '';
+                const plugin = SubPluginManager.plugins.find(p => p.id === id);
+                if (!plugin) return;
+
+                const fileInput = document.createElement('input');
+                fileInput.type = 'file';
+                fileInput.accept = '.json';
+                fileInput.addEventListener('change', async (ev) => {
+                    const file = asInput(ev.target).files?.[0];
+                    if (!file) return;
+                    restoreBtn.disabled = true;
+                    restoreBtn.textContent = '⏳';
+                    try {
+                        const text = await file.text();
+                        const backup = JSON.parse(text);
+                        if (!backup.pluginName || !backup.storageData) {
+                            alert('⚠️ 올바른 CPM 백업 파일이 아닙니다.');
+                            return;
+                        }
+                        if (backup.pluginName !== plugin.name) {
+                            const ok = confirm(
+                                `⚠️ 백업 파일의 플러그인 이름이 다릅니다.\n\n` +
+                                `백업: ${backup.pluginName}\n현재: ${plugin.name}\n\n그래도 복원하시겠습니까?`
+                            );
+                            if (!ok) return;
+                        }
+                        const result = await SubPluginManager.restorePluginData(backup);
+                        alert(`✅ "${backup.pluginName}" 데이터 복원 완료!\n\n복원된 키: ${result.restoredKeys.length}개`);
+                    } catch (err) {
+                        alert('❌ 복원 실패: ' + (/** @type {Error} */ (err).message || err));
+                    }
+                    restoreBtn.disabled = false;
+                    restoreBtn.textContent = '📥';
+                });
+                fileInput.click();
             });
         });
 

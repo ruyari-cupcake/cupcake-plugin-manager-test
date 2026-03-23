@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.22.33
-//@changes v1.22.33: 서브플러그인 삭제 시 2가지 옵션(레지스트리만/데이터 포함), 잔류 데이터 정리 기능 추가
+//@version 1.22.34
+//@changes v1.22.34: 잔류데이터 키매핑 완전화, 서브플러그인 데이터 백업/복원 기능 추가
 //@update-url https://test-2-wheat-omega.vercel.app/api/main-plugin
 
 // ==========================================

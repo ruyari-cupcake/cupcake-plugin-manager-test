@@ -60,8 +60,8 @@
     "changes": "v0.2.1: 설정 UI 이벤트 리스너 정리 — 핫 리로드 시 중복 방지"
   },
   "Cupcake Provider Manager": {
-    "version": "1.22.33",
+    "version": "1.22.34",
     "file": "provider-manager.js",
-    "changes": "v1.22.33: 서브플러그인 삭제 시 2가지 옵션(레지스트리만/데이터 포함), 잔류 데이터 정리 기능 추가"
+    "changes": "v1.22.34: 잔류데이터 키매핑 완전화, 서브플러그인 데이터 백업/복원 기능 추가"
   }
 }

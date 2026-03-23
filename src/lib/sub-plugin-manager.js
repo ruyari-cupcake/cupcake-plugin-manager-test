@@ -24,7 +24,7 @@ export { _computeSHA256 };
 
 /**
  * Build short identifiers from a plugin name for key scanning.
- * e.g. "CPM Component - Translation Cache" → ['transcache', 'translationcache']
+ * e.g. "CPM Component - Translation Cache Manager" → ['translationcachemanager', 'translationcache']
  * e.g. "CPM Provider - Anthropic" → ['anthropic']
  * @param {string} pluginName
  * @returns {string[]}
@@ -39,17 +39,15 @@ function _buildPluginShortNames(pluginName) {
         .replace(/\s+/g, '');
     if (stripped.length >= 3) names.push(stripped);
 
-    // Also try with underscores/hyphens removed
-    const noSep = lower.replace(/[^a-z0-9]/g, '');
-    // Short slug: last meaningful word(s) after "cpm component" or "cpm provider"
+    // Short slug: meaningful words joined after "cpm component" or "cpm provider"
     const parts = lower.split(/[-–—:\s]+/).filter(Boolean);
     const meaningful = parts.filter(p => !['cpm', 'component', 'provider', '-', '–', '—'].includes(p));
     if (meaningful.length > 0) {
         const joined = meaningful.join('');
         if (joined.length >= 3 && !names.includes(joined)) names.push(joined);
-        // Also add last word alone if it's meaningful (≥4 chars)
+        // Only add last word alone if it's very specific (≥ 7 chars, avoids generic words like 'cache')
         const last = meaningful[meaningful.length - 1];
-        if (last && last.length >= 4 && !names.includes(last)) names.push(last);
+        if (last && last.length >= 7 && !names.includes(last)) names.push(last);
     }
 
     return names;
@@ -228,15 +226,8 @@ export const SubPluginManager = {
         const nameLower = pluginName.toLowerCase().replace(/[^a-z0-9]/g, '');
 
         // Known mapping: plugin name → storage keys (pluginStorage + safeLocalStorage)
-        /** @type {Record<string, {pluginStorage?: string[], safeLocalStorage?: string[]}>} */
-        const KNOWN_KEYS = {
-            'cpmcomponent-translationcache': {
-                pluginStorage: ['cpm_transcache_corrections', 'cpm_transcache_timestamps'],
-            },
-            'cpmcomponent-chatlimiter': {
-                safeLocalStorage: ['cpm_chat_limiter_active', 'cpm_chat_limiter_count'],
-            },
-        };
+        // Covers ALL CPM sub-plugins. Plugins with no storage keys have empty arrays.
+        const KNOWN_KEYS = this._getKnownKeysMap();
 
         // Normalize plugin name for lookup
         const normalizedName = pluginName.toLowerCase().replace(/\s+/g, '').replace(/_/g, '');
@@ -326,14 +317,13 @@ export const SubPluginManager = {
         /** @type {Map<string, string[]>} */
         const orphanMap = new Map();
 
-        // Known mapping: key prefix → display name
+        // Known mapping: key prefix → display name (for ALL sub-plugins that use storage)
+        // Only sub-plugins that actually create storage keys need prefix mapping.
+        // Sub-plugins with no storage (Navigation, Resizer, Copilot, Providers) won't have orphan keys.
         /** @type {Record<string, string>} */
         const KEY_TO_PLUGIN = {
-            'cpm_transcache': 'CPM Component - Translation Cache',
+            'cpm_transcache': 'CPM Component - Translation Cache Manager',
             'cpm_chat_limiter': 'CPM Component - Chat Limiter',
-            'cpm_chat_navi': 'CPM Component - Chat Navigation',
-            'cpm_resizer': 'CPM Component - Chat Resizer',
-            'cpm_copilot': 'CPM Component - Copilot Manager',
         };
 
         /**
@@ -419,6 +409,148 @@ export const SubPluginManager = {
         }
         console.log(`[CPM] Purged ${count} orphaned key(s) for "${pluginName}"`);
         return count;
+    },
+
+    /**
+     * Backup a sub-plugin's data (code + associated storage keys).
+     * Returns a JSON-serializable backup object that can be saved/exported.
+     * @param {string} id  sub-plugin id
+     * @returns {Promise<{pluginName: string, pluginMeta: object, storageData: Array<{storage: string, key: string, value: any}>} | null>}
+     */
+    async backupPluginData(id) {
+        const plugin = this.plugins.find(p => p.id === id);
+        if (!plugin) return null;
+
+        const pluginName = plugin.name;
+        /** @type {Array<{storage: string, key: string, value: any}>} */
+        const storageData = [];
+
+        // Collect from pluginStorage (known keys + prefix scan)
+        const shortNames = _buildPluginShortNames(pluginName);
+        const normalizedName = pluginName.toLowerCase().replace(/\s+/g, '').replace(/_/g, '');
+
+        // Known key lookup
+        const KNOWN_KEYS = this._getKnownKeysMap();
+        for (const [pattern, keys] of Object.entries(KNOWN_KEYS)) {
+            const patternNorm = pattern.toLowerCase().replace(/\s+/g, '').replace(/_/g, '').replace(/-/g, '');
+            if (!(normalizedName.includes(patternNorm) || patternNorm.includes(normalizedName))) continue;
+            if (keys.pluginStorage) {
+                for (const key of keys.pluginStorage) {
+                    try {
+                        const val = await Risu.pluginStorage.getItem(key);
+                        if (val !== null && val !== undefined) storageData.push({ storage: 'pluginStorage', key, value: val });
+                    } catch (_) { /* ignore */ }
+                }
+            }
+            if (keys.safeLocalStorage) {
+                for (const key of keys.safeLocalStorage) {
+                    try {
+                        const val = await Risu.safeLocalStorage.getItem(key);
+                        if (val !== null && val !== undefined) storageData.push({ storage: 'safeLocalStorage', key, value: val });
+                    } catch (_) { /* ignore */ }
+                }
+            }
+        }
+
+        // Prefix scan pluginStorage
+        try {
+            const allKeys = await Risu.pluginStorage.keys();
+            for (const key of allKeys) {
+                if (this._PLUGIN_STORAGE_KEYS.includes(key)) continue;
+                if (storageData.some(d => d.storage === 'pluginStorage' && d.key === key)) continue;
+                const keyLower = key.toLowerCase();
+                if (shortNames.some(sn => keyLower.includes(sn))) {
+                    try {
+                        const val = await Risu.pluginStorage.getItem(key);
+                        if (val !== null && val !== undefined) storageData.push({ storage: 'pluginStorage', key, value: val });
+                    } catch (_) { /* ignore */ }
+                }
+            }
+        } catch (_) { /* ignore */ }
+
+        // Prefix scan safeLocalStorage
+        try {
+            if (Risu.safeLocalStorage && typeof Risu.safeLocalStorage.keys === 'function') {
+                const allLocalKeys = await Risu.safeLocalStorage.keys();
+                for (const key of allLocalKeys) {
+                    if (!key.startsWith('cpm_') && !key.startsWith('cpm-')) continue;
+                    if (storageData.some(d => d.storage === 'safeLocalStorage' && d.key === key)) continue;
+                    const keyLower = key.toLowerCase();
+                    if (shortNames.some(sn => keyLower.includes(sn))) {
+                        try {
+                            const val = await Risu.safeLocalStorage.getItem(key);
+                            if (val !== null && val !== undefined) storageData.push({ storage: 'safeLocalStorage', key, value: val });
+                        } catch (_) { /* ignore */ }
+                    }
+                }
+            }
+        } catch (_) { /* ignore */ }
+
+        return {
+            pluginName,
+            pluginMeta: { id: plugin.id, name: plugin.name, version: plugin.version, enabled: plugin.enabled, icon: plugin.icon, description: plugin.description },
+            storageData,
+        };
+    },
+
+    /**
+     * Restore a sub-plugin's data from a backup object.
+     * Only restores storage keys that belong to the target plugin (cpm_ prefixed).
+     * Does NOT modify the plugin registry — just restores data.
+     * @param {{pluginName: string, pluginMeta: object, storageData: Array<{storage: string, key: string, value: any}>}} backup
+     * @returns {Promise<{restoredKeys: string[]}>}
+     */
+    async restorePluginData(backup) {
+        /** @type {string[]} */
+        const restoredKeys = [];
+        if (!backup || !Array.isArray(backup.storageData)) {
+            return { restoredKeys };
+        }
+
+        for (const entry of backup.storageData) {
+            // Safety: only restore cpm_ prefixed keys, never core system keys
+            if (this._PLUGIN_STORAGE_KEYS.includes(entry.key)) continue;
+            if (!entry.key.startsWith('cpm_') && !entry.key.startsWith('cpm-')) continue;
+
+            try {
+                if (entry.storage === 'pluginStorage') {
+                    await Risu.pluginStorage.setItem(entry.key, entry.value);
+                    restoredKeys.push(`pluginStorage:${entry.key}`);
+                } else if (entry.storage === 'safeLocalStorage') {
+                    await Risu.safeLocalStorage.setItem(entry.key, entry.value);
+                    restoredKeys.push(`safeLocalStorage:${entry.key}`);
+                }
+            } catch (_) { /* ignore */ }
+        }
+
+        console.log(`[CPM] Restored ${restoredKeys.length} key(s) for "${backup.pluginName}":`, restoredKeys);
+        return { restoredKeys };
+    },
+
+    /**
+     * Returns the known keys mapping (shared between _purgePluginData, backupPluginData).
+     * @returns {Record<string, {pluginStorage?: string[], safeLocalStorage?: string[]}>}
+     */
+    _getKnownKeysMap() {
+        return {
+            'cpmcomponent-translationcachemanager': {
+                pluginStorage: ['cpm_transcache_corrections', 'cpm_transcache_timestamps'],
+            },
+            'cpmcomponent-chatlimiter': {
+                safeLocalStorage: ['cpm_chat_limiter_active', 'cpm_chat_limiter_count'],
+            },
+            'cpmcomponent-chatnavigation': {},
+            'cpmcomponent-chatinputresizer': {},
+            'cpmcomponent-copilottokenmanager': {},
+            'cpmcomponent-autotranslatelastcharalpha': {},
+            'cpmprovider-anthropic': {},
+            'cpmprovider-awsbedrock': {},
+            'cpmprovider-deepseek': {},
+            'cpmprovider-geministudio': {},
+            'cpmprovider-openai': {},
+            'cpmprovider-openrouter': {},
+            'cpmprovider-vertexai': {},
+        };
     },
 
     /**
