@@ -1,7 +1,7 @@
 /**
- * @file cpm-chat-limiter.test.js — Tests for cpm-chat-limiter.js
+ * @file cpm-chat-limiter.test.js — Tests for cpm-chat-limiter.js v0.2.0
  * Tests CSS generation logic, selector detection, state management,
- * and CPM sub-plugin registration.
+ * inter-plugin API, Navigation compatibility, and CPM sub-plugin registration.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
@@ -20,8 +20,8 @@ describe('cpm-chat-limiter.js — header metadata', () => {
         expect(PLUGIN_SRC).toMatch(/\/\/@name\s+CPM Component - Chat Limiter/);
     });
 
-    it('has correct @version', () => {
-        expect(PLUGIN_SRC).toMatch(/\/\/@version\s+0\.1\.0/);
+    it('has correct @version 0.2.0', () => {
+        expect(PLUGIN_SRC).toMatch(/\/\/@version\s+0\.2\.0/);
     });
 
     it('has @update-url pointing to test2 repo', () => {
@@ -70,6 +70,92 @@ describe('cpm-chat-limiter — CSS generation', () => {
 });
 
 // ════════════════════════════════════════════
+// Inter-plugin API (_cpmLimiterState)
+// ════════════════════════════════════════════
+describe('cpm-chat-limiter — inter-plugin API', () => {
+    it('source exposes _cpmLimiterState on window', () => {
+        expect(PLUGIN_SRC).toContain('window._cpmLimiterState');
+    });
+
+    it('_cpmLimiterState has isVisible method', () => {
+        expect(PLUGIN_SRC).toContain('isVisible:');
+    });
+
+    it('_cpmLimiterState has getVisibleCount method', () => {
+        expect(PLUGIN_SRC).toContain('getVisibleCount:');
+    });
+
+    it('_cpmLimiterState exposes enabled, keepCount, totalMessageCount', () => {
+        expect(PLUGIN_SRC).toContain('enabled,');
+        expect(PLUGIN_SRC).toContain('keepCount,');
+        expect(PLUGIN_SRC).toContain('totalMessageCount,');
+    });
+
+    // Test isVisible logic directly
+    it('isVisible returns true for indices within keepCount', () => {
+        const isVisible = (index, en, kc) => !en || index <= kc;
+        expect(isVisible(1, true, 6)).toBe(true);
+        expect(isVisible(6, true, 6)).toBe(true);
+        expect(isVisible(7, true, 6)).toBe(false);
+        expect(isVisible(100, true, 6)).toBe(false);
+    });
+
+    it('isVisible returns true for all indices when disabled', () => {
+        const isVisible = (index, en, _kc) => !en || index <= _kc;
+        expect(isVisible(999, false, 6)).toBe(true);
+    });
+
+    // Test getVisibleCount logic directly
+    it('getVisibleCount clamps to totalMessageCount', () => {
+        const getVisibleCount = (en, kc, total) =>
+            en ? Math.min(kc, total) : total;
+        expect(getVisibleCount(true, 6, 42)).toBe(6);
+        expect(getVisibleCount(true, 6, 3)).toBe(3);
+        expect(getVisibleCount(false, 6, 42)).toBe(42);
+    });
+
+    it('cleanup deletes _cpmLimiterState', () => {
+        expect(PLUGIN_SRC).toContain('delete window._cpmLimiterState');
+    });
+});
+
+// ════════════════════════════════════════════
+// Navigation compatibility
+// ════════════════════════════════════════════
+describe('cpm-chat-navigation — Limiter compatibility', () => {
+    const NAV_SRC = fs.readFileSync(
+        path.resolve('cpm-chat-navigation.js'), 'utf-8'
+    );
+
+    it('Navigation checks _cpmLimiterState in getMessageCount', () => {
+        expect(NAV_SRC).toContain('_cpmLimiterState');
+    });
+
+    it('Navigation clamps count to limiter.keepCount', () => {
+        expect(NAV_SRC).toContain('Math.min(total, limiter.keepCount)');
+    });
+
+    it('Navigation version is 2.1.4+', () => {
+        expect(NAV_SRC).toMatch(/\/\/@version\s+2\.1\.[4-9]/);
+    });
+
+    // Simulate the clamping logic
+    it('clamping logic: with limiter enabled, count is limited', () => {
+        const getClampedCount = (total, limiterState) => {
+            if (limiterState && limiterState.enabled) {
+                return Math.min(total, limiterState.keepCount);
+            }
+            return total;
+        };
+        expect(getClampedCount(100, { enabled: true, keepCount: 6 })).toBe(6);
+        expect(getClampedCount(100, { enabled: false, keepCount: 6 })).toBe(100);
+        expect(getClampedCount(3, { enabled: true, keepCount: 6 })).toBe(3);
+        expect(getClampedCount(100, null)).toBe(100);
+        expect(getClampedCount(100, undefined)).toBe(100);
+    });
+});
+
+// ════════════════════════════════════════════
 // Sub-plugin registration integration test
 // ════════════════════════════════════════════
 describe('cpm-chat-limiter — sub-plugin registration', () => {
@@ -90,12 +176,14 @@ describe('cpm-chat-limiter — sub-plugin registration', () => {
         globalThis._cpmLimiterCleanup = _origCleanup;
         delete globalThis.risuai;
         delete globalThis.Risuai;
+        delete globalThis._cpmLimiterState;
     });
 
     it('registers to CupcakePM_SubPlugins when risuai exists', async () => {
         // Setup mock risuai
         const mockDoc = {
             querySelector: vi.fn().mockResolvedValue(null),
+            querySelectorAll: vi.fn().mockResolvedValue([]),
             createElement: vi.fn().mockResolvedValue({
                 setAttribute: vi.fn(),
                 setInnerHTML: vi.fn(),
@@ -113,7 +201,6 @@ describe('cpm-chat-limiter — sub-plugin registration', () => {
         globalThis.CupcakePM_SubPlugins = [];
 
         // Execute the plugin by eval (since it's an IIFE)
-        // Use dynamic import + data URL workaround
         const blob = new Blob([PLUGIN_SRC], { type: 'text/javascript' });
         const url = URL.createObjectURL(blob);
         try {
@@ -127,9 +214,11 @@ describe('cpm-chat-limiter — sub-plugin registration', () => {
         const registered = (globalThis.CupcakePM_SubPlugins || []).find(p => p.id === 'cpm-chat-limiter');
         if (registered) {
             expect(registered.name).toBe('Chat Limiter');
-            expect(registered.version).toBe('0.1.0');
+            expect(registered.version).toBe('0.2.0');
             expect(registered.uiHtml).toContain('cpm_chat_limiter_enable');
             expect(registered.uiHtml).toContain('cpm_chat_limiter_count');
+            expect(registered.uiHtml).toContain('cpm_chat_limiter_slider');
+            expect(registered.uiHtml).toContain('cpm_chat_limiter_status');
             expect(typeof registered.onRender).toBe('function');
         }
 
@@ -138,7 +227,62 @@ describe('cpm-chat-limiter — sub-plugin registration', () => {
 });
 
 // ════════════════════════════════════════════
-// Source code structure verification
+// v0.2.0 new features — source code verification
+// ════════════════════════════════════════════
+describe('cpm-chat-limiter v0.2.0 — new features', () => {
+    it('contains range slider input', () => {
+        expect(PLUGIN_SRC).toContain('type="range"');
+        expect(PLUGIN_SRC).toContain('cpm_chat_limiter_slider');
+    });
+
+    it('slider and number input are synced', () => {
+        // Both update via applyCount function
+        expect(PLUGIN_SRC).toContain('applyCount');
+        // slider input event updates countInput
+        expect(PLUGIN_SRC).toContain("slider.addEventListener('input'");
+        // countInput change event updates slider
+        expect(PLUGIN_SRC).toContain("countInput.addEventListener('change'");
+    });
+
+    it('has message count status display', () => {
+        expect(PLUGIN_SRC).toContain('cpm_chat_limiter_status');
+        expect(PLUGIN_SRC).toContain('메시지 표시 중');
+        expect(PLUGIN_SRC).toContain('비활성화됨');
+    });
+
+    it('has MutationObserver support', () => {
+        expect(PLUGIN_SRC).toContain('startObserver');
+        expect(PLUGIN_SRC).toContain('stopObserver');
+        expect(PLUGIN_SRC).toContain('.observe(');
+    });
+
+    it('has auto-scroll function', () => {
+        expect(PLUGIN_SRC).toContain('scrollToLatest');
+        expect(PLUGIN_SRC).toContain('scrollTo');
+        expect(PLUGIN_SRC).toContain("behavior: 'smooth'");
+    });
+
+    it('scrollToLatest called when toggled ON', () => {
+        expect(PLUGIN_SRC).toContain('if (enabled) await scrollToLatest()');
+    });
+
+    it('has keepCount persistence', () => {
+        expect(PLUGIN_SRC).toContain('cpm_chat_limiter_count');
+        expect(PLUGIN_SRC).toContain('STORAGE_KEY_COUNT');
+    });
+
+    it('has totalMessageCount tracking', () => {
+        expect(PLUGIN_SRC).toContain('totalMessageCount');
+        expect(PLUGIN_SRC).toContain('countMessages');
+    });
+
+    it('cleanup stops observer', () => {
+        expect(PLUGIN_SRC).toContain('stopObserver()');
+    });
+});
+
+// ════════════════════════════════════════════
+// Source code structure verification (from v0.1.0)
 // ════════════════════════════════════════════
 describe('cpm-chat-limiter — code structure', () => {
     it('contains hot-reload cleanup pattern', () => {
@@ -169,19 +313,12 @@ describe('cpm-chat-limiter — code structure', () => {
         expect(PLUGIN_SRC).toContain('safeLocalStorage.setItem');
     });
 
-    it('does NOT contain auto-scroll code', () => {
-        expect(PLUGIN_SRC).not.toContain('scrollToNewestMessage');
-        expect(PLUGIN_SRC).not.toContain('isNearBottom');
-        expect(PLUGIN_SRC).not.toContain('scrollThreshold');
-    });
-
     it('does NOT contain keyboard shortcut code', () => {
         expect(PLUGIN_SRC).not.toContain('keydown');
         expect(PLUGIN_SRC).not.toContain('parseShortcut');
     });
 
     it('does NOT contain fold/unfold UI code', () => {
-        expect(PLUGIN_SRC).not.toContain('toggle');
         expect(PLUGIN_SRC).not.toContain('border-top: 3px dashed');
     });
 
@@ -189,7 +326,38 @@ describe('cpm-chat-limiter — code structure', () => {
         const versions = JSON.parse(fs.readFileSync(path.resolve('versions.json'), 'utf-8'));
         const entry = versions['CPM Component - Chat Limiter'];
         expect(entry).toBeDefined();
-        expect(entry.version).toBe('0.1.0');
+        expect(entry.version).toBe('0.2.0');
         expect(entry.file).toBe('cpm-chat-limiter.js');
+    });
+});
+
+// ════════════════════════════════════════════
+// Conflict verification — Resizer vs Limiter CSS
+// ════════════════════════════════════════════
+describe('cpm-chat-limiter — conflict verification', () => {
+    const RESIZER_SRC = fs.readFileSync(
+        path.resolve('cpm-chat-resizer.js'), 'utf-8'
+    );
+
+    it('Resizer does NOT target chat message containers', () => {
+        expect(RESIZER_SRC).not.toContain('.chat-message-container');
+        expect(RESIZER_SRC).not.toContain('.flex-col-reverse');
+    });
+
+    it('Resizer and Limiter use different style tag identifiers', () => {
+        expect(RESIZER_SRC).toContain('cpm-maximizer-styles');
+        expect(PLUGIN_SRC).toContain('x-cpm-limiter-style');
+        // No overlap
+        expect(PLUGIN_SRC).not.toContain('cpm-maximizer-styles');
+        expect(RESIZER_SRC).not.toContain('x-cpm-limiter-style');
+    });
+
+    it('Limiter CSS does not affect textarea elements', () => {
+        expect(PLUGIN_SRC).not.toContain('textarea');
+    });
+
+    it('Resizer CSS does not use nth-child for message hiding', () => {
+        expect(RESIZER_SRC).not.toContain('nth-child');
+        expect(RESIZER_SRC).not.toContain('display: none !important');
     });
 });

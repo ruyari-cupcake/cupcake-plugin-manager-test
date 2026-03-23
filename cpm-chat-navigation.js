@@ -1,7 +1,7 @@
 //@name CPM Component - Chat Navigation
 //@display-name 🧁 Cupcake Navigation
-//@version 2.1.3
-//@description 채팅 메시지 네비게이션 (4버튼 → 2버튼 → 키보드 → OFF 순환)
+//@version 2.1.4
+//@description 채팅 메시지 네비게이션 (4버튼 → 2버튼 → 키보드 → OFF 순환, Chat Limiter 연동)
 //@icon 🧭
 //@author Cupcake
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager-test2/main/cpm-chat-navigation.js
@@ -117,14 +117,20 @@
         return false;
     };
 
-    // ── 메시지 수 ──
+    // ── 메시지 수 (Chat Limiter 연동) ──
     const getMessageCount = async () => {
         try {
             if (!containerSelector) return 0;
             const container = await rootDoc.querySelector(containerSelector);
             if (!container) return 0;
             const children = await container.getChildren();
-            return children ? children.length : 0;
+            const total = children ? children.length : 0;
+            // Chat Limiter가 활성화되어 있으면 visible count로 클램핑
+            const limiter = window._cpmLimiterState;
+            if (limiter && limiter.enabled) {
+                return Math.min(total, limiter.keepCount);
+            }
+            return total;
         } catch (_) {
             return 0;
         }

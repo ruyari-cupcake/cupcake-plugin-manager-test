@@ -578,7 +578,7 @@ describe('tool-loop branch coverage — deep paths', () => {
         vi.mocked(getToolMaxDepth).mockResolvedValue(5);
 
         const ac = new AbortController();
-        let toolCallCount = 0;
+        let _toolCallCount = 0;
         // We need to abort during tool execution — use a real tool that triggers abort
         const fetchFn = vi.fn().mockResolvedValue({
             success: true, content: 'text',
@@ -591,7 +591,7 @@ describe('tool-loop branch coverage — deep paths', () => {
         // Abort immediately — will be checked before first tool call iteration
         ac.abort();
 
-        const result = await runToolLoop({
+        await runToolLoop({
             initialResult: { success: true, content: '', _rawData: threeToolResponse },
             messages: [{ role: 'user', content: 'test' }],
             config: { format: 'openai' },
