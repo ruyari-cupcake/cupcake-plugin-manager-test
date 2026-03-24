@@ -35,9 +35,9 @@
     "changes": "v1.5.3: 보조모델 슬롯별 effort/thinkingBudget 오버라이드 지원"
   },
   "CPM Component - Chat Input Resizer": {
-    "version": "0.3.7",
+    "version": "0.3.8",
     "file": "cpm-chat-resizer.js",
-    "changes": "v0.3.7: risuai.onUnload 추가 — 페이지 종료 시 리소스 정리"
+    "changes": "v0.3.8: FIX-C SafeElement body 참조 보존 — 핸 리로드 시 pointerdown 리스너 누수 해결"
   },
   "CPM Component - Copilot Token Manager": {
     "version": "1.7.14",
@@ -50,14 +50,14 @@
     "changes": "v1.4.0: 번역캐시 import/export 개선, 일반 윈도우 추적 지원, 대규모 리팩토링"
   },
   "CPM Component - Chat Navigation": {
-    "version": "2.1.5",
+    "version": "2.1.6",
     "file": "cpm-chat-navigation.js",
-    "changes": "v2.1.5: UI 이름 이모지 제거 + risuai.onUnload 추가"
+    "changes": "v2.1.6: FIX-1 currentIndex 클램핑, FIX-2 컨테이너 검증, FIX-3 Limiter 이벤트 동기화, FIX-A 키보드 리스너 body 참조 보존, FIX-B 드래그 리스너 참조 보존"
   },
   "CPM Component - Chat Limiter": {
-    "version": "0.2.1",
+    "version": "0.2.2",
     "file": "cpm-chat-limiter.js",
-    "changes": "v0.2.1: 설정 UI 이벤트 리스너 정리 — 핫 리로드 시 중복 방지"
+    "changes": "v0.2.2: FIX-3 Navigation 등 다른 플러그인에 cpm-limiter-change CustomEvent 디스패치"
   },
   "Cupcake Provider Manager": {
     "version": "1.22.36",

@@ -1,13 +1,13 @@
 //@name CPM Component - Chat Navigation
 //@display-name 🧁 Cupcake Navigation
-//@version 2.1.5
+//@version 2.1.6
 //@description 채팅 메시지 네비게이션 (4버튼 → 2버튼 → 키보드 → OFF 순환, Chat Limiter 연동)
 //@icon 🧭
 //@author Cupcake
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager-test2/main/cpm-chat-navigation.js
 
 /**
- * ======== CUPCAKE PM Sub-Plugin: Chat Navigation v2.1.2 ========
+ * ======== CUPCAKE PM Sub-Plugin: Chat Navigation v2.1.6 ========
  *
  * chat 버튼을 누를 때마다 모드가 순환:
  *   1번 → 4버튼 위젯 (⏫🔼🔽⏬, 드래그 가능)
@@ -49,6 +49,7 @@
     let dragShiftY = 0;
     let globalPointerMoveId = null;
     let globalPointerUpId = null;
+    let widgetBodyRef = null; // FIX-B: createWidget에서 사용한 body 참조 보존
 
     // Button refs for hit-test
     let upBtnRef = null;
@@ -59,6 +60,7 @@
 
     // Keyboard listener
     let keyListenerId = null;
+    let keyListenerBody = null; // FIX-A: body 참조 보존 (SafeElement 인스턴스 동일성 보장)
 
     // Chat screen observer
     let domObserver = null;
@@ -108,8 +110,13 @@
                 if (container) {
                     const children = await container.getChildren();
                     if (children && children.length >= 2) {
-                        containerSelector = sel;
-                        return true;
+                        // FIX-2: INNER 컨테이너인지 검증 (.chat-message-container 자식 확인)
+                        const msgChild = await rootDoc.querySelector(`${sel} > .chat-message-container`);
+                        if (msgChild) {
+                            containerSelector = sel;
+                            return true;
+                        }
+                        // .chat-message-container 없으면 OUTER일 수 있음 → 다음 셀렉터 시도
                     }
                 }
             } catch (_) {}
@@ -167,6 +174,9 @@
         if (!isReady) return;
         try {
             const count = await getMessageCount();
+            if (count === 0) return;
+            // FIX-1: keepCount 변경 시 currentIndex를 가시 범위로 클램핑
+            if (currentIndex > count) currentIndex = count;
             if (currentIndex < count) currentIndex++;
             const sel = `${containerSelector} > *:nth-child(${currentIndex})`;
             const el = await rootDoc.querySelector(sel);
@@ -177,6 +187,10 @@
     const scrollDown = async () => {
         if (!isReady) return;
         try {
+            const count = await getMessageCount();
+            if (count === 0) return;
+            // FIX-1: keepCount 변경 시 currentIndex를 가시 범위로 클램핑
+            if (currentIndex > count) currentIndex = count;
             if (currentIndex > 1) currentIndex--;
             const sel = `${containerSelector} > *:nth-child(${currentIndex})`;
             const el = await rootDoc.querySelector(sel);
@@ -198,12 +212,15 @@
     // ── 위젯 제거 ──
     const destroyWidget = async () => {
         try {
-            const body = await rootDoc.querySelector('body');
             const existing = await rootDoc.querySelector(`[${WIDGET_ATTR_KEY}="${WIDGET_ATTR_VAL}"]`);
             if (existing) await existing.remove();
             widgetElement = null;
-            if (globalPointerMoveId) { await body.removeEventListener('pointermove', globalPointerMoveId); globalPointerMoveId = null; }
-            if (globalPointerUpId) { await body.removeEventListener('pointerup', globalPointerUpId); globalPointerUpId = null; }
+            // FIX-B: 동일 SafeElement 인스턴스로 removeEventListener 호출
+            if (widgetBodyRef) {
+                if (globalPointerMoveId) { await widgetBodyRef.removeEventListener('pointermove', globalPointerMoveId); globalPointerMoveId = null; }
+                if (globalPointerUpId) { await widgetBodyRef.removeEventListener('pointerup', globalPointerUpId); globalPointerUpId = null; }
+            }
+            widgetBodyRef = null;
             topBtnRef = upBtnRef = downBtnRef = bottomBtnRef = handleRef = null;
         } catch (_) {}
     };
@@ -214,6 +231,7 @@
         try {
             const body = await rootDoc.querySelector('body');
             if (!body) return;
+            keyListenerBody = body; // FIX-A: 참조 보존
             keyListenerId = await body.addEventListener('keydown', async (e) => {
                 try {
                     // V3 SafeElement proxy: use async nodeName() instead of sync tagName
@@ -242,10 +260,13 @@
     const disableKeyboard = async () => {
         if (!keyListenerId) return;
         try {
-            const body = await rootDoc.querySelector('body');
-            if (body) await body.removeEventListener('keydown', keyListenerId);
+            // FIX-A: 동일 SafeElement 인스턴스로 removeEventListener 호출
+            if (keyListenerBody) {
+                await keyListenerBody.removeEventListener('keydown', keyListenerId);
+            }
         } catch (_) {}
         keyListenerId = null;
+        keyListenerBody = null;
         console.log(`${LOG_PREFIX} 키보드 리스너 해제`);
     };
 
@@ -254,6 +275,7 @@
     const createWidget = async (mode) => {
         try {
             const body = await rootDoc.querySelector('body');
+            widgetBodyRef = body; // FIX-B: 참조 보존
 
             const theme = {
                 handle: 'rgba(255, 255, 255, 0.3)',
@@ -543,6 +565,17 @@
 
     tryFindContainer();
 
+    // FIX-3: Limiter keepCount 변경 시 currentIndex 즉시 클램핑
+    const onLimiterChange = (e) => {
+        try {
+            const { enabled: limEnabled, keepCount: limKeep } = e.detail;
+            if (limEnabled && currentIndex > limKeep) {
+                currentIndex = Math.max(1, limKeep);
+            }
+        } catch (_) {}
+    };
+    window.addEventListener('cpm-limiter-change', onLimiterChange);
+
     containerPollTimer = setInterval(async () => {
         if (!isReady || !containerSelector) {
             const found = await findChatContainer();
@@ -568,9 +601,11 @@
         isReady = false;
         lastChatScreenState = null;
         currentModeIndex = -1;
+        // 6. FIX-3: Remove limiter listener
+        window.removeEventListener('cpm-limiter-change', onLimiterChange);
     };
 
     risuai.onUnload(window._cpmNaviCleanup);
 
-    console.log(`${LOG_PREFIX} 초기화 완료 (v2.1.4 모드 순환)`);
+    console.log(`${LOG_PREFIX} 초기화 완료 (v2.1.6 모드 순환)`);
 })();

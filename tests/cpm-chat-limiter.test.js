@@ -20,8 +20,8 @@ describe('cpm-chat-limiter.js — header metadata', () => {
         expect(PLUGIN_SRC).toMatch(/\/\/@name\s+CPM Component - Chat Limiter/);
     });
 
-    it('has correct @version 0.2.1', () => {
-        expect(PLUGIN_SRC).toMatch(/\/\/@version\s+0\.2\.1/);
+    it('has correct @version 0.2.2', () => {
+        expect(PLUGIN_SRC).toMatch(/\/\/@version\s+0\.2\.2/);
     });
 
     it('has @update-url pointing to test2 repo', () => {
@@ -135,8 +135,8 @@ describe('cpm-chat-navigation — Limiter compatibility', () => {
         expect(NAV_SRC).toContain('Math.min(total, limiter.keepCount)');
     });
 
-    it('Navigation version is 2.1.4+', () => {
-        expect(NAV_SRC).toMatch(/\/\/@version\s+2\.1\.[4-9]/);
+    it('Navigation version is 2.1.6+', () => {
+        expect(NAV_SRC).toMatch(/\/\/@version\s+2\.1\.[6-9]/);
     });
 
     // Simulate the clamping logic

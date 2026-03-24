@@ -1,6 +1,6 @@
 //@name CPM Component - Chat Limiter
 //@display-name 🧁 Cupcake Chat Limiter
-//@version 0.2.1
+//@version 0.2.2
 //@description 최신 N개 채팅만 표시하여 렉 제거 (실시간 슬라이더, 메시지 카운트, Navigation 연동)
 //@icon 📋
 //@author Cupcake
@@ -66,6 +66,12 @@
             /** Returns the visible count (clamped to totalMessageCount) */
             getVisibleCount: () => enabled ? Math.min(keepCount, totalMessageCount) : totalMessageCount,
         };
+        // FIX-3: Navigation 등 다른 플러그인에 상태 변경 알림
+        try {
+            window.dispatchEvent(new CustomEvent('cpm-limiter-change', {
+                detail: { enabled, keepCount, totalMessageCount }
+            }));
+        } catch (_) {}
     }
     updatePublicState();
 

@@ -1,6 +1,6 @@
 //@name CPM Component - Chat Input Resizer
 //@display-name Cupcake UI Resizer
-//@version 0.3.7
+//@version 0.3.8
 //@author Cupcake
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager-test2/main/cpm-chat-resizer.js
 
@@ -432,6 +432,7 @@
                 }
                 try {
                     window._cpmResizerPointerListenerId = await body.addEventListener('pointerdown', handlePointerDown);
+                    window._cpmResizerBodyRef = body; // FIX-C: 참조 보존
                     console.log('[CPM Resizer] pointerdown delegation active (backup).');
                 } catch (evtErr) {
                     console.warn('[CPM Resizer] pointerdown listener failed:', evtErr.message);
@@ -445,12 +446,13 @@
         // Cleanup function for hot-reload
         window._cpmResizerCleanup = async () => {
             try {
-                const body = await rootDoc.querySelector('body');
-                if (body && window._cpmResizerPointerListenerId) {
-                    await body.removeEventListener('pointerdown', window._cpmResizerPointerListenerId);
+                // FIX-C: 동일 SafeElement 인스턴스로 removeEventListener 호출
+                if (window._cpmResizerBodyRef && window._cpmResizerPointerListenerId) {
+                    await window._cpmResizerBodyRef.removeEventListener('pointerdown', window._cpmResizerPointerListenerId);
                 }
             } catch (_) {}
             window._cpmResizerPointerListenerId = null;
+            window._cpmResizerBodyRef = null;
             if (window._cpmResizerObserver) {
                 try { await window._cpmResizerObserver.disconnect(); } catch (_) {}
                 window._cpmResizerObserver = null;
