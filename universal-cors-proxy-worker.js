@@ -38,7 +38,11 @@ const USER_AGENT = `GitHubCopilotChat/${CHAT_VERSION}`;
 const TOKEN_USER_AGENT = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Code/${CODE_VERSION} Chrome/${CHROME_VERSION} Electron/${ELECTRON_VERSION} Safari/537.36`;
 // Token exchange API version (CPM copilot-headers.js GITHUB_TOKEN_API_VERSION과 동일)
 const GITHUB_TOKEN_API_VERSION = "2024-12-15";
-const __VERSION = "2.1.0-diag";
+const __VERSION = "2.2.0";
+
+// ── tid 토큰 인메모리 캐시 (apiKey → { token, expiresAt }) ──
+// Workers isolate 수명 동안 유효. expires_at 5분 전에 갱신.
+const _tidCache = new Map();
 
 const COPILOT_PATHS = new Set([
   "/chat/completions",
@@ -77,8 +81,16 @@ function generateHexId(length = 64) {
   return Array.from(arr, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-// ── Copilot tid 토큰 발급 ──
+// ── Copilot tid 토큰 발급 (캐싱 포함) ──
+// GitHub tid 토큰은 보통 ~30분 유효. expires_at 5분 전까지 캐시 재사용.
+// 같은 Workers isolate 내 연속 요청에서 GitHub API 호출을 절약.
 async function refreshTidToken(apiKey) {
+  const now = Date.now();
+  const cached = _tidCache.get(apiKey);
+  if (cached && cached.expiresAt > now + 5 * 60 * 1000) {
+    return cached.token;
+  }
+
   const resp = await fetch(COPILOT_TOKEN_URL, {
     method: "GET",
     headers: {
@@ -93,12 +105,27 @@ async function refreshTidToken(apiKey) {
 
   if (!resp.ok) {
     const text = await resp.text();
+    // 인증 실패 시 기존 캐시도 삭제
+    _tidCache.delete(apiKey);
     throw new Error(`tid token failed (${resp.status}): ${text}`);
   }
 
   const data = await resp.json();
   if (!data.token || !data.expires_at) {
     throw new Error("tid token response missing token or expires_at");
+  }
+
+  // expires_at은 Unix timestamp (초) — GitHub 형식
+  const expiresAt = typeof data.expires_at === 'number'
+    ? data.expires_at * 1000
+    : new Date(data.expires_at).getTime();
+
+  _tidCache.set(apiKey, { token: data.token, expiresAt });
+
+  // 캐시 크기 제한 (메모리 보호, 최대 50개 apiKey)
+  if (_tidCache.size > 50) {
+    const oldest = _tidCache.keys().next().value;
+    _tidCache.delete(oldest);
   }
 
   return data.token;
@@ -171,6 +198,7 @@ export default {
           status: "ok",
           type: "universal-cors-proxy",
           version: __VERSION,
+          tidCacheSize: _tidCache.size,
           modes: [
             "X-Target-URL header (recommended — CPM auto-sends)",
             "URL-in-URL: /https://api.example.com/v1/chat/completions",
