@@ -4,7 +4,7 @@
 //@description 최신 N개 채팅만 표시하여 렉 제거 (실시간 슬라이더, 메시지 카운트, Navigation 연동)
 //@icon 📋
 //@author Cupcake
-//@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-chat-limiter.js
+//@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager-test2/main/cpm-chat-limiter.js
 
 /**
  * ======== CUPCAKE PM Sub-Plugin: Chat Limiter v0.2.0 ========
