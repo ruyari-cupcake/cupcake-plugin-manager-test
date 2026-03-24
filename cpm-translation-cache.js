@@ -4,7 +4,7 @@
 //@author Cupcake
 //@description 번역 캐시를 검색·조회·수정하고, 사용자 번역 사전으로 표시 번역을 교정하는 관리 도구입니다.
 //@icon 💾
-//@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager-test2/main/cpm-translation-cache.js
+//@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-translation-cache.js
 
 /**
  * ======== CUPCAKE PM Sub-Plugin: Translation Cache Manager ========
